@@ -13,12 +13,13 @@ def get_vpdiff_uniform_score(a, b, nse):
     #
     # ---> prior_t: uniform_cst * f_1(theta_t_1) * f_2(theta_t_2)
     # ---> grad log prior_t: (f_1_prime / f_1, f_2_prime / f_2)
-
+    norm = torch.distributions.Normal(loc=torch.zeros((1,), device=a.device),
+                                      scale=torch.ones((1,), device=a.device))
+    norm.pdf = lambda x: torch.exp(norm.log_prob(x))
     def vpdiff_uniform_score(theta_t, t):
         # device
         device = theta_t.device
-        t = t.to("cpu")
-        theta_t = theta_t.to("cpu")
+
 
         # reshape theta_t
         thetas = {}
@@ -59,6 +60,6 @@ def get_vpdiff_uniform_score(a, b, nse):
             [ps for ps in prior_score_t.values()], dim=1
         )  # (batch_size, dim_theta)
 
-        return prior_score_t.type(torch.float32).to(device)
+        return prior_score_t
 
     return vpdiff_uniform_score

@@ -8,7 +8,12 @@ def train(
     model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False
 ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    dloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    ema_model = torch.optim.swa_utils.AveragedModel(model,
+                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+    dloader = torch.utils.data.DataLoader(dataset,
+                                          batch_size=batch_size,
+                                          shuffle=True,
+                                          generator=torch.Generator(device=next(model.parameters()).device),)
 
     with tqdm(range(n_epochs), desc="Training epochs") as tepoch:
         for _ in tepoch:
@@ -26,12 +31,13 @@ def train(
                 loss = loss_fn(theta, **kwargs_sn)
                 loss.backward()
                 opt.step()
+                ema_model.update_parameters(model)
 
                 # running stats
                 total_loss = total_loss + loss.detach().item() * theta.shape[0]
 
             tepoch.set_postfix(loss=total_loss / len(dataset))
-
+    return ema_model
 
 # Training with validation and early stopping as in
 # https://github.com/smsharma/mining-for-substructure-lens/blob/master/inference/trainer.py
