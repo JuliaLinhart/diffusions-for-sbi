@@ -88,6 +88,9 @@ class NSE(nn.Module):
     # The following function define the VP SDE with linear noise schedule beta(t):
     # dtheta = f(t) theta dt + g(t) dW = -0.5 * beta(t) theta dt + sqrt(beta(t)) dW
 
+    def score(self, theta, x, t):
+        return -self(theta, x, t) / self.sigma(t)
+
     def beta(self, t: Tensor) -> Tensor:
         r"""Linear noise schedule of the VP SDE:
         .. math:: \beta(t) = 32 t .
@@ -110,20 +113,18 @@ class NSE(nn.Module):
         r"""Mean of the transition kernel of the VP SDE:
         .. math: `alpha(t) = \exp ( -0.5 \int_0^t \beta(s)ds)`.
         """
-        return torch.exp(-8 * t**2)
+        return torch.exp(-16 * t**2)
 
     def sigma(self, t: Tensor) -> Tensor:
         r"""Standard deviation of the transition kernel of the VP SDE:
         .. math:: \sigma^2(t) = 1 - \exp( - \int_0^t \beta(s)ds) + C
         where C is such that :math: `\sigma^2(1) = 1, \sigma^2(0)  = \epsilon \approx 1e-4`.
         """
-        return torch.sqrt(1 - self.alpha(t) ** 2 + math.exp(-16))
+        return torch.sqrt(1 - self.alpha(t) + math.exp(-16))
 
-    def bridge_mean(self, t: Tensor, t_1: Tensor, theta_t: Tensor, theta_0: Tensor, bridge_std: float) -> Tensor:
-        alpha_t_1 = self.alpha(t_1)
-        alpha_t = self.alpha(t)
+    def bridge_mean(self, alpha_t: Tensor, alpha_t_1: Tensor, theta_t: Tensor, theta_0: Tensor, bridge_std: float) -> Tensor:
         est_noise = (theta_t - (alpha_t**.5) * theta_0) / ((1 - alpha_t)**.5)
-        return (alpha_t_1**.5)*theta_0 + ((1 - alpha_t - bridge_std**2)**.5) * est_noise
+        return (alpha_t_1**.5)*theta_0 + ((1 - alpha_t_1 - bridge_std**2)**.5) * est_noise
 
     def ode(self, theta: Tensor, x: Tensor, t: Tensor, **kwargs) -> Tensor:
         return self.f(t) * theta + self.g(t) ** 2 / 2 * self(
@@ -152,19 +153,29 @@ class NSE(nn.Module):
         )
 
     def ddim(
-            self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, **kwargs
+            self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, eta: float = 1., **kwargs
     ):
+        if len(x.shape) == 1:
+            score_fun = self.score
+        else:
+            score_fun = partial(self.factorized_score, prior_score_fun=kwargs['prior_score_fun'])
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
 
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
 
         for t in tqdm(time[:-1], disable=not verbose):
-            ratio = self.alpha(t - dt) / self.alpha(t)
-            theta = ratio * theta + (self.sigma(t - dt) - ratio * self.sigma(t)) * self(
-                theta, x, t, **kwargs
-            )
-
+            alpha_t = self.alpha(t)
+            alpha_t_1 = self.alpha(t - dt)
+            bridge_std = eta * ((((1 - alpha_t_1) / (1 -alpha_t))*(1 - alpha_t / alpha_t_1))**.5)
+            score = score_fun(theta, x, t).detach()
+            pred_theta_0 = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t)
+            theta_mean = self.bridge_mean(alpha_t=alpha_t,
+                                          alpha_t_1=alpha_t_1,
+                                          theta_0=pred_theta_0,
+                                          theta_t=theta,
+                                          bridge_std=bridge_std)
+            theta = theta_mean + torch.randn_like(theta_mean) * bridge_std
         return theta
 
     def euler(
@@ -208,14 +219,14 @@ class NSE(nn.Module):
                 # delta = tau * self.alpha(t) / score.square().mean()
                 delta = (
                         tau
-                        * self.alpha(t)
+                        * (self.alpha(t)**.5)
                         * min(self.sigma(t) ** 2, 1 / score.square().mean())
                 )
                 theta = theta + delta * score + torch.sqrt(2 * delta) * z
 
         return theta
 
-    def mean_pred(self, theta: Tensor, x: Tensor, t: Tensor, **kwargs) -> Tensor:
+    def mean_pred(self, theta: Tensor, score: Tensor, alpha_t: Tensor, **kwargs) -> Tensor:
         '''
         Parameters
         ----------
@@ -228,9 +239,7 @@ class NSE(nn.Module):
         -------
 
         '''
-        alpha_t = self.alpha(t)
         upsilon = 1 - alpha_t
-        score = self(theta, x, t, **kwargs) / (-self.sigma(t))
         mean = (alpha_t ** (-.5)) * (theta + upsilon*score)
         return mean
 
@@ -249,13 +258,19 @@ class NSE(nn.Module):
         alpha_t = self.alpha(t)
         upsilon = 1 - alpha_t
         def mean_to_jac(theta, x):
-            mu = self.mean_pred(theta=theta, x=x, t=t, **kwargs)
-            return mu, mu
+            score = self.score(theta, x, t)
+            mu = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t, **kwargs)
+            return mu, (mu, score)
 
-        grad_mean, mean = vmap(vmap(jacrev(mean_to_jac, has_aux=True)))(theta, x)
-        return mean, (upsilon / (alpha_t ** .5))*grad_mean
+        grad_mean, out = vmap(vmap(jacrev(mean_to_jac, has_aux=True)))(theta, x)
+        mean, score = out
+        return mean, (upsilon / (alpha_t ** .5))*grad_mean, score
 
-    def log_L(self, pred_means: Tensor, pred_covs: Tensor):
+    def log_L(self,
+              means_posterior: Tensor,
+              covar_posteriors: Tensor,
+              mean_prior: Tensor,
+              covar_prior: Tensor):
         '''
         Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...) Following http://www.lucamartino.altervista.org/2003-003.pdf
         Parameters
@@ -267,75 +282,61 @@ class NSE(nn.Module):
         -------
 
         '''
-        lambda_i = torch.linalg.inv(pred_covs)
-        eta_i = lambda_i @ pred_means[..., None]
-        zeta_i = - .5 * (-torch.logdet(lambda_i) + (eta_i.mT @ pred_covs @ eta_i)[..., 0, 0])
+        def from_canonical_to_sufficient(mean, covar):
+            lda = torch.linalg.inv(covar)
+            eta = (lda @ mean[..., None])[..., 0]
+            return lda, eta, -.5 * (torch.linalg.slogdet(covar).logabsdet + (mean[..., None].mT @ lda @ mean[..., None])[...,0, 0])
 
-        lambda_sum = lambda_i.sum(axis=1)
-        eta_sum = eta_i.sum(axis=1)
-        zeta_sum = -.5 * (-torch.logdet(lambda_sum) + (eta_sum.mT @ torch.linalg.inv(lambda_sum) @ eta_sum)[..., 0, 0])
-        return zeta_i.sum(axis=1) - zeta_sum
+        n_observations = means_posterior.shape[-2]
+        lambdas_posterior, etas_posterior, zetas_posterior = from_canonical_to_sufficient(means_posterior, covar_posteriors)
+        lda_prior, eta_prior, zeta_prior = from_canonical_to_sufficient(mean_prior, covar_prior)
 
-    def factorized_posterior_sampling(self,
-                                      x: Tensor,
-                                      prior_score_fun: Callable[[Tensor, Tensor], Tensor],
-                                      n_samples: int = 32,
-                                      steps: int = 256,
-                                      verbose: bool = False,
-                                      eta: float = 1,) -> Tensor:
-        time = torch.linspace(1, 0, steps + 1).to(x)
-        dt = 1 / steps
+        sum_zetas = zetas_posterior.sum(axis=1) + (1 - n_observations)*zeta_prior
+
+        final_gaussian_etas = (etas_posterior + (1 - n_observations)*eta_prior[:, None]).sum(axis=1)
+        final_gaussian_ldas = ((1 - n_observations)*lda_prior[:, None] + lambdas_posterior).sum(axis=1)
+        final_gaussian_zeta = -.5 * (-torch.linalg.slogdet(final_gaussian_ldas).logabsdet
+                                     + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
+        return sum_zetas - final_gaussian_zeta
+
+    def factorized_score(self, theta, x, t, prior_score_fun):
+        # Defining stuff
         n_observations = x.shape[0]
-        # Initialize theta according to N(0, (n_observations + 1)^{-1} Id)
-        theta = DiagNormal(self.zeros, self.ones /((n_observations + 1)**.5)).sample((n_samples,)).to(x.device)
-        theta.requires_grad_(True)
-        for t in tqdm(time[:-1], disable=not verbose):
-            # "Normal" diffusion of each posterior
-            alpha_t = self.alpha(t)
-            alpha_t_1 = self.alpha(t - dt)
-            upsilon = 1 - alpha_t
-            predicted_mean, predicted_covar = self.gaussian_approximation(theta=theta[:, None].repeat(1, n_observations, 1),
-                                                                          x=x[None, :].repeat(n_samples, 1, 1),
-                                                                          t=t)
-            scores = (predicted_mean * (alpha_t ** .5) - theta[:, None]) / upsilon
-            #Normal diffusion of the prior
-            def pred_mean_prior(theta):
-                prior_score = prior_score_fun(theta[None], t)[0]
-                prior_predicted_mean = (alpha_t ** (-.5)) * (theta + upsilon * prior_score)
-                return prior_predicted_mean, (prior_predicted_mean, prior_score)
-            grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta)
-            prior_predicted_mean, prior_score = out
-            prior_predicted_covar = (upsilon / (alpha_t ** .5))*grad_prior_predicted_mean
+        n_samples = theta.shape[0]
+        alpha_t = self.alpha(t)
+        upsilon = 1 - alpha_t
+        theta_ = theta.clone().requires_grad_(True)
 
-            # Concatenating everything
-            scores = torch.cat((scores,
-                                prior_score[:, None]), axis=1)
-            predicted_mean = torch.cat((predicted_mean,
-                                        prior_predicted_mean[:, None]), dim=1)
-            predicted_covar = torch.cat((predicted_covar,
-                                         (1 - n_observations)*prior_predicted_covar[:, None]), dim=1).detach()
-            predicted_covar = .5*(predicted_covar + predicted_covar.mT)
+        # Calculating m, Sigma and scores for the posteriors
+        predicted_mean, predicted_covar, scores = self.gaussian_approximation(theta=theta_[:, None].repeat(1, n_observations, 1),
+                                                                              x=x[None, :].repeat(n_samples, 1, 1),
+                                                                              t=t)
 
-            # Modified diffusion of the aggregated posterior
-            #Score calculation: score = \sum scores + grad log L
-            self.log_L(predicted_mean, predicted_covar).sum().backward()
-            grad_log_L = theta.grad
-            aggregated_score = (1-n_observations)*scores[:,-1] + scores[:,:-1].sum(axis=1) + grad_log_L
+        # Calculating m, Sigma and score of the prior
+        def pred_mean_prior(theta):
+            prior_score = prior_score_fun(theta[None], t)[0]
+            prior_predicted_mean = self.mean_pred(theta, prior_score, alpha_t)
+            return prior_predicted_mean, (prior_predicted_mean, prior_score)
 
-            #From score to predicted_x0
-            std_fwd_mod_t = ((1 - alpha_t))**.5
-            aggregated_epsilon_pred = - std_fwd_mod_t*aggregated_score
-            aggregated_predicted_theta_0 = ((theta - std_fwd_mod_t * aggregated_epsilon_pred) / (alpha_t**.5)).clip(-3, 3)
+        grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
+        prior_predicted_mean, prior_score = out
+        prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
+        prior_predicted_covar = (prior_predicted_covar
+                                 + torch.eye(prior_predicted_covar.shape[-1],
+                                             device=prior_predicted_covar.device)[None,:] * 1e-16)
+        # Calculating correction term
+        log_L = self.log_L(predicted_mean,
+                           predicted_covar,
+                           prior_predicted_mean,
+                           prior_predicted_covar)
 
-            # DDIM update
-            bridge_std = (((1 - alpha_t_1) / (1 - alpha_t))**.5) * ((1 - (alpha_t / alpha_t_1))**.5) * eta
-            ddim_mean = (alpha_t_1**.5) * aggregated_predicted_theta_0
-            ddim_mean += (((1 - alpha_t_1 - bridge_std**2) / (1 - alpha_t))**.5) * (theta - (alpha_t**.5) * aggregated_predicted_theta_0)
-            theta = ddim_mean.detach() + torch.randn_like(theta)*bridge_std
-            theta.grad = None
-            theta.requires_grad_(True)
-
-        return theta.requires_grad_(False)
+        log_L.sum().backward()
+        aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1) + theta_.grad * (n_observations > 1)
+        theta_.detach()
+        # real_score = self.score(theta, x, t)
+        # res = torch.linalg.norm(aggregated_score - real_score, axis=-1)
+        # print((res/torch.linalg.norm(real_score, axis=-1)).max().item())
+        return aggregated_score
 
 
 class NSELoss(nn.Module):
@@ -376,10 +377,10 @@ class NSELoss(nn.Module):
 
         t = torch.rand(theta.shape[0], dtype=theta.dtype, device=theta.device)
 
-        alpha = self.estimator.alpha(t)
+        scaling = self.estimator.alpha(t)**.5
         sigma = self.estimator.sigma(t)
 
         eps = torch.randn_like(theta)
-        theta_t = alpha[:, None] * theta + sigma[:, None] * eps
+        theta_t = scaling[:, None] * theta + sigma[:, None] * eps
 
         return (self.estimator(theta_t, x, t, **kwargs) - eps).square().mean()

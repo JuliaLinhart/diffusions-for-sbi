@@ -27,30 +27,30 @@ def get_vpdiff_uniform_score(a, b, nse):
             thetas[i] = theta_t[:, i].unsqueeze(1)
 
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t)
-        # with _t = theta_0 * alpha_t
-        alpha_t = nse.alpha(t)
+        # with _t = theta_0 * scaling_t
+        scaling_t = nse.alpha(t)**.5
         sigma_t = nse.sigma(t)
 
         # N(theta_t|mu_t, sigma^2_t) = N(mu_t|theta_t, sigma^2_t)
-        # int N(theta_t|mu_t, sigma^2_t) dtheta = int N(mu_t|theta_t, sigma^2_t) dmu_t / alpha_t
-        # theta in [a, b] -> mu_t in [a, b] * alpha_t
+        # int N(theta_t|mu_t, sigma^2_t) dtheta = int N(mu_t|theta_t, sigma^2_t) dmu_t / scaling_t
+        # theta in [a, b] -> mu_t in [a, b] * scaling_t
 
         prior_score_t = {}
         for i in range(len(a)):
             f = (
-                norm.cdf((b[i] * alpha_t - thetas[i]) / sigma_t)
-                - norm.cdf((a[i] * alpha_t - thetas[i]) / sigma_t)
-            ) / alpha_t
+                norm.cdf((b[i] * scaling_t - thetas[i]) / sigma_t)
+                - norm.cdf((a[i] * scaling_t - thetas[i]) / sigma_t)
+            ) / scaling_t
 
             # derivative of norm_cdf w.r.t. theta_t
             f_prime = (
                 -1
                 / (sigma_t)
                 * (
-                    norm.pdf((b[i] * alpha_t - thetas[i]) / sigma_t)
-                    - norm.pdf((a[i] * alpha_t - thetas[i]) / sigma_t)
+                    norm.pdf((b[i] * scaling_t - thetas[i]) / sigma_t)
+                    - norm.pdf((a[i] * scaling_t - thetas[i]) / sigma_t)
                 )
-                / alpha_t
+                / scaling_t
             )
 
             # score of diffused prior: grad_t log prior_t (theta_t)
