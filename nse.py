@@ -313,18 +313,17 @@ class NSE(nn.Module):
             predicted_mean = torch.cat((predicted_mean,
                                         prior_predicted_mean[:, None]), dim=1)
             predicted_covar = torch.cat((predicted_covar,
-                                         prior_predicted_covar[:, None]), dim=1)
+                                         (1 - n_observations)*prior_predicted_covar[:, None]), dim=1).detach()
             predicted_covar = .5*(predicted_covar + predicted_covar.mT)
 
             # Modified diffusion of the aggregated posterior
             #Score calculation: score = \sum scores + grad log L
-            sum_scores = scores.sum(axis=1)
             self.log_L(predicted_mean, predicted_covar).sum().backward()
             grad_log_L = theta.grad
-            aggregated_score = sum_scores + grad_log_L
+            aggregated_score = (n_observations - 1)*scores[:,-1] + scores[:,:-1].sum(axis=1) + grad_log_L
 
             #From score to predicted_x0
-            std_fwd_mod_t = (((1 - alpha_t) / (n_observations + 1))**.5)
+            std_fwd_mod_t = ((1 - alpha_t))**.5
             aggregated_epsilon_pred = - std_fwd_mod_t*aggregated_score
             aggregated_predicted_theta_0 = ((theta - std_fwd_mod_t * aggregated_epsilon_pred) / (alpha_t**.5))#.clip(-3, 3)
 
@@ -332,7 +331,7 @@ class NSE(nn.Module):
             bridge_std = (((1 - alpha_t_1) / (1 - alpha_t))**.5) * ((1 - (alpha_t / alpha_t_1))**.5) * eta
             ddim_mean = (alpha_t_1**.5) * aggregated_predicted_theta_0
             ddim_mean += (((1 - alpha_t_1 - bridge_std**2) / (1 - alpha_t))**.5) * (theta - (alpha_t**.5) * aggregated_predicted_theta_0)
-            theta = ddim_mean.detach() + (torch.randn_like(theta)*bridge_std) / ((n_observations + 1)**.5)
+            theta = ddim_mean.detach() + torch.randn_like(theta)*bridge_std
             theta.grad = None
             theta.requires_grad_(True)
 
