@@ -320,12 +320,12 @@ class NSE(nn.Module):
             #Score calculation: score = \sum scores + grad log L
             self.log_L(predicted_mean, predicted_covar).sum().backward()
             grad_log_L = theta.grad
-            aggregated_score = (n_observations - 1)*scores[:,-1] + scores[:,:-1].sum(axis=1) + grad_log_L
+            aggregated_score = (1-n_observations)*scores[:,-1] + scores[:,:-1].sum(axis=1) + grad_log_L
 
             #From score to predicted_x0
             std_fwd_mod_t = ((1 - alpha_t))**.5
             aggregated_epsilon_pred = - std_fwd_mod_t*aggregated_score
-            aggregated_predicted_theta_0 = ((theta - std_fwd_mod_t * aggregated_epsilon_pred) / (alpha_t**.5))#.clip(-3, 3)
+            aggregated_predicted_theta_0 = ((theta - std_fwd_mod_t * aggregated_epsilon_pred) / (alpha_t**.5)).clip(-3, 3)
 
             # DDIM update
             bridge_std = (((1 - alpha_t_1) / (1 - alpha_t))**.5) * ((1 - (alpha_t / alpha_t_1))**.5) * eta
