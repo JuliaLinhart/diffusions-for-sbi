@@ -16,6 +16,12 @@ from functools import partialmethod, partial
 from torch.func import jacrev, vmap
 
 
+
+def assure_positive_definitness(m):
+    U, S, Vh = torch.linalg.svd(.5 * (m + m.mT), full_matrices=False)
+    return U @ torch.diag_embed(S.clip(1e-10, 1e10)) @ Vh
+
+
 class NSE(nn.Module):
     r"""Creates a neural score estimation (NSE) network.
 
@@ -158,24 +164,74 @@ class NSE(nn.Module):
         if len(x.shape) == 1:
             score_fun = self.score
         else:
-            score_fun = partial(self.factorized_score, prior_score_fun=kwargs['prior_score_fun'])
+            score_fun = partial(self.factorized_score, **kwargs)
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
 
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
 
         for t in tqdm(time[:-1], disable=not verbose):
-            alpha_t = self.alpha(t)
-            alpha_t_1 = self.alpha(t - dt)
-            bridge_std = eta * ((((1 - alpha_t_1) / (1 -alpha_t))*(1 - alpha_t / alpha_t_1))**.5)
-            score = score_fun(theta, x, t).detach()
-            pred_theta_0 = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t)
-            theta_mean = self.bridge_mean(alpha_t=alpha_t,
-                                          alpha_t_1=alpha_t_1,
-                                          theta_0=pred_theta_0,
-                                          theta_t=theta,
-                                          bridge_std=bridge_std)
-            theta = theta_mean + torch.randn_like(theta_mean) * bridge_std
+            theta = self.ddim_step(dt, eta, score_fun, t, theta, x)
+        return theta
+
+    def ddim_step(self, theta, x, t, score_fun, dt, eta, **kwargs):
+        alpha_t = self.alpha(t)
+        alpha_t_1 = self.alpha(t - dt)
+        bridge_std = eta * ((((1 - alpha_t_1) / (1 - alpha_t)) * (1 - alpha_t / alpha_t_1)) ** .5)
+        score = score_fun(theta, x, t).detach()
+        pred_theta_0 = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t)
+        theta_mean = self.bridge_mean(alpha_t=alpha_t,
+                                      alpha_t_1=alpha_t_1,
+                                      theta_0=pred_theta_0,
+                                      theta_t=theta,
+                                      bridge_std=bridge_std)
+        # print(theta_mean.mean(axis=0))
+        theta = theta_mean + torch.randn_like(theta_mean) * bridge_std
+        return theta
+
+    def langevin_corrector(self, theta, x, t, score_fun, n_steps, r, **kwargs):
+        alpha_t = self.alpha(t)
+        for i in range(n_steps):
+            z = torch.randn_like(theta)
+            g = score_fun(theta, x, t).detach()
+            eps = 2*alpha_t*(r*torch.linalg.norm(z, axis=-1).mean(axis=0)/torch.linalg.norm(g, axis=-1).mean(axis=0))**2
+            theta = theta + eps*g + ((2*eps)**.5)*z
+        return theta
+
+    def predictor_corrector(self,
+                            shape: Size,
+                            x: Tensor,
+                            steps: int = 64,
+                            verbose: bool = False,
+                            predictor_type='ddim',
+                            corrector_type='langevin',
+                            **kwargs
+    ):
+        if len(x.shape) == 1:
+            score_fun = self.score
+        else:
+            score_fun = partial(self.factorized_score, **kwargs)
+
+        if predictor_type == 'ddim':
+            predictor_fun = partial(self.ddim_step, **kwargs)
+        elif predictor_type == 'id':
+            predictor_fun = lambda theta, x, t, score_fun, dt: theta
+        else:
+            raise NotImplemented("")
+        if corrector_type == 'langevin':
+            corrector_fun = partial(self.langevin_corrector, **kwargs)
+        elif corrector_type == 'id':
+            corrector_fun = lambda theta, x, t, score_fun: theta
+        else:
+            raise NotImplemented("")
+        time = torch.linspace(1, 0, steps + 1).to(x)
+        dt = 1 / steps
+
+        theta = DiagNormal(self.zeros, self.ones).sample(shape)
+
+        for t in tqdm(time[:-1], disable=not verbose):
+            theta_pred = predictor_fun(theta=theta, x=x, t=t, score_fun=score_fun, dt=dt)
+            theta = corrector_fun(theta=theta_pred, x=x, t=t-dt, score_fun=score_fun)
         return theta
 
     def euler(
@@ -299,7 +355,7 @@ class NSE(nn.Module):
                                      + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
         return sum_zetas - final_gaussian_zeta
 
-    def factorized_score(self, theta, x, t, prior_score_fun):
+    def factorized_score(self, theta, x, t, prior_score_fun, corrector_lda=0, **kwargs):
         # Defining stuff
         n_observations = x.shape[0]
         n_samples = theta.shape[0]
@@ -321,9 +377,9 @@ class NSE(nn.Module):
         grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
         prior_predicted_mean, prior_score = out
         prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
-        prior_predicted_covar = (prior_predicted_covar
-                                 + torch.eye(prior_predicted_covar.shape[-1],
-                                             device=prior_predicted_covar.device)[None,:] * 1e-16)
+        prior_predicted_covar = prior_predicted_covar
+        predicted_covar = assure_positive_definitness(predicted_covar.detach())
+        prior_predicted_covar = assure_positive_definitness(prior_predicted_covar.detach())
         # Calculating correction term
         log_L = self.log_L(predicted_mean,
                            predicted_covar,
@@ -331,7 +387,10 @@ class NSE(nn.Module):
                            prior_predicted_covar)
 
         log_L.sum().backward()
-        aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1) + theta_.grad * (n_observations > 1)
+        langevin_grad = (1 - n_observations) * prior_score + scores.sum(axis=1)
+        correction = theta_.grad * (n_observations > 1)
+        #print(torch.linalg.norm(langevin_grad + correction, axis=-1).mean() / torch.linalg.norm(correction, axis=-1).mean() )
+        aggregated_score = langevin_grad + corrector_lda*correction
         theta_.detach()
         # real_score = self.score(theta, x, t)
         # res = torch.linalg.norm(aggregated_score - real_score, axis=-1)
