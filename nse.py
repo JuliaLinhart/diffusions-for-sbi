@@ -171,7 +171,7 @@ class NSE(nn.Module):
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
 
         for t in tqdm(time[:-1], disable=not verbose):
-            theta = self.ddim_step(dt, eta, score_fun, t, theta, x)
+            theta = self.ddim_step(theta, x, t, score_fun, dt, eta)
         return theta
 
     def ddim_step(self, theta, x, t, score_fun, dt, eta, **kwargs):
@@ -194,7 +194,12 @@ class NSE(nn.Module):
         for i in range(n_steps):
             z = torch.randn_like(theta)
             g = score_fun(theta, x, t).detach()
-            eps = 2*alpha_t*(r*torch.linalg.norm(z, axis=-1).mean(axis=0)/torch.linalg.norm(g, axis=-1).mean(axis=0))**2
+            # eps = 2*alpha_t*(r*torch.linalg.norm(z, axis=-1).mean(axis=0)/torch.linalg.norm(g, axis=-1).mean(axis=0))**2
+            eps = (
+                    r
+                    * (self.alpha(t)**.5)
+                    * min(self.sigma(t) ** 2, 1 / g.square().mean())
+            )
             theta = theta + eps*g + ((2*eps)**.5)*z
         return theta
 
