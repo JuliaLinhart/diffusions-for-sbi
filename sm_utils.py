@@ -12,8 +12,8 @@ def train(
                                                     multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
     dloader = torch.utils.data.DataLoader(dataset,
                                           batch_size=batch_size,
-                                          shuffle=True,
-                                          generator=torch.Generator(device=next(model.parameters()).device),)
+                                          shuffle=True,)
+                                        #   generator=torch.Generator(device=next(model.parameters()).device),)
 
     with tqdm(range(n_epochs), desc="Training epochs") as tepoch:
         for _ in tepoch:
