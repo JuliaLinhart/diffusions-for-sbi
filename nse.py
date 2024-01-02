@@ -346,7 +346,7 @@ class NSE(nn.Module):
         def from_canonical_to_sufficient(mean, covar):
             lda = torch.linalg.inv(covar)
             eta = (lda @ mean[..., None])[..., 0]
-            return lda, eta, -.5 * (torch.linalg.slogdet(covar).logabsdet + (mean[..., None].mT @ lda @ mean[..., None])[...,0, 0])
+            return lda, eta, -.5 * (-torch.linalg.slogdet(lda).logabsdet + (mean[..., None].mT @ lda @ mean[..., None])[...,0, 0])
 
         n_observations = means_posterior.shape[-2]
         lambdas_posterior, etas_posterior, zetas_posterior = from_canonical_to_sufficient(means_posterior, covar_posteriors)
@@ -354,8 +354,8 @@ class NSE(nn.Module):
 
         sum_zetas = zetas_posterior.sum(axis=1) + (1 - n_observations)*zeta_prior
 
-        final_gaussian_etas = (etas_posterior + (1 - n_observations)*eta_prior[:, None]).sum(axis=1)
-        final_gaussian_ldas = ((1 - n_observations)*lda_prior[:, None] + lambdas_posterior).sum(axis=1)
+        final_gaussian_etas = (1 - n_observations)*eta_prior + etas_posterior.sum(axis=1) 
+        final_gaussian_ldas = (1 - n_observations)*lda_prior + lambdas_posterior.sum(axis=1)
         final_gaussian_zeta = -.5 * (-torch.linalg.slogdet(final_gaussian_ldas).logabsdet
                                      + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
         return sum_zetas - final_gaussian_zeta
@@ -448,3 +448,21 @@ class NSELoss(nn.Module):
         theta_t = scaling[:, None] * theta + sigma[:, None] * eps
 
         return (self.estimator(theta_t, x, t, **kwargs) - eps).square().mean()
+
+
+if __name__ == "__main__":
+    theta = torch.randn(128, 2)
+    x = torch.randn(10,2)
+    t = torch.rand(1)
+    nse = NSE(2,2)
+
+    nse.predictor_corrector((128,),
+                            x=x,
+                            steps=2,
+                            prior_score_fun=lambda theta, t: torch.ones_like(theta),
+                            eta=0.01,
+                            corrector_lda=0.1,
+                            n_steps=2,
+                            r=.5,
+                            predictor_type='ddim',
+                            verbose=True).cpu()
