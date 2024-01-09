@@ -354,7 +354,7 @@ class NSE(nn.Module):
 
         sum_zetas = zetas_posterior.sum(axis=1) + (1 - n_observations)*zeta_prior
 
-        final_gaussian_etas = (1 - n_observations)*eta_prior + etas_posterior.sum(axis=1) 
+        final_gaussian_etas = (1 - n_observations)*eta_prior + etas_posterior.sum(axis=1)
         final_gaussian_ldas = (1 - n_observations)*lda_prior + lambdas_posterior.sum(axis=1)
         final_gaussian_zeta = -.5 * (-torch.linalg.slogdet(final_gaussian_ldas).logabsdet
                                      + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
@@ -408,7 +408,7 @@ class NSELoss(nn.Module):
     Minimizing this loss estimates the noise :math: `\eplison_phi`, from which the score function
     can be calculated as
 
-        .. math: `s_\phi(\theta, x, t) = - \sigma(t) * \epsilon_\phi(\theta, x, t)`.
+    .. math: `s_\phi(\theta, x, t) = -  \epsilon_\phi(\theta, x, t) / \sigma(t)`.
 
     Given a batch of :math:`N` pairs :math:`(\theta_i, x_i)`, the module returns
 
