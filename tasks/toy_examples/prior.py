@@ -31,14 +31,16 @@ class UniformPrior:
 
     def sample(self, sample_shape):
         return self.prior.sample(sample_shape)
-    
+
+
 class GaussianPrior:
     def __init__(self, means=means, stds=stds):
         self.means = means
         self.stds = stds
         self.prior = torch.distributions.MultivariateNormal(
             loc=torch.tensor([self.means[k] for k in [0, 1]]),
-            covariance_matrix=torch.eye(2) * torch.tensor([self.stds[k]**2 for k in [0, 1]]),
+            covariance_matrix=torch.eye(2)
+            * torch.tensor([self.stds[k] ** 2 for k in [0, 1]]),
         )
 
     def sample(self, sample_shape):
