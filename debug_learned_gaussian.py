@@ -115,24 +115,26 @@ def comparison(theta, t, x_obs, prior, prior_score_fn, post_score_fn_1, post_sco
         theta.grad = None
 
         means_posterior_backward = []
+        sigmas_posterior_backward = []
         posterior_scores = []
         for i in range(n_obs):
             if posterior_score_fn is None:
                 posterior = task.true_posterior(x_obs[i])
                 # for comparison purposes we rescale the mean and covariance of the posterior
                 posterior_score = get_vpdiff_gaussian_score(posterior.loc - theta_mean, posterior.covariance_matrix / theta_std**2, nse)
-                sigma_posterior_backward = sigma_backward(t, posterior.covariance_matrix / theta_std**2, nse).repeat(theta.shape[0], n_obs, 1,1)
+                sigmas_posterior_backward.append(sigma_backward(t, posterior.covariance_matrix / theta_std**2, nse).repeat(theta.shape[0], 1,1))
                 kwargs = {}
 
             else:
                 posterior_score = posterior_score_fn
                 x = x_obs_[i].to(theta.device).repeat(theta.shape[0], 1)
                 kwargs = {"x": x_obs_[i].to(theta.device)}
-                sigma_posterior_backward = sigma_backward_autodiff(theta, x, t, posterior_score, nse).repeat(n_obs, 1,1,1).permute(1,0,2,3)
+                sigmas_posterior_backward.append(sigma_backward_autodiff(theta, x, t, posterior_score, nse))
             posterior_scores.append(posterior_score(theta=theta,t=t, **kwargs))
             means_posterior_backward.append(mean_backward(theta, t, posterior_score, nse, **kwargs))
         
         means_posterior_backward = torch.stack(means_posterior_backward).permute(1,0,2)
+        sigma_posterior_backward = torch.stack(sigmas_posterior_backward).permute(1,0,2,3)
 
         mean_prior_backward = mean_backward(theta, t, prior_score_fn, nse)
         sigma_prior_backward = sigma_backward(t, prior.prior.covariance_matrix, nse).repeat(theta.shape[0], 1,1)
