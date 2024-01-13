@@ -105,7 +105,7 @@ def sigma_backward_autodiff(theta, x, t, score_fn, nse):
     sigma_t = nse.sigma(t)
 
     def mean_to_jac(theta, x):
-        score = score_fn(theta=theta, t=t, x=x).detach()
+        score = score_fn(theta=theta, t=t, x=x)
         # mu = mean_backward(theta, t, score_fn, nse, x=x)
         mu = 1/(alpha_t**.5) * (theta + sigma_t**2 * score)
         return mu, (mu, score)
@@ -247,7 +247,7 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
             theta_t.detach()
             + drift * dt
             + diffusion * torch.randn_like(theta_t) * torch.abs(dt) ** 0.5
-        )
+        ).clip(-3,3)
         theta_list.append(theta_t.detach().cpu())
         if debug:
             gradlogL_list.append(gradlogL)
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     # ]
 
     diff_theta_list = [
-        (theta_list_learned[i] - theta_list_ana[i]).square().mean()
+        torch.linalg.norm((theta_list_learned[i] - theta_list_ana[i]), dim=-1).mean()
         for i in range(len(theta_list_learned))
     ]
     t = torch.linspace(1, 0, len(diff_theta_list) + 1)[:-1]
@@ -427,7 +427,7 @@ if __name__ == "__main__":
 
 
     diff_posterior_scores_list = [
-        (posterior_scores_list[i] - posterior_scores_list_ana[i]).square().mean()
+        torch.linalg.norm((posterior_scores_list[i] - posterior_scores_list_ana[i]), dim=-1).mean()
         for i in range(len(posterior_scores_list))
     ]
     plt.plot(
@@ -446,7 +446,7 @@ if __name__ == "__main__":
 
     for i in range(N_OBS):
         diff_mean_posterior_backward_list = [
-            (m[:,i,:] - m_ana[:,i,:]).square().mean() for m, m_ana in zip(means_posterior_backward_list, means_posterior_backward_list_ana)
+            torch.linalg.norm((m[:,i,:] - m_ana[:,i,:]), dim=-1).mean() for m, m_ana in zip(means_posterior_backward_list, means_posterior_backward_list_ana)
         ]
         plt.plot(
             t,
@@ -464,7 +464,7 @@ if __name__ == "__main__":
 
     for i in range(N_OBS):
         diff_sigma_posterior_backward_list = [
-            (s[:,i,:,:] - s_ana[:,i,:,:]).square().mean() for s, s_ana in zip(sigma_posterior_backward_list, sigma_posterior_backward_list_ana)
+            torch.linalg.norm((s[:,i,:,:] - s_ana[:,i,:,:]), dim=(-2,-1)).mean() for s, s_ana in zip(sigma_posterior_backward_list, sigma_posterior_backward_list_ana)
         ]
         plt.plot(
             t,
