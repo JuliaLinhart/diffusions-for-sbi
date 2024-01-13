@@ -12,7 +12,7 @@ def log_L(
     covar_prior_backward,
 ):
     """
-    Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...) 
+    Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...)
     Following http://www.lucamartino.altervista.org/2003-003.pdf
     Parameters
     ----------
@@ -107,7 +107,7 @@ def eta_lda(
     covar_prior_backward,
 ):
     """
-    Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...) 
+    Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...)
     Following http://www.lucamartino.altervista.org/2003-003.pdf
     Parameters
     ----------
@@ -165,89 +165,19 @@ def sigma_backward_autodiff(theta, x, t, score_fn, nse):
 
     grad_mean, _ = vmap(jacrev(mean_to_jac, has_aux=True))(theta, x)
     return (sigma_t**2 / (alpha_t**0.5)) * grad_mean
-
-
-def comparison(theta, t, x_obs, task, theta_mean, theta_std, x_mean, x_std, nse):
-    def compute_results(posterior_fn):
-        n_obs = len(x_obs)
-        # input normalization for the score network
-        x_obs_ = (x_obs - x_mean) / x_std
-
-        theta.requires_grad = True
-        theta.grad = None
-
-        means_posterior_backward = []
-        sigmas_posterior_backward = []
-        posterior_scores = []
-        for i in range(n_obs):
-            if posterior_fn is not None:
-                posterior = posterior_fn(x_obs[i])
-                # for comparison purposes we rescale the mean and covariance of the posterior
-                loc = (posterior.loc - theta_mean) / theta_std
-                cov = (
-                    torch.diag(1 / theta_std)
-                    @ posterior.covariance_matrix
-                    @ torch.diag(1 / theta_std)
-                )
-                posterior_score = get_vpdiff_gaussian_score(loc, cov, nse)
-                sigmas_posterior_backward.append(
-                    sigma_backward(t, cov, nse).repeat(theta.shape[0], 1, 1)
-                )
-                kwargs = {}
-
-            else:
-                posterior_score = nse.score_net
-                x = x_obs_[i].to(theta.device).repeat(theta.shape[0], 1)
-                kwargs = {"x": x_obs_[i].to(theta.device)}
-                sigmas_posterior_backward.append(
-                    sigma_backward_autodiff(theta, x, t, posterior_score, nse)
-                )
-            posterior_scores.append(posterior_score(theta=theta, t=t, **kwargs))
-            means_posterior_backward.append(
-                mean_backward(theta, t, posterior_score, nse, **kwargs)
-            )
-
-        means_posterior_backward = torch.stack(means_posterior_backward).permute(
-            1, 0, 2
-        )
-        sigma_posterior_backward = torch.stack(sigmas_posterior_backward).permute(
-            1, 0, 2, 3
-        )
-
-        return (
-            torch.stack(posterior_scores).sum(axis=0),
-            means_posterior_backward,
-            sigma_posterior_backward,
-        )
-
-    (
-        posterior_scores_1,
-        means_posterior_backward_1,
-        sigma_posterior_backward_1,
-    ) = compute_results(posterior_fn=None)
-    (
-        posterior_scores_2,
-        means_posterior_backward_2,
-        sigma_posterior_backward_2,
-    ) = compute_results(posterior_fn=task.true_posterior)
-
-    diff_posterior_scores = (posterior_scores_1 - posterior_scores_2).square().mean()
-    diff_posterior_means_backward = (
-        (means_posterior_backward_1 - means_posterior_backward_2).square().mean()
-    )
-    diff_posterior_sigma_backward = (
-        (sigma_posterior_backward_1 - sigma_posterior_backward_2).square().mean()
-    )
-
-    return (
-        diff_posterior_scores,
-        diff_posterior_means_backward,
-        diff_posterior_sigma_backward,
-    )
+    # return torch.eye(2).repeat(theta.shape[0], 1, 1).to(theta.device)
 
 
 def diffused_tall_posterior_score(
-    theta, t, prior, posterior_fn, x_obs, nse, theta_mean=None, theta_std=None
+    theta,
+    t,
+    prior,
+    posterior_fn,
+    x_obs,
+    nse,
+    theta_mean=None,
+    theta_std=None,
+    debug=False,
 ):
     # device
     prior.loc = prior.loc.to(theta.device)
@@ -322,13 +252,26 @@ def diffused_tall_posterior_score(
     posterior_scores = torch.stack(posterior_scores).sum(axis=0)
     prior_score = prior_score_fn(theta, t)
 
-    return (1 - n_obs) * prior_score + posterior_scores + gradlogL
+    if debug:
+        return (
+            (1 - n_obs) * prior_score + posterior_scores + gradlogL,
+            gradlogL.detach().cpu(),
+            posterior_scores.detach().cpu(),
+            means_posterior_backward.detach().cpu(),
+            sigma_posterior_backward.detach().cpu(),
+        )
+    else:
+        return (1 - n_obs) * prior_score + posterior_scores + gradlogL
 
 
-def euler_sde_sampler(score_fn, nsamples, beta, device="cpu"):
+def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
     theta_t = torch.randn((nsamples, 2)).to(device)  # (nsamples, 2)
     time_pts = torch.linspace(1, 0, 1000).to(device)  # (ntime_pts,)
     theta_list = []
+    gradlogL_list = []
+    posterior_scores_list = []
+    means_posterior_backward_list = []
+    sigma_posterior_backward_list = []
     for i in tqdm(range(len(time_pts) - 1)):
         t = time_pts[i]
         dt = time_pts[i + 1] - t
@@ -336,7 +279,18 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu"):
         # calculate the drift and diffusion terms
         f = -0.5 * beta(t) * theta_t
         g = beta(t) ** 0.5
-        score = score_fn(theta_t, t).detach()
+        if debug:
+            (
+                score,
+                gradlogL,
+                posterior_scores,
+                means_posterior_backward,
+                sigma_posterior_backward,
+            ) = score_fn(theta_t, t, debug=True)
+        else:
+            score = score_fn(theta_t, t)
+        score = score.detach()
+
         drift = f - g * g * score
         diffusion = g
 
@@ -347,7 +301,22 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu"):
             + diffusion * torch.randn_like(theta_t) * torch.abs(dt) ** 0.5
         )
         theta_list.append(theta_t.detach().cpu())
-    return theta_t, theta_list
+        if debug:
+            gradlogL_list.append(gradlogL)
+            posterior_scores_list.append(posterior_scores)
+            means_posterior_backward_list.append(means_posterior_backward)
+            sigma_posterior_backward_list.append(sigma_posterior_backward)
+    if debug:
+        return (
+            theta_t,
+            theta_list,
+            gradlogL_list,
+            posterior_scores_list,
+            means_posterior_backward_list,
+            sigma_posterior_backward_list,
+        )
+    else:
+        return theta_t, theta_list
 
 
 if __name__ == "__main__":
@@ -362,7 +331,7 @@ if __name__ == "__main__":
 
     N_TRAIN = 10_000
     N_SAMPLES = 4096
-    N_OBS = 5
+    N_OBS = 2
 
     # Task
     task = SBIGaussian2d(prior_type="gaussian")
@@ -431,18 +400,47 @@ if __name__ == "__main__":
     )
     score_fn_2 = partial(
         diffused_tall_posterior_score,
-        prior=prior.prior,
+        prior=prior_,
         posterior_fn=task.true_posterior,
         x_obs=x_obs_100[:N_OBS],
         nse=score_net,
+        theta_mean=theta_train.mean(axis=0),
+        theta_std=theta_train.std(axis=0),
     )
-    # score_fn_2 = partial(diffused_tall_posterior_score, prior=prior_, posterior_fn=task.true_posterior, x_obs=x_obs_100[:N_OBS], nse=score_net, theta_mean=theta_train.mean(axis=0), theta_std=theta_train.std(axis=0)
 
-    theta_learned, theta_list_learned = euler_sde_sampler(
-        score_fn_1, N_SAMPLES, beta=score_net.beta, device="cuda:0"
+    # (
+        # theta_learned,
+        # theta_list_learned,
+    # ) = euler_sde_sampler(
+    #     score_fn_1, N_SAMPLES, beta=score_net.beta, device="cuda:0",
+    # )
+    # (
+    #     theta_ana,
+    #     theta_list_ana,
+    # ) = euler_sde_sampler(
+    #     score_fn_2, N_SAMPLES, beta=score_net.beta, device="cpu", 
+    # )
+
+
+    (
+        theta_learned,
+        theta_list_learned,
+        gradlogL_list,
+        posterior_scores_list,
+        means_posterior_backward_list,
+        sigma_posterior_backward_list,
+    ) = euler_sde_sampler(
+        score_fn_1, N_SAMPLES, beta=score_net.beta, device="cuda:0", debug=True
     )
-    theta_ana, theta_list_ana = euler_sde_sampler(
-        score_fn_2, N_SAMPLES, beta=score_net.beta, device="cpu"
+    (
+        theta_ana,
+        theta_list_ana,
+        gradlogL_list_ana,
+        posterior_scores_list_ana,
+        means_posterior_backward_list_ana,
+        sigma_posterior_backward_list_ana,
+    ) = euler_sde_sampler(
+        score_fn_2, N_SAMPLES, beta=score_net.beta, device="cpu", debug=True
     )
 
     theta_learned = theta_learned.detach().cpu()
@@ -479,36 +477,42 @@ if __name__ == "__main__":
     plt.savefig(f"samples_n_obs_{N_OBS}.png")
     plt.clf()
 
-    # theta = torch.randn((N_SAMPLES, 2))
-    # t = torch.linspace(1, 0, 20)[:-1]
 
-    # diff_posterior_scores_list  = []
-    # diff_posterior_means_backward_list = []
-    # diff_posterior_sigma_backward_list = []
+    diff_posterior_scores_list = [
+        (posterior_scores_list[i] - posterior_scores_list_ana[i]).square().mean()
+        for i in range(len(posterior_scores_list))
+    ]
+    plt.plot(
+        t,
+        diff_posterior_scores_list,
+        label="diff posterior scores",
+        marker="o",
+        alpha=0.5,
+        linewidth=3,
+    )
+    plt.xlabel("t")
+    plt.ylabel("MSE")
+    plt.legend()
+    plt.savefig(f"diff_posterior_scores_n_obs_{N_OBS}.png")
+    plt.clf()
 
-    # for t_ in tqdm(t):
-    #     diff_posterior_scores, diff_posterior_means_backward, diff_posterior_sigma_backward = comparison(theta, t_, x_obs_100[:N_OBS], task, theta_train.mean(axis=0), theta_train.std(axis=0), x_train.mean(axis=0), x_train.std(axis=0), score_net)
-    #     diff_posterior_scores_list.append(diff_posterior_scores.detach().numpy())
-    #     diff_posterior_means_backward_list.append(diff_posterior_means_backward.detach().numpy())
-    #     diff_posterior_sigma_backward_list.append(diff_posterior_sigma_backward.detach().numpy())
+    for i in range(N_OBS):
+        diff_mean_posterior_backward_list = [
+            (m[:,i,:] - m_ana[:,i,:]).square().mean() for m, m_ana in zip(means_posterior_backward_list, means_posterior_backward_list_ana)
+        ]
+        plt.plot(
+            t,
+            diff_mean_posterior_backward_list,
+            label=f"diff posterior means {i}",
+            marker="o",
+            alpha=0.5,
+            linewidth=3,
+        )
+    plt.xlabel("t")
+    plt.ylabel("MSE")
+    plt.legend()
+    plt.savefig(f"diff_posterior_means_backward_n_obs_{N_OBS}.png")
+    plt.clf()
 
-    # plt.plot(t, diff_posterior_scores_list, label="diff posterior scores", marker="o", alpha=0.5, linewidth=3)
-    # plt.xlabel("t")
-    # plt.ylabel("MSE")
-    # plt.legend()
-    # plt.savefig("diff_posterior_scores.png")
-    # plt.clf()
 
-    # plt.plot(t, diff_posterior_means_backward_list, label="diff posterior means backward", marker="o", alpha=0.5, linewidth=3)
-    # plt.xlabel("t")
-    # plt.ylabel("MSE")
-    # plt.legend()
-    # plt.savefig("diff_posterior_means_backward.png")
-    # plt.clf()
 
-    # plt.plot(t, diff_posterior_sigma_backward_list, label="diff posterior sigma backward", marker="o", alpha=0.5, linewidth=3)
-    # plt.xlabel("t")
-    # plt.ylabel("MSE")
-    # plt.legend()
-    # plt.savefig("diff_posterior_sigma_backward.png")
-    # plt.clf()
