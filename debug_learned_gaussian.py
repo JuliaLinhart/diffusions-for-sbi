@@ -368,18 +368,18 @@ if __name__ == "__main__":
     dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
     score_net = NSE(theta_dim=2, x_dim=2, hidden_features=[128, 256, 128]).cuda()
 
-    # avg_score_net = train(
-    #     model=score_net,
-    #     dataset=dataset,
-    #     loss_fn=NSELoss(score_net),
-    #     n_epochs=200,
-    #     lr=1e-3,
-    #     batch_size=256,
-    #     prior_score=False, # learn the prior score via the classifier-free guidance approach
-    # )
-    # score_net = avg_score_net.module
+    avg_score_net = train(
+        model=score_net,
+        dataset=dataset,
+        loss_fn=NSELoss(score_net),
+        n_epochs=200,
+        lr=1e-3,
+        batch_size=256,
+        prior_score=False, # learn the prior score via the classifier-free guidance approach
+    )
+    score_net = avg_score_net.module
     # torch.save(score_net, "score_net.pkl")
-    score_net = torch.load("score_net.pkl")
+    # score_net = torch.load("score_net.pkl")
 
     loc_ = (prior.prior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
     cov_ = (
