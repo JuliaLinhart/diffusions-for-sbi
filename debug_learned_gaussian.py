@@ -100,67 +100,14 @@ def sigma_backward(t, dist_cov, nse):
     )
 
 
-def eta_lda(
-    means_posterior_backward,
-    covar_posteriors_backward,
-    mean_prior_backward,
-    covar_prior_backward,
-):
-    """
-    Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...)
-    Following http://www.lucamartino.altervista.org/2003-003.pdf
-    Parameters
-    ----------
-    means_posterior_backward: torch.Tensor
-        (*, n_observations, dim_theta)
-    covar_posteriors_backward: torch.Tensor
-        (*, n_observations, dim_theta, dim_theta)
-    mean_prior_backward: torch.Tensor
-        (*, dim_theta)
-    covar_prior_backward: torch.Tensor
-        (*, dim_theta, dim_theta)
-
-    Returns
-    -------
-
-    """
-
-    def from_canonical_to_sufficient(mean, covar):
-        lda = torch.linalg.inv(covar)
-        eta = (lda @ mean[..., None])[..., 0]
-        return (
-            lda,
-            eta,
-            -0.5
-            * (
-                -torch.linalg.slogdet(lda).logabsdet
-                + (mean[..., None].mT @ lda @ mean[..., None])[..., 0, 0]
-            ),
-        )
-
-    n_observations = means_posterior_backward.shape[-2]
-    lambdas_posterior, etas_posterior, zetas_posterior = from_canonical_to_sufficient(
-        means_posterior_backward, covar_posteriors_backward
-    )
-    lda_prior, eta_prior, zeta_prior = from_canonical_to_sufficient(
-        mean_prior_backward, covar_prior_backward
-    )
-
-    final_gaussian_etas = (1 - n_observations) * eta_prior + etas_posterior.sum(axis=1)
-    final_gaussian_ldas = (1 - n_observations) * lda_prior + lambdas_posterior.sum(
-        axis=1
-    )
-
-    return final_gaussian_etas, final_gaussian_ldas
-
-
 def sigma_backward_autodiff(theta, x, t, score_fn, nse):
     alpha_t = nse.alpha(t)
     sigma_t = nse.sigma(t)
 
     def mean_to_jac(theta, x):
-        score = score_fn(theta=theta, t=t, x=x)
-        mu = mean_backward(theta, t, score_fn, nse, x=x)
+        score = score_fn(theta=theta, t=t, x=x).detach()
+        # mu = mean_backward(theta, t, score_fn, nse, x=x)
+        mu = 1/(alpha_t**.5) * (theta + sigma_t**2 * score)
         return mu, (mu, score)
 
     grad_mean, _ = vmap(jacrev(mean_to_jac, has_aux=True))(theta, x)
@@ -273,6 +220,7 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
     means_posterior_backward_list = []
     sigma_posterior_backward_list = []
     for i in tqdm(range(len(time_pts) - 1)):
+        
         t = time_pts[i]
         dt = time_pts[i + 1] - t
 
@@ -331,7 +279,7 @@ if __name__ == "__main__":
 
     N_TRAIN = 10_000
     N_SAMPLES = 4096
-    N_OBS = 2
+    N_OBS = 10
 
     # Task
     task = SBIGaussian2d(prior_type="gaussian")
@@ -368,18 +316,18 @@ if __name__ == "__main__":
     dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
     score_net = NSE(theta_dim=2, x_dim=2, hidden_features=[128, 256, 128]).cuda()
 
-    avg_score_net = train(
-        model=score_net,
-        dataset=dataset,
-        loss_fn=NSELoss(score_net),
-        n_epochs=200,
-        lr=1e-3,
-        batch_size=256,
-        prior_score=False, # learn the prior score via the classifier-free guidance approach
-    )
-    score_net = avg_score_net.module
+    # avg_score_net = train(
+    #     model=score_net,
+    #     dataset=dataset,
+    #     loss_fn=NSELoss(score_net),
+    #     n_epochs=200,
+    #     lr=1e-3,
+    #     batch_size=256,
+    #     prior_score=False, # learn the prior score via the classifier-free guidance approach
+    # )
+    # score_net = avg_score_net.module
     # torch.save(score_net, "score_net.pkl")
-    # score_net = torch.load("score_net.pkl")
+    score_net = torch.load("score_net.pkl")
 
     loc_ = (prior.prior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
     cov_ = (
@@ -445,12 +393,12 @@ if __name__ == "__main__":
 
     theta_learned = theta_learned.detach().cpu()
 
-    # unnormalize samples
-    theta_learned = theta_learned * theta_train.std(axis=0) + theta_train.mean(axis=0)
-    theta_list_learned = [
-        theta * theta_train.std(axis=0) + theta_train.mean(axis=0)
-        for theta in theta_list_learned
-    ]
+    # # unnormalize samples
+    # theta_learned = theta_learned * theta_train.std(axis=0) + theta_train.mean(axis=0)
+    # theta_list_learned = [
+    #     theta * theta_train.std(axis=0) + theta_train.mean(axis=0)
+    #     for theta in theta_list_learned
+    # ]
 
     diff_theta_list = [
         (theta_list_learned[i] - theta_list_ana[i]).square().mean()
@@ -514,5 +462,22 @@ if __name__ == "__main__":
     plt.savefig(f"diff_posterior_means_backward_n_obs_{N_OBS}.png")
     plt.clf()
 
+    for i in range(N_OBS):
+        diff_sigma_posterior_backward_list = [
+            (s[:,i,:,:] - s_ana[:,i,:,:]).square().mean() for s, s_ana in zip(sigma_posterior_backward_list, sigma_posterior_backward_list_ana)
+        ]
+        plt.plot(
+            t,
+            diff_sigma_posterior_backward_list,
+            label=f"diff posterior sigma {i}",
+            marker="o",
+            alpha=0.5,
+            linewidth=3,
+        )
+    plt.xlabel("t")
+    plt.ylabel("MSE")
+    plt.legend()
+    plt.savefig(f"diff_posterior_sigma_backward_n_obs_{N_OBS}.png")
+    plt.clf()
 
 
