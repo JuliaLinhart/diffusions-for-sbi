@@ -408,9 +408,16 @@ if __name__ == "__main__":
     ) = euler_sde_sampler(
         score_fn, N_SAMPLES, beta=score_net.beta, device="cuda:0", debug=True
     )
+    gradlogL = torch.stack(gradlogL_list)
     posterior_scores = torch.stack(posterior_scores_list)
     posterior_scores_ana = torch.stack(posterior_scores_list_ana)
+    means_posterior_backward = torch.stack(means_posterior_backward_list)
+    means_posterior_backward_ana = torch.stack(means_posterior_backward_list_ana)
+    sigma_posterior_backward = torch.stack(sigma_posterior_backward_list)
+    sigma_posterior_backward_ana = torch.stack(sigma_posterior_backward_list_ana)
 
+    means_posterior_diff = torch.linalg.norm(means_posterior_backward_ana - means_posterior_backward, axis=-1)
+    sigma_posterior_diff = torch.linalg.norm(sigma_posterior_backward_ana - sigma_posterior_backward, axis=(-2,-1))
     posterior_scores_diff = torch.linalg.norm(posterior_scores_ana - posterior_scores, dim=-1)
 
     theta_learned = theta_learned.detach().cpu()
@@ -444,7 +451,7 @@ if __name__ == "__main__":
     plt.show()
 
     #Erreur de score a la premiere iteration
-    plt.scatter(posterior_scores_diff[0], torch.linalg.norm(theta_list_learned[0].detach().cpu(), dim=-1))
+    plt.scatter(posterior_scores_diff[100], torch.linalg.norm(theta_list_learned[100].detach().cpu(), dim=-1))
     plt.show()
 
     #Tout erreur vs tout theta
@@ -452,6 +459,21 @@ if __name__ == "__main__":
                 posterior_scores_diff.flatten())
     plt.show()
 
+    indices_best_to_worst = torch.argsort(torch.linalg.norm(theta_learned - theta_true[None,...], axis=-1))
+    ind = indices_best_to_worst[-2]
+    plt.plot(posterior_scores_diff[:, ind])
+    plt.show()
+
+    plt.plot(torch.linalg.norm(all_theta[:, ind], dim=-1))
+    plt.show()
+
+    ind_diff = torch.diff(torch.linalg.norm(all_theta[:, ind], axis=-1) > 5).float().argmax()
+    range = torch.arange(ind_diff-3, ind_diff + 4)
+    print(torch.linalg.norm(all_theta[:, ind], axis=-1)[range])
+    print(posterior_scores_diff[range, ind])
+    print(torch.linalg.norm(gradlogL, axis=-1)[range, ind])
+    print(means_posterior_diff[range, ind].max(axis=-1).values)
+    print(sigma_posterior_diff[range, ind].max(axis=-1).values)
     # theta_list_learned = [
     #     theta * theta_train.std(axis=0) + theta_train.mean(axis=0)
     #     for theta in theta_list_learned
