@@ -18,8 +18,11 @@ from torch.func import jacrev, vmap
 
 
 def assure_positive_definitness(m):
-    U, S, Vh = torch.linalg.svd(.5 * (m + m.mT), full_matrices=False)
-    return U @ torch.diag_embed(S.clip(1e-10, 1e10)) @ Vh
+    L, V = torch.linalg.eig(.5 * (m + m.mT))
+    L = L.real
+    V = V.real
+    corrected_m = V @ torch.diag_embed(L.real.abs().clip(1e-4, 1e20)) @ torch.linalg.inv(V)
+    return corrected_m
 
 
 class NSE(nn.Module):
