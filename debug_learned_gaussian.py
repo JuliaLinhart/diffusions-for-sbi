@@ -84,22 +84,23 @@ def mean_backward(theta, t, score_fn, nse, **kwargs):
 def sigma_backward(t, dist_cov, nse):
     alpha_t = nse.alpha(t)
     sigma_t = nse.sigma(t)
-
-    return (
-        ((sigma_t**2)
-        / alpha_t)
-        * (
-            torch.eye(2).to(alpha_t.device)
-            + (sigma_t**2)
-            * (-1)
-            * torch.linalg.inv(
-                (
-                    nse.alpha(t) * dist_cov.to(alpha_t.device)
-                    + (sigma_t**2)* torch.eye(2).to(alpha_t.device)
-                )
-            )
-        )
-    )
+    # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+    return torch.linalg.inv(torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * torch.eye(2).to(dist_cov.device))
+    # return (
+    #     ((sigma_t**2)
+    #     / alpha_t)
+    #     * (
+    #         torch.eye(2).to(alpha_t.device)
+    #         + (sigma_t**2)
+    #         * (-1)
+    #         * torch.linalg.inv(
+    #             (
+    #                 nse.alpha(t) * dist_cov.to(alpha_t.device)
+    #                 + (sigma_t**2)* torch.eye(2).to(alpha_t.device)
+    #             )
+    #         )
+    #     )
+    # )
 
 
 def sigma_backward_autodiff(theta, x, t, score_fn, nse):
@@ -353,7 +354,7 @@ if __name__ == "__main__":
 
     N_TRAIN = 10_000
     N_SAMPLES = 4096
-    N_OBS = 50
+    N_OBS = 2
 
     # Task
     task = SBIGaussian2d(prior_type="gaussian")
@@ -424,7 +425,7 @@ if __name__ == "__main__":
         diffused_tall_posterior_score,
         prior=prior_, # normalized prior
         posterior_fn_ana=task.true_posterior,
-        cov_post=cov_post_,# analytical posterior
+        cov_post=cov_post_.cuda(),# analytical posterior
         x_obs=x_obs_100[:N_OBS].cuda(), # observations
         x_obs_=x_obs_100_[:N_OBS].cuda(), # normalized observations
         nse=score_net, # trained score network
@@ -544,5 +545,6 @@ if __name__ == "__main__":
 
     min_eigvals_lda = torch.linalg.eigvals(ldas).real.min(axis=-1).values
     plt.plot(min_eigvals_lda.clip(-10000, 10000))
-    plt.ylabel('Min eigvalue Lambda(t) normalized by max')
+    plt.yscale('log')
+    #plt.ylabel('Min eigvalue Lambda(t) normalized by max')
     plt.show()
