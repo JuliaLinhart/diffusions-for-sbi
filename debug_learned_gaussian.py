@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import torch
-from torch.distributions import MultivariateNormal
 
 from torch.func import vmap, jacrev
 from vp_diffused_priors import get_vpdiff_gaussian_score
@@ -110,11 +109,18 @@ def sigma_backward_autodiff(theta, x, t, score_fn, nse):
     def mean_to_jac(theta, x):
         score = score_fn(theta=theta, t=t, x=x)
         # mu = mean_backward(theta, t, score_fn, nse, x=x)
-        mu = theta / alpha_t + (sigma_t**2 / alpha_t) * score
+        mu = 1 / (alpha_t**0.5) * (theta + sigma_t**2 * score)
         return mu, (mu, score)
 
     grad_mean, _ = vmap(jacrev(mean_to_jac, has_aux=True))(theta, x)
-    return sigma_t**2  * grad_mean
+
+    # # extract diag terms of grad_mean and create diag_matrix
+    # diag_terms = torch.stack([grad_mean[:,0,0], grad_mean[:,1,1]],dim=-1)
+    # # clip negative values
+    # diag_terms = diag_terms.abs().clip(1e-1,1e20)
+
+    # grad_mean = torch.diag_embed(diag_terms)
+    return (sigma_t**2 / (alpha_t**0.5)) * grad_mean
     # return torch.eye(2).repeat(theta.shape[0], 1, 1).to(theta.device)
 
 
@@ -123,12 +129,12 @@ def diffused_tall_posterior_score(
     t,
     prior,
     posterior_fn_ana,
-        cov_post,
     x_obs,
     x_obs_,
     nse,
     theta_mean=None,
     theta_std=None,
+    ana=False,
     debug=False,
 ):
     # device
@@ -166,7 +172,7 @@ def diffused_tall_posterior_score(
             posterior.loc, posterior.covariance_matrix, nse
         )
         sigma_posterior_ana = sigma_backward(
-            t, cov_post, nse
+            t, posterior.covariance_matrix, nse
         ).repeat(theta.shape[0], 1, 1)
         sigmas_posterior_backward_ana.append(sigma_posterior_ana)
         posterior_scores_ana.append(posterior_score_fn_ana(theta=theta, t=t))
@@ -175,17 +181,18 @@ def diffused_tall_posterior_score(
         )
 
         # Learned score
-        posterior_score_fn = nse.score
-        x = x_obs_[i].to(theta.device).repeat(theta.shape[0], 1)
-        kwargs = {"x": x_obs_[i].to(theta.device)}
-        sigmas_posterior_backward.append(
-            sigma_backward_autodiff(theta, x, t, posterior_score_fn, nse)
-        )
+        if not ana:
+            posterior_score_fn = nse.score
+            x = x_obs_[i].to(theta.device).repeat(theta.shape[0], 1)
+            kwargs = {"x": x_obs_[i].to(theta.device)}
+            sigmas_posterior_backward.append(
+                sigma_backward_autodiff(theta, x, t, posterior_score_fn, nse)
+            )
 
-        posterior_scores.append(posterior_score_fn(theta=theta, t=t, **kwargs))
-        means_posterior_backward.append(
-            mean_backward(theta, t, posterior_score_fn, nse, **kwargs)
-        )
+            posterior_scores.append(posterior_score_fn(theta=theta, t=t, **kwargs))
+            means_posterior_backward.append(
+                mean_backward(theta, t, posterior_score_fn, nse, **kwargs)
+            )
 
     means_posterior_backward_ana = torch.stack(means_posterior_backward_ana).permute(
         1, 0, 2
@@ -193,29 +200,13 @@ def diffused_tall_posterior_score(
     sigma_posterior_backward_ana = torch.stack(sigmas_posterior_backward_ana).permute(
         1, 0, 2, 3
     )
-    means_posterior_backward = torch.stack(means_posterior_backward).permute(1, 0, 2)
-    sigma_posterior_backward = assure_positive_definitness(torch.stack(sigmas_posterior_backward).permute(
-        1, 0, 2, 3
-    )).detach()
 
     mean_prior_backward = mean_backward(theta, t, prior_score_fn, nse)
     sigma_prior_backward = sigma_backward(t, prior.covariance_matrix, nse).repeat(
         theta.shape[0], 1, 1
     )
-    #
-    #sigma_posterior_backward = sigma_posterior_backward_ana
-    logL, _, _ = log_L(
-        means_posterior_backward,
-        sigma_posterior_backward,
-        mean_prior_backward,
-        sigma_prior_backward,
-    )
-    logL.sum().backward()
-
-    gradlogL = theta.grad
-    posterior_scores = torch.stack(posterior_scores).sum(axis=0)
-    posterior_scores_ana = torch.stack(posterior_scores_ana).sum(axis=0)
-    prior_score = prior_score_fn(theta, t)
+    if not ana:
+        sigma_prior_backward = assure_positive_definitness(sigma_prior_backward.detach())
 
     logL_ana, eta_ana, lda_ana = log_L(
         means_posterior_backward_ana,
@@ -224,55 +215,98 @@ def diffused_tall_posterior_score(
         sigma_prior_backward,
     )
 
-    means_backward_sum = (
-        means_posterior_backward.sum(axis=1) + (1 - n_obs) * mean_prior_backward
-    )
-    gradlogL_ana = -((nse.alpha(t) ** 0.5) / (nse.sigma(t) ** 2)) * (
-        means_backward_sum - (torch.linalg.inv(lda_ana[0]) @ eta_ana.mT).mT
-    )
-    is_lambda_pos_def = torch.linalg.eigvals(lda_ana[0]).real.min().item() > 0
-    # # clip gradlogL
-    # max_diff_gradlogL = torch.linalg.norm(gradlogL - gradlogL_ana, axis=-1).max()
-    # if max_diff_gradlogL > 1e2: # because for 1e4 it does not work anymore (n_obs=2)
-    #     # print(f"cliping gradlogL as diff gradlogL = {max_diff_gradlogL}")
-    #     min = gradlogL_ana.min()
-    #     max = gradlogL_ana.max()
-    #     gradlogL = gradlogL.clip(min, max)
+    # check if lda_ana is symmetric positive definite
+    # if not, print the eigenvalues that are negative
+    lda_ana_eigs = torch.linalg.eigvals(lda_ana)
+    if ((lda_ana_eigs[:,0].float() < 0).sum() > 0 or (lda_ana_eigs[:,1].float() < 0).sum() > 0):
+        print("lda_ana not psd")
+        print((lda_ana_eigs[:,0].float() < 0).sum(),(lda_ana_eigs[:,1].float() < 0).sum())
 
-    if debug:
-        return (
-            (1 - n_obs) * prior_score + posterior_scores + gradlogL if is_lambda_pos_def else (1 - n_obs) * prior_score + posterior_scores ,
-            logL.cpu().detach(),
-            gradlogL.detach().cpu(),
-            posterior_scores.detach().cpu(),
-            means_posterior_backward.detach().cpu(),
-            sigma_posterior_backward.detach().cpu(),
-            logL_ana.cpu().detach(),
-            gradlogL_ana.detach().cpu(),
-            posterior_scores_ana.detach().cpu(),
-            means_posterior_backward_ana.detach().cpu(),
-            sigma_posterior_backward_ana.detach().cpu(),
-            lda_ana[0].detach().cpu(),
+    posterior_scores_ana = torch.stack(posterior_scores_ana).sum(axis=0)
+    prior_score = prior_score_fn(theta, t)
+
+    if ana:
+        # logL_ana.sum().backward()
+        # gradlogL_ana = theta.grad
+        means_backward_ana_sum = (
+            means_posterior_backward_ana.sum(axis=1) + (1 - n_obs) * mean_prior_backward
         )
+        gradlogL_ana = -((nse.alpha(t) ** 0.5) / (nse.sigma(t) ** 2)) * (
+            means_backward_ana_sum - (torch.linalg.inv(lda_ana[0]) @ eta_ana.mT).mT
+        )
+        return (1 - n_obs) * prior_score + posterior_scores_ana + gradlogL_ana
     else:
-        return (1 - n_obs) * prior_score + posterior_scores + gradlogL
+        means_posterior_backward = torch.stack(means_posterior_backward).permute(1, 0, 2)
+        sigma_posterior_backward = torch.stack(sigmas_posterior_backward).permute(
+            1, 0, 2, 3
+        )
+        sigma_posterior_backward = assure_positive_definitness(sigma_posterior_backward.detach())
+
+        logL, _, lda = log_L(
+            means_posterior_backward,
+            sigma_posterior_backward,
+            mean_prior_backward,
+            sigma_prior_backward,
+        )
+
+        posterior_scores = torch.stack(posterior_scores).sum(axis=0)
+        total_score = (1 - n_obs) * prior_score + posterior_scores
+
+        logL.sum().backward()
+        gradlogL = theta.grad
+
+        # check if lda is symmetric positive definite
+        # if not, print the eigenvalues that are negative and ignore gradlogL
+        lda_eigs = torch.linalg.eigvals(lda)
+        if ((lda_eigs[:,0].float() < 0).sum() > 0 or (lda_eigs[:,1].float() < 0).sum() > 0):
+            print("lda not psd")
+            print((lda_eigs[:,0].float() < 0).sum(),(lda_eigs[:,1].float() < 0).sum())
+        else:
+            total_score = total_score + gradlogL
+
+        means_backward_ana_sum = (
+            means_posterior_backward_ana.sum(axis=1) + (1 - n_obs) * mean_prior_backward
+        )
+        gradlogL_ana = -((nse.alpha(t) ** 0.5) / (nse.sigma(t) ** 2)) * (
+            means_backward_ana_sum - (torch.linalg.inv(lda_ana[0]) @ eta_ana.mT).mT
+        )
+
+        # # clip gradlogL
+        # max = torch.linalg.norm(gradlogL_ana, dim=-1).max()
+        # gradlogL = gradlogL.clip(0, gradlogL_ana.max())
+
+        if debug:
+            return (
+                total_score,
+                gradlogL.detach().cpu(),
+                lda.detach().cpu(),
+                posterior_scores.detach().cpu(),
+                means_posterior_backward.detach().cpu(),
+                sigma_posterior_backward.detach().cpu(),
+                gradlogL_ana.detach().cpu(),
+                lda_ana.detach().cpu(),
+                posterior_scores_ana.detach().cpu(),
+                means_posterior_backward_ana.detach().cpu(),
+                sigma_posterior_backward_ana.detach().cpu(),
+            )
+        else:
+            return (1 - n_obs) * prior_score + posterior_scores + gradlogL
 
 
-def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
+def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", ana=False, debug=False):
     theta_t = torch.randn((nsamples, 2)).to(device)  # (nsamples, 2)
     time_pts = torch.linspace(1, 0, 1000).to(device)  # (ntime_pts,)
     theta_list = [theta_t]
-    logL_list = []
     gradlogL_list = []
+    lda_list = []
     posterior_scores_list = []
     means_posterior_backward_list = []
     sigma_posterior_backward_list = []
-    logL_list_ana = []
     gradlogL_ana_list = []
+    lda_ana_list = []
     posterior_scores_list_ana = []
     means_posterior_backward_list_ana = []
     sigma_posterior_backward_list_ana = []
-    ldas = []
     for i in tqdm(range(len(time_pts) - 1)):
         t = time_pts[i]
         dt = time_pts[i + 1] - t
@@ -283,20 +317,19 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
         if debug:
             (
                 score,
-                logL,
                 gradlogL,
+                lda,
                 posterior_scores,
                 means_posterior_backward,
                 sigma_posterior_backward,
-                logL_ana,
                 gradlogL_ana,
+                lda_ana,
                 posterior_scores_ana,
                 means_posterior_backward_ana,
                 sigma_posterior_backward_ana,
-                lda
             ) = score_fn(theta_t, t, debug=True)
         else:
-            score = score_fn(theta_t, t)
+            score = score_fn(theta_t, t, ana=ana)
         score = score.detach()
 
         drift = f - g * g * score
@@ -307,36 +340,34 @@ def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", debug=False):
             theta_t.detach()
             + drift * dt
             + diffusion * torch.randn_like(theta_t) * torch.abs(dt) ** 0.5
-        ).clip(-3, 3)
+        )
         theta_list.append(theta_t.detach().cpu())
         if debug:
-            logL_list.append(logL)
             gradlogL_list.append(gradlogL)
+            lda_list.append(lda)
             posterior_scores_list.append(posterior_scores)
             means_posterior_backward_list.append(means_posterior_backward)
             sigma_posterior_backward_list.append(sigma_posterior_backward)
-            logL_list_ana.append(logL_ana)
             gradlogL_ana_list.append(gradlogL_ana)
+            lda_ana_list.append(lda_ana)
             posterior_scores_list_ana.append(posterior_scores_ana)
             means_posterior_backward_list_ana.append(means_posterior_backward_ana)
             sigma_posterior_backward_list_ana.append(sigma_posterior_backward_ana)
-            ldas.append(lda)
     theta_list[0] = theta_list[0].detach().cpu()
     if debug:
         return (
             theta_t,
             torch.stack(theta_list),
-            torch.stack(logL_list),
             torch.stack(gradlogL_list),
+            torch.stack(lda_list),
             torch.stack(posterior_scores_list),
             torch.stack(means_posterior_backward_list),
             torch.stack(sigma_posterior_backward_list),
-            torch.stack(logL_list_ana),
             torch.stack(gradlogL_ana_list),
+            torch.stack(lda_ana_list),
             torch.stack(posterior_scores_list_ana),
             torch.stack(means_posterior_backward_list_ana),
             torch.stack(sigma_posterior_backward_list_ana),
-            torch.stack(ldas)
         )
     else:
         return theta_t, theta_list
@@ -354,7 +385,7 @@ if __name__ == "__main__":
 
     N_TRAIN = 10_000
     N_SAMPLES = 4096
-    N_OBS = 2
+    N_OBS = 10
 
     # Task
     task = SBIGaussian2d(prior_type="gaussian")
@@ -366,12 +397,12 @@ if __name__ == "__main__":
     theta_true = torch.FloatTensor([-5, 150])  # true parameters
     x_obs = simulator(theta_true)  # x_obs ~ simulator(theta_true)
     x_obs_100 = torch.cat(
-        [simulator(theta_true).reshape(1, -1) for i in range(100)], dim=0
+        [simulator(theta_true).reshape(1, -1) for _ in range(100)], dim=0
     )
 
     # True posterior: p(theta|x_obs)
     true_posterior = task.true_posterior(x_obs)
-    #true_posterior = task.true_posterior(torch.mean(x_obs_100[:N_OBS], axis=0))
+    true_posterior = task.true_posterior(torch.mean(x_obs_100[:N_OBS], axis=0))
 
     # Train data
     theta_train = task.prior.sample((N_TRAIN,))
@@ -388,12 +419,12 @@ if __name__ == "__main__":
     # # train score network
     # dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
     # score_net = NSE(theta_dim=2, x_dim=2, hidden_features=[128, 256, 128]).cuda()
-    #
+
     # avg_score_net = train(
     #     model=score_net,
     #     dataset=dataset,
     #     loss_fn=NSELoss(score_net),
-    #     n_epochs=2000,
+    #     n_epochs=200,
     #     lr=1e-3,
     #     batch_size=256,
     #     prior_score=False, # learn the prior score via the classifier-free guidance approach
@@ -411,11 +442,6 @@ if __name__ == "__main__":
         @ prior.prior.covariance_matrix
         @ torch.diag(1 / theta_train.std(axis=0))
     )
-    cov_post_ = (
-        torch.diag(1 / theta_train.std(axis=0))
-        @ true_posterior.covariance_matrix
-        @ torch.diag(1 / theta_train.std(axis=0))
-    )
     prior_ = torch.distributions.MultivariateNormal(
         loc=loc_.cuda(), covariance_matrix=cov_.cuda()
     )
@@ -424,8 +450,7 @@ if __name__ == "__main__":
     score_fn = partial(
         diffused_tall_posterior_score,
         prior=prior_, # normalized prior
-        posterior_fn_ana=task.true_posterior,
-        cov_post=cov_post_.cuda(),# analytical posterior
+        posterior_fn_ana=task.true_posterior, # analytical posterior 
         x_obs=x_obs_100[:N_OBS].cuda(), # observations
         x_obs_=x_obs_100_[:N_OBS].cuda(), # normalized observations
         nse=score_net, # trained score network
@@ -439,20 +464,40 @@ if __name__ == "__main__":
     (
         theta_learned,
         all_theta_learned,
-        logL,
         gradlogL,
+        lda,
         posterior_scores,
         means_posterior_backward,
         sigma_posterior_backward,
-        logL_ana,
         gradlogL_ana,
+        lda_ana,
         posterior_scores_ana,
         means_posterior_backward_ana,
         sigma_posterior_backward_ana,
-        ldas
     ) = euler_sde_sampler(
         score_fn, N_SAMPLES, beta=score_net.beta, device="cuda:0", debug=True
     )
+
+    # compute analytical samples only
+    theta_ana, all_theta_ana = euler_sde_sampler(
+        score_fn, N_SAMPLES, beta=score_net.beta, device="cuda:0", ana=True
+    )
+
+    results_dict = {
+        "all_theta_learned": all_theta_learned,
+        "all_theta_ana": all_theta_ana,
+        "gradlogL": gradlogL,
+        "lda": lda,
+        "posterior_scores": posterior_scores,
+        "means_posterior_backward": means_posterior_backward,
+        "sigma_posterior_backward": sigma_posterior_backward,
+        "gradlogL_ana": gradlogL_ana,
+        "lda_ana": lda_ana,
+        "posterior_scores_ana": posterior_scores_ana,
+        "means_posterior_backward_ana": means_posterior_backward_ana,
+        "sigma_posterior_backward_ana": sigma_posterior_backward_ana,
+    }
+    torch.save(results_dict, f"results_dict_n_obs_{N_OBS}_assure_psd_prior.pkl")
 
     # norm of the difference between the learned and analytic quantities
     means_posterior_diff = torch.linalg.norm(
@@ -473,16 +518,17 @@ if __name__ == "__main__":
     s = posterior_scores_diff.mean(dim=0)
     # s = posterior_scores_diff.max(dim=0).values
     s = s - s.min()
-    plt.scatter(*theta_learned.T, label=f"DDGM (n={N_OBS})")#s=s.clip(0, 100))
+    plt.scatter(*theta_learned.T, label=f"DDGM (n={N_OBS})", s=s.clip(0, 100))
     plt.scatter(*true_posterior.sample((N_SAMPLES,)).T, label="True (n=1)", alpha=0.1)
     plt.xlabel("theta_1")
     plt.ylabel("theta_2")
-    #plt.ylim(140, 170)
-    #plt.xlim(10, -10)
+    plt.ylim(140, 170)
+    plt.xlim(10, -10)
     plt.legend()
-    # plt.savefig(f"samples_n_obs_{N_OBS}_clip_gradlogL.png")
-    # plt.clf()
-    plt.show()
+    plt.savefig(f"samples_n_obs_{N_OBS}_assure_psd.png")
+    plt.clf()
+    # plt.show()
+
 
     # # Erreur des score en fonction de la distance a theta true
     # plt.scatter(
@@ -521,30 +567,28 @@ if __name__ == "__main__":
     indices_best_to_worst = torch.argsort(
         torch.linalg.norm(theta_learned - theta_true[None, ...], axis=-1)
     )
-
     ind = indices_best_to_worst[-1]
-        # plt.plot(posterior_scores_diff[:, ind])
-        # plt.show()
+    # # plt.plot(posterior_scores_diff[:, ind])
+    # # plt.show()
 
-        # plt.plot(torch.linalg.norm(all_theta_learned[:, ind], dim=-1))
-        # plt.show()
+    # # plt.plot(torch.linalg.norm(all_theta_learned[:, ind], dim=-1))
+    # # plt.show()
 
-        # index before the norm of the learned theta becomes greater than 4.5
+    # index before the norm of the learned theta becomes greater than 4.5
     ind_diff = (
-        torch.diff(torch.linalg.norm(all_theta_learned[:, ind], axis=-1) > 10).float().argmax()
+        torch.diff(torch.linalg.norm(all_theta_learned[:, ind], axis=-1) > 4.5).float().argmax()
     )
-    #print(ind_diff)
-    ind_range = torch.arange(ind_diff-1, ind_diff + 2)
-        #
-    print(torch.linalg.norm(all_theta_learned[:, ind], axis=-1)[ind_range])
-    print(posterior_scores_diff[ind_range, ind])
-    print(means_posterior_diff[ind_range, ind].max(axis=-1).values)
-    print(sigma_posterior_diff[ind_range, ind].max(axis=-1).values)
-    print(gradlogL_diff[ind_range, ind])
-    print(torch.linalg.eigvals(sigma_posterior_backward[ind_diff, ind]))
+    print(ind_diff)
+    range = torch.arange(ind_diff - 3, ind_diff + 4)
 
-    min_eigvals_lda = torch.linalg.eigvals(ldas).real.min(axis=-1).values
-    plt.plot(min_eigvals_lda.clip(-10000, 10000))
-    plt.yscale('log')
-    #plt.ylabel('Min eigvalue Lambda(t) normalized by max')
-    plt.show()
+    print(torch.linalg.norm(all_theta_learned[:, ind], axis=-1)[range])
+    print(posterior_scores_diff[range, ind])
+    print(means_posterior_diff[range, ind].max(axis=-1).values)
+    print(sigma_posterior_diff[range, ind].max(axis=-1).values)
+    print()
+    print(torch.linalg.norm(gradlogL, axis=-1)[range, ind])
+    print(torch.linalg.norm(gradlogL_ana, axis=-1)[range, ind])
+    print(gradlogL_diff[range, ind])
+    print()
+    print(torch.linalg.eigvals(sigma_posterior_backward[range, ind][:,0,:,:]))
+    print(torch.linalg.eigvals(sigma_posterior_backward_ana[range, ind][:,0,:,:]))
