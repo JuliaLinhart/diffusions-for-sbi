@@ -15,12 +15,12 @@ from torch.autograd.functional import jacobian
 from functools import partialmethod, partial
 from torch.func import jacrev, vmap
 
-def assure_positive_definitness(m):
+def assure_positive_definitness(m, lim_inf=0, lim_sup=1e20):
     L, V = torch.linalg.eig(.5 * (m + m.mT))
     L = L.real
     V = V.real
 
-    return V @ torch.diag_embed(L.abs().clip(1e-4,1e20)) @ torch.linalg.inv(V)
+    return V @ torch.diag_embed(L.abs().clip(lim_inf, lim_sup)) @ torch.linalg.inv(V)
 
 
 class NSE(nn.Module):

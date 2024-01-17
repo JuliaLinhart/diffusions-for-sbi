@@ -28,10 +28,10 @@ class SBIGaussian2d:
         samples_x = MultivariateNormal(loc=theta, covariance_matrix=cov).sample()
         return samples_x
 
-    def true_posterior(self, x_obs):
+    def true_posterior(self, x_obs, return_loc_cov=False):
         cov = torch.FloatTensor([[1, self.rho], [self.rho, 1]])
         if self.prior_type == "uniform":
-            return MultivariateNormal(loc=x_obs, covariance_matrix=cov)
+            return MultivariateNormal(loc=x_obs, covariance_matrix=cov, validate_args=False)
         elif self.prior_type == "gaussian":
             cov_prior = self.prior.prior.covariance_matrix
             cov_posterior = torch.linalg.inv(
@@ -41,7 +41,8 @@ class SBIGaussian2d:
                 torch.linalg.inv(cov) @ x_obs
                 + torch.linalg.inv(cov_prior) @ self.prior.prior.loc
             )
-
-            return MultivariateNormal(
-                loc=loc_posterior, covariance_matrix=cov_posterior
-            )
+            if not return_loc_cov:
+                return MultivariateNormal(
+                    loc=loc_posterior, covariance_matrix=cov_posterior, validate_args=False
+                )
+            return loc_posterior, cov_posterior
