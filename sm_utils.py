@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 
 def train(
-    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False
+    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False, track_loss=False
 ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     ema_model = torch.optim.swa_utils.AveragedModel(model,
@@ -15,6 +15,7 @@ def train(
                                           shuffle=True,)
                                         #   generator=torch.Generator(device=next(model.parameters()).device),)
 
+    losses = []
     with tqdm(range(n_epochs), desc="Training epochs") as tepoch:
         for _ in tepoch:
             total_loss = 0
@@ -37,7 +38,11 @@ def train(
                 total_loss = total_loss + loss.detach().item() * theta.shape[0]
 
             tepoch.set_postfix(loss=total_loss / len(dataset))
-    return ema_model
+        losses.append(total_loss / len(dataset))
+    if track_loss:
+        return ema_model, losses
+    else:
+        return ema_model
 
 # Training with validation and early stopping as in
 # https://github.com/smsharma/mining-for-substructure-lens/blob/master/inference/trainer.py
