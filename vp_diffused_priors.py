@@ -11,16 +11,10 @@ def get_vpdiff_uniform_score(a, b, nse):
     # ---> prior_t: uniform_cst * f_1(theta_t_1) * f_2(theta_t_2)
     # ---> grad log prior_t: (f_1_prime / f_1, f_2_prime / f_2)
     norm = torch.distributions.Normal(
-        loc=torch.zeros((1,), device=a.device), scale=torch.ones((1,), device=a.device)
+        loc=torch.zeros((1,), device=a.device), scale=torch.ones((1,), device=a.device), validate_args=False
     )
-    norm.pdf = lambda x: torch.exp(norm.log_prob(x))
 
-    def vpdiff_uniform_score(theta_t, t):
-        # reshape theta_t
-        thetas = {}
-        for i in range(len(a)):
-            thetas[i] = theta_t[:, i].unsqueeze(1)
-
+    def vpdiff_uniform_score(theta, t):
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t)
         # with _t = theta_0 * scaling_t
         scaling_t = nse.alpha(t) ** 0.5
@@ -29,32 +23,23 @@ def get_vpdiff_uniform_score(a, b, nse):
         # N(theta_t|mu_t, sigma^2_t) = N(mu_t|theta_t, sigma^2_t)
         # int N(theta_t|mu_t, sigma^2_t) dtheta = int N(mu_t|theta_t, sigma^2_t) dmu_t / scaling_t
         # theta in [a, b] -> mu_t in [a, b] * scaling_t
+        f = (norm.cdf((b * scaling_t - theta) / sigma_t) - norm.cdf((a * scaling_t - theta) / sigma_t)) / scaling_t
+        f_prime = -1/sigma_t * (torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t)) - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t)))/ scaling_t
 
-        prior_score_t = {}
-        for i in range(len(a)):
-            f = (
-                norm.cdf((b[i] * scaling_t - thetas[i]) / sigma_t)
-                - norm.cdf((a[i] * scaling_t - thetas[i]) / sigma_t)
-            ) / scaling_t
+        # theta = theta.unsqueeze(1)
+        # f_2 = torch.cumprod(norm.cdf((b * scaling_t - theta) / sigma_t) - norm.cdf((a * scaling_t - theta) / sigma_t), dim=1) / scaling_t
+        # f_prime_2 = -1/sigma_t * (torch.cumprod(torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t)) - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t)), dim=1) / scaling_t)
 
-            # derivative of norm_cdf w.r.t. theta_t
-            f_prime = (
-                -1
-                / (sigma_t)
-                * (
-                    norm.pdf((b[i] * scaling_t - thetas[i]) / sigma_t)
-                    - norm.pdf((a[i] * scaling_t - thetas[i]) / sigma_t)
-                )
-                / scaling_t
-            )
+        # score of diffused prior: grad_t log prior_t (theta_t)
+        prior_score_t = f_prime / (f + 1e-6)
+        # prior_score_t_2 = f_prime_2 / (f_2 + 1e-6)
 
-            # score of diffused prior: grad_t log prior_t (theta_t)
-            prior_score_t[i] = f_prime / (f + 1e-6)  # (batch_size, 1)
-
-        prior_score_t = torch.cat(
-            [ps for ps in prior_score_t.values()], dim=1
-        )  # (batch_size, dim_theta)
-
+        # print(f)
+        # print(f_2.squeeze(1))
+        # print(f_prime)
+        # print(f_prime_2.squeeze(1))
+        # print(prior_score_t)
+        # print(prior_score_t_2.squeeze(1))
         return prior_score_t
 
     return vpdiff_uniform_score
@@ -85,12 +70,12 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
 
 if __name__ == '__main__':
     from nse import NSE
-    from tasks.toy_examples.prior import GaussianPrior
-    theta_t = torch.randn((1000, 2))
-    t = torch.tensor([0.1])
+    from tasks.toy_examples.prior import UniformPrior
+    theta_t = torch.randn((5,2))
+    t = torch.tensor(1)
     nse = NSE(2,2)
-    prior = GaussianPrior()
-    diffused_prior_score = get_vpdiff_gaussian_score(prior.prior.loc, prior.prior.covariance_matrix, nse)
+    prior = UniformPrior()
+    diffused_prior_score = get_vpdiff_uniform_score(prior.low, prior.high, nse)
 
     prior_score_t = diffused_prior_score(theta_t, t)
-    print(prior_score_t.shape)
+    # print(prior_score_t)
