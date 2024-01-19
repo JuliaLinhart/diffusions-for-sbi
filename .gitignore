@@ -4,6 +4,13 @@ __pycache__/
 __init__.py
 .DS_Store
 
-*.pkl
+# *.pkl
 *.pdf
 *.png
+/results/jrnnm/4d/*/euler*/*
+/results/jrnnm/dataset*.pkl
+/results/jrnnm/3d/*/euler*/*
+/results/uniform/*
+/results/gaussian/*
+score_net*.pkl
+*train_losses*.pkl

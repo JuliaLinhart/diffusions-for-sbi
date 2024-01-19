@@ -9,9 +9,9 @@ import torch
 from functools import partial
 from nse import NSE, NSELoss
 from sm_utils import train
-from tasks.jrnnm.summary import summary_JRNMM
+# from tasks.jrnnm.summary import summary_JRNMM
 from tasks.jrnnm.prior import prior_JRNMM
-from tasks.jrnnm.simulator import simulator_JRNMM
+# from tasks.jrnnm.simulator import simulator_JRNMM
 from tqdm import tqdm
 from zuko.nn import MLP
 
@@ -19,7 +19,6 @@ from debug_learned_uniform import diffused_tall_posterior_score, euler_sde_sampl
 from vp_diffused_priors import get_vpdiff_uniform_score
 
 PATH_EXPERIMENT = "results/jrnnm/"
-THETA_DIM = 4  # C, mu, sigma, gain
 
 
 def run_train_sgm(
@@ -37,15 +36,15 @@ def run_train_sgm(
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
     # normalize theta
-    theta_train_norm = (theta_train - theta_train.mean(dim=0)) / theta_train.std(dim=0)
+    theta_train_norm = (theta_train - theta_train_mean) / theta_train_std
     # normalize x
-    x_train = (x_train - x_train.mean(dim=0)) / x_train.std(dim=0)
+    x_train = (x_train - x_train_mean) / x_train_std
     # dataset for dataloader
     data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train.to(device))
 
     # Score network
     score_network = NSE(
-        theta_dim=THETA_DIM,
+        theta_dim=theta_train.shape[-1],
         x_dim=x_train.shape[-1],
         hidden_features=[128, 256, 128],
     ).to(device)
@@ -97,8 +96,10 @@ def run_sample_sgm(
     nsamples,
     steps,  # number of ddim steps
     score_network,
-    theta_train,
-    x_train,
+    theta_train_mean,
+    theta_train_std,
+    x_train_mean,
+    x_train_std,
     prior,
     save_path=PATH_EXPERIMENT,
 ):
@@ -110,11 +111,12 @@ def run_sample_sgm(
     n_obs = context.shape[0]
 
     # normalize context
-    context_norm = (context - x_train.mean(dim=0)) / x_train.std(dim=0)
+    print(context.shape, x_train_mean.shape, x_train_std.shape)
+    context_norm = (context - x_train_mean) / x_train_std
 
     # normalize prior
-    low_norm = (prior.low - theta_train.mean(dim=0)) / theta_train.std(dim=0) * 2
-    high_norm = (prior.high - theta_train.mean(dim=0)) / theta_train.std(dim=0) * 2
+    low_norm = (prior.low - theta_train_mean) / theta_train_std * 2
+    high_norm = (prior.high - theta_train_mean) / theta_train_std * 2
     prior_score_fn_norm = get_vpdiff_uniform_score(low_norm.to(device), high_norm.to(device), score_network.to(device))
 
     # define score function for tall posterior
@@ -144,7 +146,7 @@ def run_sample_sgm(
         means_posterior_backward,
         sigma_posterior_backward,
     ) = euler_sde_sampler(
-        score_fn, nsamples, dim_theta=THETA_DIM, beta=score_network.beta, device=device, debug=True
+        score_fn, nsamples, dim_theta=len(theta_true), beta=score_network.beta, device=device, debug=True
     )
 
     results_dict = {
@@ -158,10 +160,10 @@ def run_sample_sgm(
 
     # unnormalize
     samples = samples.detach().cpu()
-    samples = samples * theta_train.std(dim=0) + theta_train.mean(dim=0)
+    samples = samples * theta_train_std + theta_train_mean
 
     # save  results
-    save_path += f"euler_steps_{steps}_new/"
+    save_path += f"euler_steps_{steps}/"
     os.makedirs(
         save_path,
         exist_ok=True,
@@ -211,12 +213,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_obs", type=int, default=1, help="number of context observations for sampling"
     )
+    parser.add_argument(
+        "--theta_dim", type=int, choices=[3, 4], default=4, help="if 3, fix the gain parameter to 0"
+    )
 
     # Parse Arguments
     args = parser.parse_args()
 
     # Define Experiment Path
-    save_path = PATH_EXPERIMENT + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+    save_path = PATH_EXPERIMENT + f"{args.theta_dim}d/n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
     os.makedirs(save_path, exist_ok=True)
 
     print()
@@ -226,34 +231,50 @@ if __name__ == "__main__":
 
     # SBI Task: prior and simulator
     prior = prior_JRNMM()
-    simulator = partial(simulator_JRNMM, input_parameters=["C", "mu", "sigma", "gain"])
+    input_parameters = ["C", "mu", "sigma"]
+    if args.theta_dim == 4:
+        input_parameters.append("gain")
+    # simulator = partial(simulator_JRNMM, input_parameters=input_parameters)
 
-    # Summary features
-    summary_extractor = summary_JRNMM()
-    # let's use the *log* power spectral density
-    summary_extractor.embedding.net.logscale = True
+    # # Summary features
+    # summary_extractor = summary_JRNMM()
+    # # let's use the *log* power spectral density
+    # summary_extractor.embedding.net.logscale = True
 
-    # Simulate Training Data
-    filename = PATH_EXPERIMENT + f"dataset_n_train_50000.pkl"
-    if os.path.exists(filename):
-        dataset_train = torch.load(filename)
-        theta_train = dataset_train["theta"][: args.n_train]
-        x_train = dataset_train["x"][: args.n_train]
-    else:
-        theta_train = prior.sample((args.n_train,))
-        x_train = simulator(theta_train)
-        x_train = summary_extractor(x_train)  # (n_train, x_dim, 1)
-        x_train = x_train[:, :, 0]  # (n_train, x_dim)
+    # # Simulate Training Data
+    # filename = PATH_EXPERIMENT + f"dataset_n_train_50000.pkl"
+    # if args.theta_dim == 3:
+    #     filename = PATH_EXPERIMENT + f"dataset_n_train_50000_3d.pkl"
+    # if os.path.exists(filename):
+    #     dataset_train = torch.load(filename)
+    #     theta_train = dataset_train["theta"][: args.n_train]
+    #     x_train = dataset_train["x"][: args.n_train]
+    # else:
+    #     theta_train = prior.sample((args.n_train,))
+    #     x_train = simulator(theta_train)
+    #     x_train = summary_extractor(x_train)  # (n_train, x_dim, 1)
+    #     x_train = x_train[:, :, 0]  # (n_train, x_dim)
 
-        dataset_train = {
-            "theta": theta_train, "x": x_train
-        }
-        torch.save(dataset_train, filename)
+    #     dataset_train = {
+    #         "theta": theta_train, "x": x_train
+    #     }
+    #     torch.save(dataset_train, filename)
+    # theta_train_mean = theta_train.mean(dim=0)
+    # theta_train_std = theta_train.std(dim=0)
+    # x_train_mean = x_train.mean(dim=0)
+    # x_train_std = x_train.std(dim=0)
+    # means_stds_dict = {
+    #     "theta_train_mean": theta_train_mean,
+    #     "theta_train_std": theta_train_std,
+    #     "x_train_mean": x_train_mean,
+    #     "x_train_std": x_train_std,
+    # }
+    # torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
 
     if args.run == "train":
         run_fn = run_train_sgm
         kwargs_run = {
-            "data_train": dataset_train,
+            "data_train": {}, #dataset_train,
             "n_epochs": args.n_epochs,
             "batch_size": args.batch_size,
             "lr": args.lr,
@@ -261,22 +282,29 @@ if __name__ == "__main__":
         }
     elif args.run == "sample":
         # Reference parameter and observations
-        theta_true = torch.tensor([135.0, 220.0, 2000.0, 0.0])
+        theta_true = torch.tensor([135.0, 220.0, 2000.0, 0.0])[:args.theta_dim]
         filename = PATH_EXPERIMENT + f"x_obs_100_{theta_true.tolist()}.pkl"
-        if os.path.exists(filename):
-            x_obs_100 = torch.load(filename)
-            context = x_obs_100[:args.n_obs]
-        else:
-            x_obs_100 = torch.cat(
-                [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))], dim=0
-            )
-            torch.save(x_obs_100, filename)
+        # if os.path.exists(filename):
+        x_obs_100 = torch.load(filename)
+        # else:
+        #     x_obs_100 = torch.cat(
+        #         [summary_extractor(simulator(theta_true)).reshape(1, -1) for _ in tqdm(range(100))], dim=0
+        #     )
+        #     torch.save(x_obs_100, filename)
+        context = x_obs_100[:args.n_obs]
 
         # Trained Score network
         score_network = torch.load(
-            save_path + f"score_network_new.pkl",
+            save_path + f"score_network.pkl",
             map_location=torch.device("cpu"),
         )
+
+        # Mean and std of training data
+        means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
+        theta_train_mean = means_stds_dict["theta_train_mean"]
+        theta_train_std = means_stds_dict["theta_train_std"]
+        x_train_mean = means_stds_dict["x_train_mean"]
+        x_train_std = means_stds_dict["x_train_std"]
 
         run_fn = run_sample_sgm
         kwargs_run = {
@@ -285,8 +313,10 @@ if __name__ == "__main__":
             "nsamples": args.nsamples,
             "score_network": score_network,
             "steps": args.steps,
-            "theta_train": theta_train,  # for (un)normalization
-            "x_train": x_train,  # for (un)normalization
+            "theta_train_mean": theta_train_mean,  # for (un)normalization
+            "theta_train_std": theta_train_std,  # for (un)normalization
+            "x_train_mean": x_train_mean,  # for (un)normalization
+            "x_train_std": x_train_std,  # for (un)normalization
             "prior": prior, # for score function
             "save_path": save_path,
         }
@@ -313,7 +343,7 @@ if __name__ == "__main__":
             return executor
 
         # subit job
-        executor = get_executor_marg(f"_{args.run}_lensing_sgm")
+        executor = get_executor_marg(f"_{args.run}_jrnnm_sgm")
         # launch batches
         with executor.batch():
             print("Submitting jobs...", end="", flush=True)
