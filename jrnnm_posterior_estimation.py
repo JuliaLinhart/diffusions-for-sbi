@@ -36,9 +36,9 @@ def run_train_sgm(
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
     # normalize theta
-    theta_train_norm = (theta_train - theta_train_mean) / theta_train_std
+    theta_train_norm = (theta_train - theta_train.mean(dim=0)) / theta_train.std(dim=0)
     # normalize x
-    x_train = (x_train - x_train_mean) / x_train_std
+    x_train = (x_train - x_train.mean(dim=0)) / x_train.std(dim=0)
     # dataset for dataloader
     data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train.to(device))
 
@@ -111,7 +111,6 @@ def run_sample_sgm(
     n_obs = context.shape[0]
 
     # normalize context
-    print(context.shape, x_train_mean.shape, x_train_std.shape)
     context_norm = (context - x_train_mean) / x_train_std
 
     # normalize prior
@@ -230,10 +229,17 @@ if __name__ == "__main__":
     print()
 
     # SBI Task: prior and simulator
-    prior = prior_JRNMM()
+    parameters = [
+        ("C", 10.0, 250.0),
+        ("mu", 50.0, 500.0),
+        ("sigma", 100.0, 5000.0)
+    ]
     input_parameters = ["C", "mu", "sigma"]
     if args.theta_dim == 4:
+        parameters.append(("gain", -20.0, +20.0))
         input_parameters.append("gain")
+
+    prior = prior_JRNMM(parameters=parameters)
     # simulator = partial(simulator_JRNMM, input_parameters=input_parameters)
 
     # # Summary features
@@ -245,10 +251,10 @@ if __name__ == "__main__":
     # filename = PATH_EXPERIMENT + f"dataset_n_train_50000.pkl"
     # if args.theta_dim == 3:
     #     filename = PATH_EXPERIMENT + f"dataset_n_train_50000_3d.pkl"
-    # if os.path.exists(filename):
-    #     dataset_train = torch.load(filename)
-    #     theta_train = dataset_train["theta"][: args.n_train]
-    #     x_train = dataset_train["x"][: args.n_train]
+    # # if os.path.exists(filename):
+    # dataset_train = torch.load(filename)
+    # theta_train = dataset_train["theta"][: args.n_train]
+    # x_train = dataset_train["x"][: args.n_train]
     # else:
     #     theta_train = prior.sample((args.n_train,))
     #     x_train = simulator(theta_train)
