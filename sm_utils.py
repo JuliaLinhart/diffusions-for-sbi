@@ -5,21 +5,22 @@ from tqdm import tqdm
 
 
 def train(
-    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False, track_loss=False
+    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False, track_loss=False, validation_split=0,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     ema_model = torch.optim.swa_utils.AveragedModel(model,
                                                     multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
-    dloader = torch.utils.data.DataLoader(dataset,
-                                          batch_size=batch_size,
-                                          shuffle=True,)
-                                        #   generator=torch.Generator(device=next(model.parameters()).device),)
+    # get train and validation loaders
+    train_loader, val_loader = get_dataloaders(
+        dataset, batch_size=batch_size, validation_split=validation_split
+    )
 
-    losses = []
+    train_losses = []
+    val_losses = []
     with tqdm(range(n_epochs), desc="Training epochs") as tepoch:
         for _ in tepoch:
-            total_loss = 0
-            for data in dloader:
+            train_loss = 0
+            for data in train_loader:
                 # get batch data
                 if len(data) > 1:
                     theta, x, kwargs_sn = get_batch_data(data, prior_score)
@@ -34,13 +35,39 @@ def train(
                 opt.step()
                 ema_model.update_parameters(model)
 
-                # running stats
-                total_loss = total_loss + loss.detach().item() * theta.shape[0]
+                # update loss
+                train_loss += loss.detach().item() * theta.shape[0]  # unnormalized loss
+            train_loss /= len(dataset) * (1 - validation_split)  # normalized loss
+            train_losses.append(train_loss)
 
-            tepoch.set_postfix(loss=total_loss / len(dataset))
-        losses.append(total_loss / len(dataset))
+            # validation loop
+            if val_loader is not None:
+                with torch.no_grad():
+                    val_loss = 0
+                    for data in val_loader:
+                        # get batch data
+                        if len(data) > 1:
+                            theta, x, kwargs_sn = get_batch_data(data, prior_score)
+                            kwargs_sn["x"] = x
+                        else:
+                            theta = data[0]
+                            kwargs_sn = {}
+                        # validation step
+                        loss = loss_fn(theta, **kwargs_sn)
+                        
+                        # update loss
+                        val_loss += (
+                            loss.detach().item() * theta.shape[0]
+                        )  # unnormalized loss
+                    val_loss /= len(dataset) * validation_split  # normalized loss
+                    val_losses.append(val_loss)
+
+                tepoch.set_postfix(train_loss=train_loss, val_loss=val_loss, lr=lr)
+            else:
+                tepoch.set_postfix(train_loss=train_loss, lr=lr)
+
     if track_loss:
-        return ema_model, losses
+        return ema_model, train_losses, val_losses
     else:
         return ema_model
 

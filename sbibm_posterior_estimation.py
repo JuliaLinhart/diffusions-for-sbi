@@ -24,7 +24,8 @@ NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def run_train_sgm(
-    data_train,
+    theta_train,
+    x_train,
     n_epochs,
     batch_size,
     lr,
@@ -36,7 +37,6 @@ def run_train_sgm(
         device = "cuda"
 
     # Prepare training data
-    theta_train, x_train = data_train["theta"], data_train["x"]
     # normalize theta
     theta_train_norm = (theta_train - theta_train.mean(dim=0)) / theta_train.std(dim=0)
     # normalize x
@@ -66,7 +66,7 @@ def run_train_sgm(
     print()
 
     # Train Score Network
-    avg_score_net, train_losses = train(
+    avg_score_net, train_losses, val_losses = train(
         score_network,
         dataset=data_train,
         loss_fn=NSELoss(score_network),
@@ -74,6 +74,7 @@ def run_train_sgm(
         lr=lr,
         batch_size=batch_size,
         track_loss=True,
+        validation_split=0.2,
     )
     score_network = avg_score_net.module
 
@@ -87,7 +88,7 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        train_losses,
+        {"train_losses": train_losses, "val_losses": val_losses},
         save_path + f"train_losses.pkl",
     )
 
@@ -196,7 +197,7 @@ if __name__ == "__main__":
         "--run", type=str, default="train", choices=["train", "sample"], help="run type"
     )
     parser.add_argument(
-        "--n_train", type=int, default=50_000, help="number of training data samples"
+        "--n_train", type=int, default=50_000, help="number of training data samples (1000, 3000, 10000, 30000 in [Geffner et al. 2023])"
     )
     parser.add_argument(
         "--n_epochs", type=int, default=1000, help="number of training epochs"
@@ -205,7 +206,7 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=256, help="batch size for training"
     )
     parser.add_argument(
-        "--lr", type=float, default=1e-3, help="learning rate for training"
+        "--lr", type=float, default=1e-3, help="learning rate for training (1e-3/1e-4 in [Geffner et al. 2023]))"
     )
     parser.add_argument(
         "--nsamples",
@@ -227,7 +228,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Define task path
-    task_path = PATH_EXPERIMENT + f"{args.task}_new/"
+    task_path = PATH_EXPERIMENT + f"{args.task}/"
 
     # Define Experiment Path
     save_path = task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
@@ -246,6 +247,7 @@ if __name__ == "__main__":
     # Simulate Training Data
     filename = task_path + f"dataset_n_train_50000.pkl"
     if os.path.exists(filename):
+        print(f"Loading training data from {filename}")
         dataset_train = torch.load(filename)
         theta_train = dataset_train["theta"][: args.n_train]
         x_train = dataset_train["x"][: args.n_train]
@@ -257,6 +259,9 @@ if __name__ == "__main__":
             "theta": theta_train, "x": x_train
         }
         torch.save(dataset_train, filename)
+    # extract training data for given n_train
+    theta_train, x_train = theta_train[: args.n_train], x_train[: args.n_train]
+    # compute mean and std of training data
     theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(dim=0)
     x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
     means_stds_dict = {
@@ -270,7 +275,8 @@ if __name__ == "__main__":
     if args.run == "train":
         run_fn = run_train_sgm
         kwargs_run = {
-            "data_train": dataset_train,
+            "theta_train": theta_train,
+            "x_train": x_train,
             "n_epochs": args.n_epochs,
             "batch_size": args.batch_size,
             "lr": args.lr,
