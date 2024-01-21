@@ -15,6 +15,7 @@ from sm_utils import train
 from tqdm import tqdm
 from zuko.nn import MLP
 
+from tasks.sbibm.data_generators import get_task
 from debug_learned_gaussian import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_gaussian_score
 
@@ -226,7 +227,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Define task path
-    task_path = PATH_EXPERIMENT + f"{args.task}/"
+    task_path = PATH_EXPERIMENT + f"{args.task}_new/"
 
     # Define Experiment Path
     save_path = task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
@@ -238,27 +239,7 @@ if __name__ == "__main__":
     print()
 
     # SBI Task: prior and simulator
-    # change tasks to match [Geffner 2023]
-    if args.task == "gaussian_mixture":
-        task = sbibm.get_task("gaussian_mixture", dim=10)
-        task.prior_dist = pyro.distributions.MultivariateNormal(
-            torch.zeros(10), torch.eye(10)
-        )
-        task.simulator_params = {
-            "mixture_locs_factor": torch.tensor([1.0, 1.0]),
-            "mixture_scales": torch.tensor([2.25, 1/9]),
-            "mixture_weights": torch.tensor([0.5, 0.5]),
-        }
-    elif args.task == "gaussian_linear":
-        task = sbibm.get_task("gaussian_linear", prior_scale=1.0)
-        # Σ is a diagonal matrix with elements increasing linearly from 0.6 to 1.4
-        cov = torch.diag(torch.linspace(0.6, 1.4, 10))
-        task.simulator_params = {
-            "precision_matrix": torch.inverse(cov),
-        }
-    else:
-        # no changes for lotka_volterra and sir
-        task = sbibm.get_task(args.task)
+    task = get_task(args.task)
     prior = task.get_prior()
     simulator = task.get_simulator()
 
@@ -276,10 +257,8 @@ if __name__ == "__main__":
             "theta": theta_train, "x": x_train
         }
         torch.save(dataset_train, filename)
-    theta_train_mean = theta_train.mean(dim=0)
-    theta_train_std = theta_train.std(dim=0)
-    x_train_mean = x_train.mean(dim=0)
-    x_train_std = x_train.std(dim=0)
+    theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(dim=0)
+    x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
     means_stds_dict = {
         "theta_train_mean": theta_train_mean,
         "theta_train_std": theta_train_std,
