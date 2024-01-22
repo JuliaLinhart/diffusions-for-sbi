@@ -64,7 +64,7 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
     # score of diffused prior: grad_t log prior_t (theta_t)
     # for Gaussian prior p(theta) = N(theta | mean, cov)
 
-    def vpdiff_gaussian_score(theta, t):
+    def vpdiff_gaussian_score(theta, t, **kwargs):
 
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t I)
         # with mu_t = theta * scaling_t
@@ -75,7 +75,7 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
         # p_t(theta_t) = int p_{t|0}(theta_t|theta) p(theta)dtheta
         # = N(theta_t | scaling_t * mean, sigma^2_t I + scaling_t^2 * cov)
         loc=scaling_t * mean
-        covariance_matrix=sigma_t**2 * torch.eye(2, device=mean.device) + scaling_t**2 * cov
+        covariance_matrix = (sigma_t**2) * torch.eye(2, device=mean.device) + scaling_t**2 * cov
 
         # grad_theta_t log N(theta_t | loc, cov) = - cov^{-1} * (theta_t - loc)
         prior_score_t = -(theta - loc) @ torch.linalg.inv(covariance_matrix)

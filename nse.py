@@ -16,11 +16,13 @@ from functools import partialmethod, partial
 from torch.func import jacrev, vmap
 
 def assure_positive_definitness(m, lim_inf=0, lim_sup=1e20):
-    L, V = torch.linalg.eig(.5 * (m + m.mT))
-    L = L.real
-    V = V.real
+    if (lim_inf is not None) and (lim_sup is not None):
+        L, V = torch.linalg.eig(.5 * (m + m.mT))
+        L = L.real
+        V = V.real
 
-    return V @ torch.diag_embed(L.abs().clip(lim_inf, lim_sup)) @ torch.linalg.inv(V)
+        return V @ torch.diag_embed(L.abs().clip(lim_inf, lim_sup)) @ torch.linalg.inv(V)
+    return m
 
 
 class NSE(nn.Module):
