@@ -22,6 +22,9 @@ from vp_diffused_priors import get_vpdiff_gaussian_score
 PATH_EXPERIMENT = "results/sbibm/"
 NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
+N_TRAIN_LIST = [10000, 30000] #1000, 3000, 
+N_OBS_LIST = [1, 8, 14, 22, 30]
+
 
 def run_train_sgm(
     theta_train,
@@ -40,9 +43,11 @@ def run_train_sgm(
     # normalize theta
     theta_train_norm = (theta_train - theta_train.mean(dim=0)) / theta_train.std(dim=0)
     # normalize x
-    x_train = (x_train - x_train.mean(dim=0)) / x_train.std(dim=0)
+    x_train_norm = (x_train - x_train.mean(dim=0)) / x_train.std(dim=0)
+    # replace nan by 0 (due to std in sir for n_train = 1000)
+    x_train_norm = torch.nan_to_num(x_train_norm, nan=0.0, posinf=0.0, neginf=0.0)
     # dataset for dataloader
-    data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train.to(device))
+    data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train_norm.to(device))
 
     # Score network
     score_network = NSE(
@@ -115,6 +120,8 @@ def run_sample_sgm(
 
     # normalize context
     context_norm = (context - x_train_mean) / x_train_std
+    # replace nan by 0 (due to std in sir for n_train = 1000)
+    context_norm = torch.nan_to_num(context_norm, nan=0.0, posinf=0.0, neginf=0.0)
 
     # normalize prior
     loc_norm = (prior.loc - theta_train_mean) / theta_train_std
@@ -133,7 +140,7 @@ def run_sample_sgm(
 
     print("=======================================================================")
     print(
-        f"Sampling from the approximate posterior fir observation {num_obs}: nsamples = {nsamples}."
+        f"Sampling from the approximate posterior for observation {num_obs}: n_obs = {n_obs}, nsamples = {nsamples}."
     )
     print(f"======================================================================")
     print()
@@ -194,7 +201,7 @@ if __name__ == "__main__":
         "--task", type=str, default="gaussian_linear", choices=["gaussian_linear", "gaussian_mixture", "lotka_volterra", "sir"], help="task name"
     )
     parser.add_argument(
-        "--run", type=str, default="train", choices=["train", "sample"], help="run type"
+        "--run", type=str, default="train", choices=["train", "sample", "sample_all"], help="run type"
     )
     parser.add_argument(
         "--n_train", type=int, default=50_000, help="number of training data samples (1000, 3000, 10000, 30000 in [Geffner et al. 2023])"
@@ -230,133 +237,117 @@ if __name__ == "__main__":
     # Define task path
     task_path = PATH_EXPERIMENT + f"{args.task}/"
 
-    # Define Experiment Path
-    save_path = task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
-    os.makedirs(save_path, exist_ok=True)
+    def run(n_train=args.n_train, num_obs=args.num_obs, n_obs=args.n_obs, run_type=args.run):
 
-    print()
-    print("save_path: ", save_path)
-    print("CUDA available: ", torch.cuda.is_available())
-    print()
+        # Define Experiment Path
+        save_path = task_path + f"n_train_{n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+        os.makedirs(save_path, exist_ok=True)
 
-    # SBI Task: prior and simulator
-    task = get_task(args.task)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
+        print()
+        print("save_path: ", save_path)
+        print("CUDA available: ", torch.cuda.is_available())
+        print()
 
-    # Simulate Training Data
-    filename = task_path + f"dataset_n_train_50000.pkl"
-    if os.path.exists(filename):
-        print(f"Loading training data from {filename}")
-        dataset_train = torch.load(filename)
-        theta_train = dataset_train["theta"][: args.n_train]
-        x_train = dataset_train["x"][: args.n_train]
-    else:
-        theta_train = prior(args.n_train)
-        x_train = simulator(theta_train)
+        # SBI Task: prior and simulator
+        task = get_task(args.task)
+        prior = task.get_prior()
+        simulator = task.get_simulator()
 
-        dataset_train = {
-            "theta": theta_train, "x": x_train
-        }
-        torch.save(dataset_train, filename)
-    # extract training data for given n_train
-    theta_train, x_train = theta_train[: args.n_train], x_train[: args.n_train]
-    # compute mean and std of training data
-    theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(dim=0)
-    x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
-    means_stds_dict = {
-        "theta_train_mean": theta_train_mean,
-        "theta_train_std": theta_train_std,
-        "x_train_mean": x_train_mean,
-        "x_train_std": x_train_std,
-    }
-    torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
-
-    if args.run == "train":
-        run_fn = run_train_sgm
-        kwargs_run = {
-            "theta_train": theta_train,
-            "x_train": x_train,
-            "n_epochs": args.n_epochs,
-            "batch_size": args.batch_size,
-            "lr": args.lr,
-            "save_path": save_path,
-        }
-    elif args.run == "sample":
-        # Reference parameter and observations
-        observation_list = [
-            task.get_observation(num_observation=n) for n in NUM_OBSERVATION_LIST
-        ]
-        theta_true_list = [
-            task.get_true_parameters(num_observation=n) for n in NUM_OBSERVATION_LIST
-        ]
-        
-        theta_true = theta_true_list[args.num_obs]
-        x_obs = observation_list[args.num_obs]
-
-        filename = task_path + f"x_obs_100_num_{args.num_obs}.pkl"
+        # Simulate Training Data
+        filename = task_path + f"dataset_n_train_50000.pkl"
         if os.path.exists(filename):
-            x_obs_100 = torch.load(filename)
+            print(f"Loading training data from {filename}")
+            dataset_train = torch.load(filename)
+            theta_train = dataset_train["theta"][: n_train]
+            x_train = dataset_train["x"][: n_train]
         else:
-            x_obs_100 = torch.cat(
-                [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))], dim=0
-            )
-            torch.save(x_obs_100, filename)
-        context = x_obs_100[:args.n_obs]
+            theta_train = prior(n_train)
+            x_train = simulator(theta_train)
 
-        # Trained Score network
-        score_network = torch.load(
-            save_path + f"score_network.pkl",
-            map_location=torch.device("cpu"),
-        )
-
-        # Mean and std of training data
-        means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
-        theta_train_mean = means_stds_dict["theta_train_mean"]
-        theta_train_std = means_stds_dict["theta_train_std"]
-        x_train_mean = means_stds_dict["x_train_mean"]
-        x_train_std = means_stds_dict["x_train_std"]
-
-        run_fn = run_sample_sgm
-        kwargs_run = {
-            "num_obs": args.num_obs,
-            "context": context,
-            "nsamples": args.nsamples,
-            "score_network": score_network,
-            "steps": args.steps,
-            "theta_train_mean": theta_train_mean,  # for (un)normalization
-            "theta_train_std": theta_train_std,  # for (un)normalization
-            "x_train_mean": x_train_mean,  # for (un)normalization
-            "x_train_std": x_train_std,  # for (un)normalization
-            "prior": task.prior_dist, # for score function
-            "save_path": save_path,
+            dataset_train = {
+                "theta": theta_train, "x": x_train
+            }
+            torch.save(dataset_train, filename)
+        # extract training data for given n_train
+        theta_train, x_train = theta_train[: n_train], x_train[: n_train]
+        # compute mean and std of training data
+        theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(dim=0)
+        x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
+        means_stds_dict = {
+            "theta_train_mean": theta_train_mean,
+            "theta_train_std": theta_train_std,
+            "x_train_mean": x_train_mean,
+            "x_train_std": x_train_std,
         }
+        torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
 
-    # if not args.submitit:
-    run_fn(**kwargs_run)
-    # else:
-    #     import submitit
+        if run_type == "train":
+            run_fn = run_train_sgm
+            kwargs_run = {
+                "theta_train": theta_train,
+                "x_train": x_train,
+                "n_epochs": args.n_epochs,
+                "batch_size": args.batch_size,
+                "lr": args.lr,
+                "save_path": save_path,
+            }
+        elif run_type == "sample":
+            # Reference parameter and observations
+            observation_list = [
+                task.get_observation(num_observation=n) for n in NUM_OBSERVATION_LIST
+            ]
+            theta_true_list = [
+                task.get_true_parameters(num_observation=n) for n in NUM_OBSERVATION_LIST
+            ]
+            
+            theta_true = theta_true_list[num_obs-1]
+            x_obs = observation_list[num_obs-1]
 
-    #     # function for submitit
-    #     def get_executor_marg(job_name, timeout_hour=60, n_cpus=40):
-    #         executor = submitit.AutoExecutor(job_name)
-    #         executor.update_parameters(
-    #             timeout_min=180,
-    #             slurm_job_name=job_name,
-    #             slurm_time=f"{timeout_hour}:00:00",
-    #             slurm_additional_parameters={
-    #                 "ntasks": 1,
-    #                 "cpus-per-task": n_cpus,
-    #                 "distribution": "block:block",
-    #                 # "partition": "parietal",
-    #             },
-    #         )
-    #         return executor
+            filename = task_path + f"x_obs_100_num_{num_obs}.pkl"
+            if os.path.exists(filename):
+                x_obs_100 = torch.load(filename)
+            else:
+                x_obs_100 = torch.cat(
+                    [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))], dim=0
+                )
+                torch.save(x_obs_100, filename)
+            context = x_obs_100[:n_obs]
 
-    #     # subit job
-    #     executor = get_executor_marg(f"_{args.run}_jrnnm_sgm")
-    #     # launch batches
-    #     with executor.batch():
-    #         print("Submitting jobs...", end="", flush=True)
-    #         tasks = []
-    #         tasks.append(executor.submit(run_fn, **kwargs_run))
+            # Trained Score network
+            score_network = torch.load(
+                save_path + f"score_network.pkl",
+                map_location=torch.device("cpu"),
+            )
+
+            # Mean and std of training data
+            means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
+            theta_train_mean = means_stds_dict["theta_train_mean"]
+            theta_train_std = means_stds_dict["theta_train_std"]
+            x_train_mean = means_stds_dict["x_train_mean"]
+            x_train_std = means_stds_dict["x_train_std"]
+
+            run_fn = run_sample_sgm
+            kwargs_run = {
+                "num_obs": num_obs,
+                "context": context,
+                "nsamples": args.nsamples,
+                "score_network": score_network,
+                "steps": args.steps,
+                "theta_train_mean": theta_train_mean,  # for (un)normalization
+                "theta_train_std": theta_train_std,  # for (un)normalization
+                "x_train_mean": x_train_mean,  # for (un)normalization
+                "x_train_std": x_train_std,  # for (un)normalization
+                "prior": task.prior_dist, # for score function
+                "save_path": save_path,
+            }
+                    
+        run_fn(**kwargs_run)
+
+    if args.run == "sample_all":
+        for n_train in N_TRAIN_LIST:
+            for num_obs in NUM_OBSERVATION_LIST:
+                for n_obs in N_OBS_LIST:
+                    run(n_train=n_train, num_obs=num_obs, n_obs=n_obs, run_type="sample")
+    else:
+        run()
+    

@@ -4,11 +4,13 @@ import torch
 import pyro
 import sbibm
 
-TASKS = ["gaussian_linear", "gaussian_mixtur", "sir", "lotka_volterra"]
-
 def get_task(task_name):
     if task_name == "gaussian_linear":
         task = sbibm.get_task("gaussian_linear", prior_scale=1.0)
+        for i,s in enumerate(task.observation_seeds):
+            torch.manual_seed(s)
+            true_parameters = task.get_prior()(1)
+            task._save_true_parameters(i+1, true_parameters)
         # Σ is a diagonal matrix with elements increasing linearly from 0.6 to 1.4
         cov = torch.diag(torch.linspace(0.6, 1.4, 10))
         task.simulator_params = {
@@ -20,6 +22,10 @@ def get_task(task_name):
         task.prior_dist = pyro.distributions.MultivariateNormal(
             torch.zeros(10), torch.eye(10)
         )
+        for i,s in enumerate(task.observation_seeds):
+            torch.manual_seed(s)
+            true_parameters = task.get_prior()(1)
+            task._save_true_parameters(i+1, true_parameters)
         task.simulator_params = {
             "mixture_locs_factor": torch.tensor([1.0, 1.0]),
             "mixture_scales": torch.tensor([2.25, 1/9]),

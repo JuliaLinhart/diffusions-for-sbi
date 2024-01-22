@@ -19,6 +19,7 @@ from debug_learned_uniform import diffused_tall_posterior_score, euler_sde_sampl
 from vp_diffused_priors import get_vpdiff_uniform_score
 
 PATH_EXPERIMENT = "results/jrnnm/"
+N_OBS_LIST = [1, 8, 14, 22, 30]
 
 
 def run_train_sgm(
@@ -64,7 +65,7 @@ def run_train_sgm(
     print()
 
     # Train Score Network
-    avg_score_net, train_losses = train(
+    avg_score_net, train_losses, val_losses = train(
         score_network,
         dataset=data_train,
         loss_fn=NSELoss(score_network),
@@ -72,6 +73,7 @@ def run_train_sgm(
         lr=lr,
         batch_size=batch_size,
         track_loss=True,
+        validation_split=0.1
     )
     score_network = avg_score_net.module
 
@@ -85,7 +87,7 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        train_losses,
+        {"train_losses": train_losses, "val_losses": val_losses},
         save_path + f"train_losses.pkl",
     )
 
@@ -128,7 +130,7 @@ def run_sample_sgm(
 
     print("=======================================================================")
     print(
-        f"Sampling from the approximate posterior at {theta_true}: nsamples = {nsamples}."
+        f"Sampling from the approximate posterior at {theta_true}: n_obs = {n_obs}, nsamples = {nsamples}."
     )
     print(f"======================================================================")
     print()
@@ -186,7 +188,7 @@ if __name__ == "__main__":
         help="whether to use submitit for running the job",
     )
     parser.add_argument(
-        "--run", type=str, default="train", choices=["train", "sample"], help="run type"
+        "--run", type=str, default="train", choices=["train", "sample", "sample_all"], help="run type"
     )
     parser.add_argument(
         "--n_train", type=int, default=50_000, help="number of training data samples"
@@ -208,6 +210,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--steps", type=int, default=1000, help="number of steps for ddim sampler"
+    )
+    parser.add_argument(
+        "--gain", type=float, default=0.0, help="ground truth gain parameter for simulator"
     )
     parser.add_argument(
         "--n_obs", type=int, default=1, help="number of context observations for sampling"
@@ -247,14 +252,15 @@ if __name__ == "__main__":
     # # let's use the *log* power spectral density
     # summary_extractor.embedding.net.logscale = True
 
-    # # Simulate Training Data
-    # filename = PATH_EXPERIMENT + f"dataset_n_train_50000.pkl"
-    # if args.theta_dim == 3:
-    #     filename = PATH_EXPERIMENT + f"dataset_n_train_50000_3d.pkl"
-    # # if os.path.exists(filename):
-    # dataset_train = torch.load(filename)
-    # theta_train = dataset_train["theta"][: args.n_train]
-    # x_train = dataset_train["x"][: args.n_train]
+    # Simulate Training Data
+    filename = PATH_EXPERIMENT + f"dataset_n_train_50000.pkl"
+    if args.theta_dim == 3:
+        filename = PATH_EXPERIMENT + f"dataset_n_train_50000_3d.pkl"
+    # if os.path.exists(filename):
+    dataset_train = torch.load(filename)
+    theta_train = dataset_train["theta"][: args.n_train]
+    x_train = dataset_train["x"][: args.n_train]
+    print(theta_train.shape, x_train.shape)
     # else:
     #     theta_train = prior.sample((args.n_train,))
     #     x_train = simulator(theta_train)
@@ -265,30 +271,31 @@ if __name__ == "__main__":
     #         "theta": theta_train, "x": x_train
     #     }
     #     torch.save(dataset_train, filename)
-    # theta_train_mean = theta_train.mean(dim=0)
-    # theta_train_std = theta_train.std(dim=0)
-    # x_train_mean = x_train.mean(dim=0)
-    # x_train_std = x_train.std(dim=0)
-    # means_stds_dict = {
-    #     "theta_train_mean": theta_train_mean,
-    #     "theta_train_std": theta_train_std,
-    #     "x_train_mean": x_train_mean,
-    #     "x_train_std": x_train_std,
-    # }
-    # torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
+    theta_train_mean = theta_train.mean(dim=0)
+    theta_train_std = theta_train.std(dim=0)
+    x_train_mean = x_train.mean(dim=0)
+    x_train_std = x_train.std(dim=0)
+    means_stds_dict = {
+        "theta_train_mean": theta_train_mean,
+        "theta_train_std": theta_train_std,
+        "x_train_mean": x_train_mean,
+        "x_train_std": x_train_std,
+    }
+    torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
 
     if args.run == "train":
         run_fn = run_train_sgm
         kwargs_run = {
-            "data_train": {}, #dataset_train,
+            "data_train": dataset_train,
             "n_epochs": args.n_epochs,
             "batch_size": args.batch_size,
             "lr": args.lr,
             "save_path": save_path,
         }
-    elif args.run == "sample":
+        run_fn(**kwargs_run)
+    elif args.run in ["sample", "sample_all"]:
         # Reference parameter and observations
-        theta_true = torch.tensor([135.0, 220.0, 2000.0, 0.0])[:args.theta_dim]
+        theta_true = torch.tensor([135.0, 220.0, 2000.0, args.gain])[:args.theta_dim]
         filename = PATH_EXPERIMENT + f"x_obs_100_{theta_true.tolist()}.pkl"
         # if os.path.exists(filename):
         x_obs_100 = torch.load(filename)
@@ -297,8 +304,6 @@ if __name__ == "__main__":
         #         [summary_extractor(simulator(theta_true)).reshape(1, -1) for _ in tqdm(range(100))], dim=0
         #     )
         #     torch.save(x_obs_100, filename)
-        context = x_obs_100[:args.n_obs]
-
         # Trained Score network
         score_network = torch.load(
             save_path + f"score_network.pkl",
@@ -312,46 +317,54 @@ if __name__ == "__main__":
         x_train_mean = means_stds_dict["x_train_mean"]
         x_train_std = means_stds_dict["x_train_std"]
 
-        run_fn = run_sample_sgm
-        kwargs_run = {
-            "theta_true": theta_true,
-            "context": context,
-            "nsamples": args.nsamples,
-            "score_network": score_network,
-            "steps": args.steps,
-            "theta_train_mean": theta_train_mean,  # for (un)normalization
-            "theta_train_std": theta_train_std,  # for (un)normalization
-            "x_train_mean": x_train_mean,  # for (un)normalization
-            "x_train_std": x_train_std,  # for (un)normalization
-            "prior": prior, # for score function
-            "save_path": save_path,
-        }
+        def sample_fn(n_obs=args.n_obs): 
+            run_fn = run_sample_sgm
+            kwargs_run = {
+                "theta_true": theta_true,
+                "context": x_obs_100[:n_obs],
+                "nsamples": args.nsamples,
+                "score_network": score_network,
+                "steps": args.steps,
+                "theta_train_mean": theta_train_mean,  # for (un)normalization
+                "theta_train_std": theta_train_std,  # for (un)normalization
+                "x_train_mean": x_train_mean,  # for (un)normalization
+                "x_train_std": x_train_std,  # for (un)normalization
+                "prior": prior, # for score function
+                "save_path": save_path,
+            }
+            run_fn(**kwargs_run)
+        if args.run == "sample_all":
+            for n_obs in N_OBS_LIST:
+                sample_fn(n_obs)
+        else:
+            sample_fn()
+        
 
-    if not args.submitit:
-        run_fn(**kwargs_run)
-    else:
-        import submitit
+    # if not args.submitit:
+    #     run_fn(**kwargs_run)
+    # else:
+    #     import submitit
 
-        # function for submitit
-        def get_executor_marg(job_name, timeout_hour=60, n_cpus=40):
-            executor = submitit.AutoExecutor(job_name)
-            executor.update_parameters(
-                timeout_min=180,
-                slurm_job_name=job_name,
-                slurm_time=f"{timeout_hour}:00:00",
-                slurm_additional_parameters={
-                    "ntasks": 1,
-                    "cpus-per-task": n_cpus,
-                    "distribution": "block:block",
-                    # "partition": "parietal",
-                },
-            )
-            return executor
+    #     # function for submitit
+    #     def get_executor_marg(job_name, timeout_hour=60, n_cpus=40):
+    #         executor = submitit.AutoExecutor(job_name)
+    #         executor.update_parameters(
+    #             timeout_min=180,
+    #             slurm_job_name=job_name,
+    #             slurm_time=f"{timeout_hour}:00:00",
+    #             slurm_additional_parameters={
+    #                 "ntasks": 1,
+    #                 "cpus-per-task": n_cpus,
+    #                 "distribution": "block:block",
+    #                 # "partition": "parietal",
+    #             },
+    #         )
+    #         return executor
 
-        # subit job
-        executor = get_executor_marg(f"_{args.run}_jrnnm_sgm")
-        # launch batches
-        with executor.batch():
-            print("Submitting jobs...", end="", flush=True)
-            tasks = []
-            tasks.append(executor.submit(run_fn, **kwargs_run))
+    #     # subit job
+    #     executor = get_executor_marg(f"_{args.run}_jrnnm_sgm")
+    #     # launch batches
+    #     with executor.batch():
+    #         print("Submitting jobs...", end="", flush=True)
+    #         tasks = []
+    #         tasks.append(executor.submit(run_fn, **kwargs_run))
