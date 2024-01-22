@@ -4,13 +4,29 @@ from matplotlib import cm
 import pandas as pd
 
 
+def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
+    r"""
+    Power of a matrix using Eigen Decomposition.
+    Args:
+        matrix: matrix
+        p: power
+    Returns:
+        Power of a matrix
+    """
+    L, V = torch.linalg.eig(matrix)
+    L = L.real
+    V = V.real
+    return V @ torch.diag_embed(L.pow(p)) @ torch.linalg.inv(V)
+
+
 def gaussien_wasserstein(X1, X2):
     mean1 = torch.mean(X1, dim=1)
     mean2 = torch.mean(X2, dim=1)
     cov1 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X1)
+    sqrtcov1 = _matrix_pow(cov1, .5)
     cov2 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X2)
-    return torch.linalg.norm(mean1 - mean2, dim=-1)**2 + torch.linalg.matrix_norm(cov1 - cov2, dim=(-2, -1))**2
-
+    covterm = torch.func.vmap(torch.trace)(cov1 + cov2 - 2 * _matrix_pow(sqrtcov1 @ cov2 @ sqrtcov1, .5))
+    return  (1*torch.linalg.norm(mean1 - mean2, dim=-1)**2 + 1*covterm)**.5
 
 
 if __name__ == '__main__':
