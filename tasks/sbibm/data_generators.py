@@ -8,6 +8,9 @@ def get_task(task_name):
     if task_name == "gaussian_linear":
         task = sbibm.get_task("gaussian_linear", prior_scale=1.0)
         for i,s in enumerate(task.observation_seeds):
+            # if i == 5:
+            #     s = 1000020
+            #     task.observation_seeds[i] = s
             torch.manual_seed(s)
             true_parameters = task.get_prior()(1)
             task._save_true_parameters(i+1, true_parameters)

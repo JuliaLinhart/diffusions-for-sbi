@@ -1,6 +1,14 @@
 import pandas as pd
 import seaborn as sns
+import matplotlib.pyplot as plt
+from lampe.plots import corner
 
+
+def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
+    fig = None
+    for s, l, c in zip(samples_list, legends, colors):
+        fig = corner(s, legend=l, color=c, figure=fig, smooth=2, **kwargs)
+        plt.suptitle(title)
 
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_2d(

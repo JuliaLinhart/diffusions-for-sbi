@@ -13,13 +13,19 @@ from sm_utils import train
 from tasks.jrnnm.prior import prior_JRNMM
 # from tasks.jrnnm.simulator import simulator_JRNMM
 from tqdm import tqdm
+from torch.func import vmap
 from zuko.nn import MLP
 
-from debug_learned_uniform import diffused_tall_posterior_score, euler_sde_sampler
+# from debug_learned_uniform import diffused_tall_posterior_score, euler_sde_sampler
+from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_uniform_score
+
+# time
+import time
 
 PATH_EXPERIMENT = "results/jrnnm/"
 N_OBS_LIST = [1, 8, 14, 22, 30]
+COV_MODES = ["GAUSS", "JAC", "GAUSS_clip"]
 
 
 def run_train_sgm(
@@ -103,6 +109,8 @@ def run_sample_sgm(
     x_train_mean,
     x_train_std,
     prior,
+    cov_mode,
+    langevin,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -120,44 +128,105 @@ def run_sample_sgm(
     high_norm = (prior.high - theta_train_mean) / theta_train_std * 2
     prior_score_fn_norm = get_vpdiff_uniform_score(low_norm.to(device), high_norm.to(device), score_network.to(device))
 
-    # define score function for tall posterior
-    score_fn = partial(
-        diffused_tall_posterior_score,
-        prior_score_fn=prior_score_fn_norm,
-        x_obs=context_norm.to(device),
-        nse=score_network.to(device),
-    )
-
     print("=======================================================================")
     print(
         f"Sampling from the approximate posterior at {theta_true}: n_obs = {n_obs}, nsamples = {nsamples}."
     )
     print(f"======================================================================")
-    print()
-    print(f"Using EULER sampler.")
-    print()
+    if langevin:
 
-    # sample from tall posterior
-    (
-        samples,
-        all_samples,
-        gradlogL,
-        lda,
-        posterior_scores,
-        means_posterior_backward,
-        sigma_posterior_backward,
-    ) = euler_sde_sampler(
-        score_fn, nsamples, dim_theta=len(theta_true), beta=score_network.beta, device=device, debug=True
-    )
+        print()
+        print(f"Using LANGEVIN sampler.")
+        print()
+        start_time = time.time()
+        samples = score_network.predictor_corrector((nsamples,),
+                                                x=context_norm.to(device),
+                                                steps=400,
+                                                prior_score_fun=prior_score_fn_norm,
+                                                eta=1,
+                                                corrector_lda=0,
+                                                n_steps=5,
+                                                r=.5,
+                                                predictor_type='id',
+                                                verbose=True).cpu()
+        time_elapsed = time.time() - start_time
+        results_dict = None
 
-    results_dict = {
-        "all_theta_learned": all_samples,
-        "gradlogL": gradlogL,
-        "lda": lda,
-        "posterior_scores": posterior_scores,
-        "means_posterior_backward": means_posterior_backward,
-        "sigma_posterior_backward": sigma_posterior_backward,
-    }
+        # save  path
+        save_path += f"langevin_steps_400_5/"
+        samples_filename = save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}.pkl"
+        time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}.pkl"
+
+    else:
+        print()
+        print(f"Using EULER sampler.")
+        print()
+        # estimate cov 
+        # start_time = time.time()
+        cov_est = vmap(lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=1),
+                    randomness='different')(context_norm.to(device))
+
+        cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
+        # time_cov_est = time.time() - start_time
+
+        # # define score function for tall posterior
+        # score_fn = partial(
+        #     diffused_tall_posterior_score,
+        #     prior_score_fn=prior_score_fn_norm,
+        #     x_obs=context_norm.to(device),
+        #     nse=score_network.to(device),
+        # )
+
+        if cov_mode == "GAUSS":
+            warmup = 0.5
+        else:
+            warmup = 0.5
+        score_fn = partial(
+            diffused_tall_posterior_score,
+            prior_type="uniform",
+            prior=None,  # no need for tweedie prior
+            prior_score_fn=prior_score_fn_norm,  # analytical prior score function
+            x_obs=context_norm.to(device),  # observations
+            nse=score_network,  # trained score network
+            cov_mode=cov_mode if cov_mode in ["JAC", "GAUSS"] else "GAUSS",
+            warmup_alpha=warmup,
+            psd_clipping=True if cov_mode in ['JAC', 'GAUSS_clip'] else False,
+            scale_gradlogL=True,
+            dist_cov_est=cov_est,
+        )
+
+        # sample from tall posterior
+        start_time = time.time()
+        (
+            samples,
+            all_samples,
+            gradlogL,
+            lda,
+            posterior_scores,
+            means_posterior_backward,
+            sigma_posterior_backward,
+        ) = euler_sde_sampler(
+            score_fn, nsamples, dim_theta=len(theta_true), beta=score_network.beta, device=device, debug=True,
+            theta_clipping_range=(-3,3)
+        )
+        time_elapsed = time.time() - start_time  #+ time_cov_est
+
+        assert(torch.isnan(samples).sum() == 0)
+
+        results_dict = {
+            "all_theta_learned": all_samples,
+            "gradlogL": gradlogL,
+            "lda": lda,
+            "posterior_scores": posterior_scores,
+            "means_posterior_backward": means_posterior_backward,
+            "sigma_posterior_backward": sigma_posterior_backward,
+        }
+
+        # save  path
+        save_path += f"euler_steps_{steps}/"
+        samples_filename = save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
+        results_dict_filename = save_path + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
+        time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -169,14 +238,10 @@ def run_sample_sgm(
         save_path,
         exist_ok=True,
     )
-    torch.save(
-        samples,
-        save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}.pkl",
-    )
-    torch.save(
-        results_dict,
-        save_path + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}.pkl",
-    )
+    torch.save(samples, samples_filename)
+    torch.save(time_elapsed, time_filename)
+    if results_dict is not None:
+        torch.save(results_dict, results_dict_filename)
 
 
 if __name__ == "__main__":
@@ -220,6 +285,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--theta_dim", type=int, choices=[3, 4], default=4, help="if 3, fix the gain parameter to 0"
     )
+    parser.add_argument(
+        "--cov_mode", type=str, default="GAUSS", choices=COV_MODES, help="covariance mode"
+    )
+    parser.add_argument(
+        "--langevin", action="store_true", help="whether to use langevin sampler (Geffner et al., 2023)"
+    )
 
     # Parse Arguments
     args = parser.parse_args()
@@ -260,7 +331,6 @@ if __name__ == "__main__":
     dataset_train = torch.load(filename)
     theta_train = dataset_train["theta"][: args.n_train]
     x_train = dataset_train["x"][: args.n_train]
-    print(theta_train.shape, x_train.shape)
     # else:
     #     theta_train = prior.sample((args.n_train,))
     #     x_train = simulator(theta_train)
@@ -330,6 +400,8 @@ if __name__ == "__main__":
                 "x_train_mean": x_train_mean,  # for (un)normalization
                 "x_train_std": x_train_std,  # for (un)normalization
                 "prior": prior, # for score function
+                "cov_mode": args.cov_mode,
+                "langevin": args.langevin,
                 "save_path": save_path,
             }
             run_fn(**kwargs_run)

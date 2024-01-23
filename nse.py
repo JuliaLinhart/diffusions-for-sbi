@@ -371,32 +371,36 @@ class NSE(nn.Module):
 
         # Calculating m, Sigma and scores for the posteriors
         predicted_mean, predicted_covar, scores = self.gaussian_approximation(theta=theta_[:, None].repeat(1, n_observations, 1),
-                                                                              x=x[None, :].repeat(n_samples, 1, 1),
-                                                                              t=t)
+                                                                                x=x[None, :].repeat(n_samples, 1, 1),
+                                                                                t=t)
+        if corrector_lda > 0:
 
-        # Calculating m, Sigma and score of the prior
-        def pred_mean_prior(theta):
+            # Calculating m, Sigma and score of the prior
+            def pred_mean_prior(theta):
+                prior_score = prior_score_fun(theta[None], t)[0]
+                prior_predicted_mean = self.mean_pred(theta, prior_score, alpha_t)
+                return prior_predicted_mean, (prior_predicted_mean, prior_score)
+
+            grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
+            prior_predicted_mean, prior_score = out
+            prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
+            prior_predicted_covar = prior_predicted_covar
+            predicted_covar = assure_positive_definitness(predicted_covar.detach())
+            prior_predicted_covar = assure_positive_definitness(prior_predicted_covar.detach())
+            # Calculating correction term
+            log_L = self.log_L(predicted_mean,
+                            predicted_covar,
+                            prior_predicted_mean,
+                            prior_predicted_covar)
+
+            log_L.sum().backward()
+            langevin_grad = (1 - n_observations) * prior_score + scores.sum(axis=1)
+            correction = theta_.grad * (n_observations > 1)
+            #print(torch.linalg.norm(langevin_grad + correction, axis=-1).mean() / torch.linalg.norm(correction, axis=-1).mean() )
+            aggregated_score = langevin_grad + corrector_lda*correction
+        else:
             prior_score = prior_score_fun(theta[None], t)[0]
-            prior_predicted_mean = self.mean_pred(theta, prior_score, alpha_t)
-            return prior_predicted_mean, (prior_predicted_mean, prior_score)
-
-        grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
-        prior_predicted_mean, prior_score = out
-        prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
-        prior_predicted_covar = prior_predicted_covar
-        predicted_covar = assure_positive_definitness(predicted_covar.detach())
-        prior_predicted_covar = assure_positive_definitness(prior_predicted_covar.detach())
-        # Calculating correction term
-        log_L = self.log_L(predicted_mean,
-                           predicted_covar,
-                           prior_predicted_mean,
-                           prior_predicted_covar)
-
-        log_L.sum().backward()
-        langevin_grad = (1 - n_observations) * prior_score + scores.sum(axis=1)
-        correction = theta_.grad * (n_observations > 1)
-        #print(torch.linalg.norm(langevin_grad + correction, axis=-1).mean() / torch.linalg.norm(correction, axis=-1).mean() )
-        aggregated_score = langevin_grad + corrector_lda*correction
+            aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
         theta_.detach()
         # real_score = self.score(theta, x, t)
         # res = torch.linalg.norm(aggregated_score - real_score, axis=-1)
