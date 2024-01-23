@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import torch
 
 from torch.func import vmap, jacrev
-from nse import assure_positive_definitness
 from tqdm import tqdm
 from functools import partial
+from nse import assure_positive_definitness
 
 
 def log_L(
@@ -231,7 +231,7 @@ def diffused_tall_posterior_score(
         return total_score
 
 
-def euler_sde_sampler(score_fn, nsamples, dim_theta, beta, device="cpu", ana=False, debug=False, theta_clipping_range=(None, None)):
+def euler_sde_sampler(score_fn, nsamples, dim_theta, beta, device="cpu", debug=False, theta_clipping_range=(None, None)):
     theta_t = torch.randn((nsamples, dim_theta)).to(device)  # (nsamples, 2)
     time_pts = torch.linspace(1, 0, 1000).to(device)  # (ntime_pts,)
     theta_list = [theta_t]
@@ -257,7 +257,7 @@ def euler_sde_sampler(score_fn, nsamples, dim_theta, beta, device="cpu", ana=Fal
                 sigma_posterior_backward,
             ) = score_fn(theta_t, t, debug=True)
         else:
-            score = score_fn(theta_t, t, ana=ana)
+            score = score_fn(theta_t, t)
         score = score.detach()
 
         drift = f - g * g * score
@@ -292,3 +292,4 @@ def euler_sde_sampler(score_fn, nsamples, dim_theta, beta, device="cpu", ana=Fal
         )
     else:
         return theta_t, theta_list
+    

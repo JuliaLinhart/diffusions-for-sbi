@@ -37,9 +37,22 @@ def count_outliers(samples, theta_true):
         outliers += (samples_coordj.square() > threshold).sum().item()
     return outliers * 100 / (len(theta_true) * len(samples))
 
+def remove_outliers(samples, theta_true, threshold=100, percentage=None):
+    if theta_true.ndim > 1:
+        theta_true = theta_true[0]
+
+    for j in range(len(theta_true)):
+        samples_coordj = samples[:, j]
+        if percentage is not None:
+            # remove the percentage of largest squared values
+            samples_coordj = samples_coordj[samples_coordj.square().argsort()[:-int(len(samples_coordj)*percentage)]]
+        else:
+            samples_coordj[samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
+    return samples
+
 def gaussien_wasserstein(X1, X2):
     mean1 = torch.mean(X1, dim=1)
     mean2 = torch.mean(X2, dim=1)
     cov1 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X1)
     cov2 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X2)
-    return torch.linalg.norm(mean1 - mean2, dim=-1)**2 + torch.linalg.matrix_norm(cov1 - cov2, dim=(-2, -1))**2
+    return (torch.linalg.norm(mean1 - mean2, dim=-1)**2 + torch.linalg.matrix_norm(cov1 - cov2, dim=(-2, -1))**2).item()
