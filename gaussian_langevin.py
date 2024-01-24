@@ -86,22 +86,23 @@ if __name__ == "__main__":
         loc=loc_.cuda(), covariance_matrix=cov_.cuda()
     )
     # Normalize posterior
-    loc_ = (true_posterior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
-    cov_ = (
-            torch.diag(1 / theta_train.std(axis=0))
-            @ true_posterior.covariance_matrix
-            @ torch.diag(1 / theta_train.std(axis=0))
-    )
-    true_posterior_ = torch.distributions.MultivariateNormal(
-        loc=loc_.cuda(), covariance_matrix=cov_.cuda()
-    )
-    ana_score = lambda theta, x, t, **kwargs: get_vpdiff_gaussian_score(mean=x,
-                                                                        cov=cov_.cuda(),
-                                                                        nse=score_net)(theta, t)
-
     data = {}
-    for N_OBS in [10, 20, 30, 40, 60, 80, 100]:
+    for N_OBS in range(10, 51, 2):
         data[N_OBS] = {}
+        def ana_score(theta, x, t, **kwargs):
+            x_non_norm = x.cpu() * x_train.std(axis=0)  + x_train.mean(axis=0)
+            true_posterior = task.true_posterior(x_non_norm)
+
+            loc_ = (true_posterior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
+            cov_ = (
+                    torch.diag(1 / theta_train.std(axis=0))
+                    @ true_posterior.covariance_matrix
+                    @ torch.diag(1 / theta_train.std(axis=0))
+            )
+            return get_vpdiff_gaussian_score(mean=loc_.cuda(),
+                                             cov=cov_.cuda(),
+                                             nse=score_net)(theta, t)
+
         score_fn_ana = partial(
             diffused_tall_posterior_score,
             prior=prior_,  # normalized prior# analytical posterior
@@ -109,9 +110,11 @@ if __name__ == "__main__":
             nse=score_net,  # trained score network
             dist_cov_est=cov_.cuda().repeat(N_OBS, 1, 1),  # cov_est,
             cov_mode='GAUSS',
+            logl_mode='tweedie',
             warmup_alpha=0,
             psd_clipping=False,
-            score_fn=ana_score
+            score_fn=ana_score,
+            clip_grad=False,
         )
         ref_samples_ = euler_sde_sampler(
             score_fn_ana, N_SAMPLES, beta=score_net.beta, device="cuda:0", debug=True, theta_clipping_range=(-3, 3),
@@ -126,7 +129,7 @@ if __name__ == "__main__":
             cov_mode='JAC',
             warmup_alpha=1,
             psd_clipping=False,
-            scale_gradlogL=False
+            clip_grad=False,
         )
         tstart = time()
         samples_ = annealed_langevin(score_fn=score_fn,
@@ -144,14 +147,13 @@ if __name__ == "__main__":
             "dt": tend - tstart
         }
         data[N_OBS]['experiments'] = []
-        for warmup_alpha in [0, 0.25, 0.5, 0.75][::-1]:
-            for scale in [True, False]:
-                for cov in ['GAUSS', 'JAC']:
+        for warmup_alpha in [0,]:# 0.5, 0.75][::-1]:
+            for loglmode in ['ddim', 'tweedie', 'both']:
+                for cov in ['GAUSS',]:# 'JAC']:
                     if cov == 'GAUSS':
                         cov_est = vmap(lambda x: score_net.ddim(shape=(1000,), x=x, steps=100, eta=.5),
                                        randomness='different')(x_obs_100_[:N_OBS].cuda())
                         # normalize posterior
-
                         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
                     else:
                         cov_est = None
@@ -162,9 +164,10 @@ if __name__ == "__main__":
                         nse=score_net,  # trained score network
                         cov_mode=cov,
                         warmup_alpha=warmup_alpha,
-                        psd_clipping=True if cov == 'JAC' else False,
-                        scale_gradlogL=scale,
+                        psd_clipping=False,
+                        logl_mode=loglmode,
                         dist_cov_est=cov_est,
+                        clip_grad=True,
                     )
 
                     tstart = time()
@@ -175,11 +178,12 @@ if __name__ == "__main__":
                     samples = samples_ * theta_train.std(axis=0)[None, None] + theta_train.mean(axis=0)[None, None]
                     data[N_OBS]['experiments'].append(
                         {
-                            "scale": scale,
+                            "logl_mode": loglmode,
                             "cov_mode": cov,
                             "samples": samples,
                             "warmup_alpha": warmup_alpha,
-                            "dt": tend - tstart
+                            "dt": tend - tstart,
+                            "clip": False
                         }
                     )
                     torch.save(data, f"gaussian_comparison.pt")
