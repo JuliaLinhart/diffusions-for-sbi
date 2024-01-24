@@ -6,7 +6,9 @@ def load_losses(task_name, n_train, lr, path):
     val_losses = losses["val_losses"]
     return train_losses, val_losses
 
-def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], threshold=100):
+def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], percentage=0.01):
+    samples = samples.clone()
+
     dist_to_dirac = {metric: [] for metric in metrics}
 
     if theta_true.ndim > 1:
@@ -15,7 +17,10 @@ def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], threshold=100):
     mmd, mse = [], []
     for j in range(len(theta_true)):
         samples_coordj = samples[:, j]
-        samples_coordj[samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
+        # remove threshold percent of largest squared values
+        if percentage > 0:
+            samples_coordj = samples_coordj[samples_coordj.square().argsort()[:-int(len(samples_coordj)*percentage)]]
+        # samples_coordj[samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
         if "mse" in metrics:
             mse.append((samples_coordj - theta_true[j]).square().mean())
         if "mmd" in metrics:
@@ -26,14 +31,14 @@ def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], threshold=100):
 
     return dist_to_dirac
 
-def count_outliers(samples, theta_true):
+def count_outliers(samples, theta_true, threshold=100):
     if theta_true.ndim > 1:
         theta_true = theta_true[0]
 
     outliers = 0
     for j in range(len(theta_true)):
         samples_coordj = samples[:, j]
-        threshold = theta_true[j].square()*100
+        threshold = theta_true[j].square()*threshold
         outliers += (samples_coordj.square() > threshold).sum().item()
     return outliers * 100 / (len(theta_true) * len(samples))
 
@@ -44,10 +49,11 @@ def remove_outliers(samples, theta_true, threshold=100, percentage=None):
     for j in range(len(theta_true)):
         samples_coordj = samples[:, j]
         if percentage is not None:
-            # remove the percentage of largest squared values
-            samples_coordj = samples_coordj[samples_coordj.square().argsort()[:-int(len(samples_coordj)*percentage)]]
+            if percentage > 0:
+                # remove the percentage of largest squared values
+                samples[:, j][samples_coordj.square().argsort()[-int(len(samples_coordj)*percentage):]] = theta_true[j]
         else:
-            samples_coordj[samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
+            samples[:, j][samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
     return samples
 
 def gaussien_wasserstein(X1, X2):

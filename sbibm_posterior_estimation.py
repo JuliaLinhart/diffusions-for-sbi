@@ -40,7 +40,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:1"
 
     # Prepare training data
     # normalize theta
@@ -53,10 +53,18 @@ def run_train_sgm(
     data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train_norm.to(device))
 
     # Score network
+    # embedding nets
+    theta_dim = theta_train.shape[-1]
+    x_dim = x_train.shape[-1]
+    theta_embedding_net = MLP(theta_dim, 32, [64,64,64])
+    x_embedding_net = MLP(x_dim, 32, [64,64,64])
     score_network = NSE(
-        theta_dim=theta_train.shape[-1],
-        x_dim=x_train.shape[-1],
+        theta_dim=theta_dim,
+        x_dim=x_dim,
+        embedding_nn_theta=theta_embedding_net,
+        embedding_nn_x=x_embedding_net,
         hidden_features=[128, 256, 128],
+        freqs=32,
     ).to(device)
 
     # Train score network
@@ -120,7 +128,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:1"
 
     n_obs = context.shape[0]
 
@@ -211,13 +219,13 @@ def run_sample_sgm(
         (
             samples,
             all_samples,
-            gradlogL,
-            lda,
-            posterior_scores,
-            means_posterior_backward,
-            sigma_posterior_backward,
+            # gradlogL,
+            # lda,
+            # posterior_scores,
+            # means_posterior_backward,
+            # sigma_posterior_backward,
         ) = euler_sde_sampler(
-            score_fn, nsamples, dim_theta=theta_train_mean.shape[-1], beta=score_network.beta, device=device, debug=True,
+            score_fn, nsamples, dim_theta=theta_train_mean.shape[-1], beta=score_network.beta, device=device, debug=False,
             theta_clipping_range=(-3,3)
         )
         time_elapsed = time.time() - start_time # + time_cov_est
@@ -226,11 +234,11 @@ def run_sample_sgm(
 
         results_dict = {
             "all_theta_learned": all_samples,
-            "gradlogL": gradlogL,
-            "lda": lda,
-            "posterior_scores": posterior_scores,
-            "means_posterior_backward": means_posterior_backward,
-            "sigma_posterior_backward": sigma_posterior_backward,
+            # "gradlogL": gradlogL,
+            # "lda": lda,
+            # "posterior_scores": posterior_scores,
+            # "means_posterior_backward": means_posterior_backward,
+            # "sigma_posterior_backward": sigma_posterior_backward,
         }
 
         save_path += f"euler_steps_{steps}/"
@@ -276,7 +284,7 @@ if __name__ == "__main__":
         "--n_epochs", type=int, default=1000, help="number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=256, help="batch size for training"
+        "--batch_size", type=int, default=64, help="batch size for training" #256
     )
     parser.add_argument(
         "--lr", type=float, default=1e-3, help="learning rate for training (1e-3/1e-4 in [Geffner et al. 2023]))"
@@ -421,7 +429,7 @@ if __name__ == "__main__":
         run_fn(**kwargs_run)
 
     if args.run == "sample_all":
-        for n_train in N_TRAIN_LIST:
+        for n_train in [10000, 30000]:
             for num_obs in NUM_OBSERVATION_LIST:
                 for n_obs in N_OBS_LIST:
                     run(n_train=n_train, num_obs=num_obs, n_obs=n_obs, run_type="sample")

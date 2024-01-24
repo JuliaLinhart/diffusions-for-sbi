@@ -3,6 +3,21 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from lampe.plots import corner
 
+from tueplots import fonts, axes
+
+def set_plotting_style():
+    plt.rcParams.update(fonts.neurips2022())
+    plt.rcParams.update(axes.color(base="black"))
+    plt.rcParams["legend.fontsize"] = 23.0
+    plt.rcParams["xtick.labelsize"] = 23.0
+    plt.rcParams["ytick.labelsize"] = 23.0
+    plt.rcParams["axes.labelsize"] = 23.0
+    plt.rcParams["font.size"] = 23.0
+    plt.rcParams["axes.titlesize"] = 27.0
+
+    alpha_fill_between = 0.2
+    linewidth = 2.0
+
 
 def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
     fig = None

@@ -8,9 +8,12 @@ __init__.py
 *.pdf
 *.png
 /results/jrnnm/4d/*/euler*/*
+/results/jrnnm/4d/*/langevin*/*
 /results/jrnnm/dataset*.pkl
 /results/jrnnm/3d/*/euler*/*
+/results/jrnnm/3d/*/langevin*/*
 /results/uniform/*
 /results/gaussian/*
 score_net*.pkl
 *train_losses*.pkl
+/results/sbibm

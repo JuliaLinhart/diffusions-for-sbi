@@ -11,6 +11,7 @@ from functools import partial
 from nse import NSE, NSELoss
 from sm_utils import train
 from torch.func import vmap
+from zuko.nn import MLP
 
 from tqdm import tqdm
 
@@ -37,7 +38,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:1"
 
     # Prepare training data
     # normalize theta
@@ -48,10 +49,18 @@ def run_train_sgm(
     data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train_norm.to(device))
 
     # Score network
+    # embedding nets
+    theta_dim = theta_train.shape[-1]
+    x_dim = x_train.shape[-1]
+    # theta_embedding_net = MLP(theta_dim, 32, [64,64,64])
+    # x_embedding_net = MLP(x_dim, 32, [64,64,64])
     score_network = NSE(
-        theta_dim=theta_train.shape[-1],
-        x_dim=x_train.shape[-1],
+        theta_dim=theta_dim,
+        x_dim=x_dim,
+        # embedding_nn_theta=theta_embedding_net,
+        # embedding_nn_x=x_embedding_net,
         hidden_features=[128, 256, 128],
+        # freqs=32,
     ).to(device)
 
     # Train score network
@@ -113,7 +122,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:1"
 
     n_obs = context.shape[0]
 
@@ -246,16 +255,16 @@ if __name__ == "__main__":
         "--run", type=str, default="train", choices=["train", "sample", "train_all", "sample_all"], help="run type"
     )
     parser.add_argument(
-        "--n_train", type=int, default=30_000, help="number of training data samples"
+        "--n_train", type=int, default=10000, help="number of training data samples"
     )
     parser.add_argument(
         "--n_epochs", type=int, default=1000, help="number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=256, help="batch size for training"
+        "--batch_size", type=int, default=64, help="batch size for training"
     )
     parser.add_argument(
-        "--lr", type=float, default=1e-3, help="learning rate for training"
+        "--lr", type=float, default=1e-4, help="learning rate for training"
     )
     parser.add_argument(
         "--nsamples",
@@ -284,7 +293,7 @@ if __name__ == "__main__":
         # Define task path
         task_path = PATH_EXPERIMENT + f"{dim}d"
         if args.random_prior:
-            task_path += "random_prior"
+            task_path += "_random_prior"
         task_path += "/"
 
         # Define Experiment Path

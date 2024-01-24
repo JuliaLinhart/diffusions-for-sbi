@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 # from ot import sliced_wasserstein_distance
 from experiment_utils import load_losses, dist_to_dirac
 
-EXPERIMENT_PATH = 'results/jrnnm/'
+PATH_EXPERIMENT = 'results/jrnnm/'
 TASKS = ["3d", "4d"]
 LR = [1e-3, 1e-4]
 N_OBS = [1,8,14,22,30]
@@ -15,9 +15,9 @@ def load_results(task_name, lr, n_obs, gain=0.0, cov_mode=None, langevin=False):
     if task_name == "3d":
         theta_true = theta_true[:3]
     if langevin:
-        filename = EXPERIMENT_PATH + f'{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/langevin_steps_400_5/'
+        filename = PATH_EXPERIMENT + f'{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/langevin_steps_400_5/'
     else:
-        filename = EXPERIMENT_PATH + f'{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/euler_steps_1000/'
+        filename = PATH_EXPERIMENT + f'{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/euler_steps_1000/'
     filename_samples = filename + f'posterior_samples_{theta_true}_n_obs_{n_obs}.pkl'
     filename_time = filename + f'time_{theta_true}_n_obs_{n_obs}.pkl'
     if cov_mode is not None:
@@ -31,14 +31,14 @@ def load_results(task_name, lr, n_obs, gain=0.0, cov_mode=None, langevin=False):
 # fig, axs = plt.subplots(2, 1, figsize=(5, 5), constrained_layout=True)
 # for i, task_name in enumerate(TASKS):
 #     for j, lr in enumerate(LR):
-#         train_losses, val_losses = load_losses(task_name, n_train=50000, lr=lr, path=EXPERIMENT_PATH)
+#         train_losses, val_losses = load_losses(task_name, n_train=50000, lr=lr, path=PATH_EXPERIMENT)
 #         axs[i].plot(train_losses, label=f"train, lr={lr}")
 #         axs[i].plot(val_losses, label=f"val, lr={lr}")
 #         axs[i].set_title(f"{task_name}")
 #         axs[i].set_xlabel("epochs")
 #         axs[i].set_ylim([0,0.5])
 #         axs[i].legend()
-# plt.savefig(EXPERIMENT_PATH + "losses.png")
+# plt.savefig(PATH_EXPERIMENT + "losses.png")
 # plt.clf()
 
 
@@ -70,8 +70,8 @@ gain = 0.0
 #         axs[i].set_title(f"{task_name}")
         
 #     plt.suptitle(f"Distance to true theta = (135, 220, 2000, {gain})")
-#     plt.savefig(EXPERIMENT_PATH + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.png")
-#     plt.savefig(EXPERIMENT_PATH + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.pdf")
+#     plt.savefig(PATH_EXPERIMENT + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.png")
+#     plt.savefig(PATH_EXPERIMENT + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.pdf")
 #     plt.clf()
 
 # runtime comparison 
@@ -95,6 +95,6 @@ for i, task_name in enumerate(TASKS):
     axs[i].legend()
     axs[i].set_title(f"{task_name}")
 plt.suptitle(f"Runtime comparison")
-plt.savefig(EXPERIMENT_PATH + f"runtime_comparison_n_obs_g_{gain}.png")
-plt.savefig(EXPERIMENT_PATH + f"runtime_comparison_n_obs_g_{gain}.pdf")
+plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.png")
+plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.pdf")
 plt.clf()
