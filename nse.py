@@ -211,6 +211,7 @@ class NSE(nn.Module):
                             verbose: bool = False,
                             predictor_type='ddim',
                             corrector_type='langevin',
+                            theta_clipping_range=(None, None),
                             **kwargs
     ):
         if len(x.shape) == 1:
@@ -238,6 +239,8 @@ class NSE(nn.Module):
         for t in tqdm(time[:-1], disable=not verbose):
             theta_pred = predictor_fun(theta=theta, x=x, t=t, score_fun=score_fun, dt=dt)
             theta = corrector_fun(theta=theta_pred, x=x, t=t-dt, score_fun=score_fun)
+            if theta_clipping_range[0] is not None:
+                theta = theta.clip(*theta_clipping_range)
         return theta
 
     def euler(

@@ -106,14 +106,13 @@ class Gaussian_Gaussian_mD:
         return samples_x
 
     def true_posterior(self, x_obs):
-        cov = torch.FloatTensor([[1, self.rho], [self.rho, 1]])
 
         cov_prior = self.prior.covariance_matrix
         cov_posterior = torch.linalg.inv(
-            torch.linalg.inv(cov) + torch.linalg.inv(cov_prior)
+            self.simulator_precision + torch.linalg.inv(cov_prior)
         )
         loc_posterior = cov_posterior @ (
-            torch.linalg.inv(cov) @ x_obs
+            self.simulator_precision @ x_obs
             + torch.linalg.inv(cov_prior) @ self.prior.loc
         )
 

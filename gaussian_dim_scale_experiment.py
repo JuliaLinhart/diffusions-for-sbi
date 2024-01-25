@@ -46,21 +46,23 @@ def run_train_sgm(
     # normalize x
     x_train_norm = (x_train - x_train.mean(dim=0)) / x_train.std(dim=0)
     # dataset for dataloader
-    data_train = torch.utils.data.TensorDataset(theta_train_norm.to(device), x_train_norm.to(device))
+    data_train = torch.utils.data.TensorDataset(
+        theta_train_norm.to(device), x_train_norm.to(device)
+    )
 
     # Score network
     # embedding nets
     theta_dim = theta_train.shape[-1]
     x_dim = x_train.shape[-1]
-    # theta_embedding_net = MLP(theta_dim, 32, [64,64,64])
-    # x_embedding_net = MLP(x_dim, 32, [64,64,64])
+    theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
+    x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
     score_network = NSE(
         theta_dim=theta_dim,
         x_dim=x_dim,
-        # embedding_nn_theta=theta_embedding_net,
-        # embedding_nn_x=x_embedding_net,
+        embedding_nn_theta=theta_embedding_net,
+        embedding_nn_x=x_embedding_net,
         hidden_features=[128, 256, 128],
-        # freqs=32,
+        freqs=32,
     ).to(device)
 
     # Train score network
@@ -117,6 +119,7 @@ def run_sample_sgm(
     prior,
     cov_mode,
     langevin=False,
+    clip=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -133,63 +136,82 @@ def run_sample_sgm(
 
     # normalize prior
     loc_norm = (prior.loc - theta_train_mean) / theta_train_std
-    cov_norm = torch.diag(1/theta_train_std) @ prior.covariance_matrix @ torch.diag(1/theta_train_std)
-    prior_norm = torch.distributions.MultivariateNormal(loc_norm.to(device), cov_norm.to(device))
-    prior_score_fn_norm = get_vpdiff_gaussian_score(loc_norm.to(device), cov_norm.to(device), score_network.to(device))
+    cov_norm = (
+        torch.diag(1 / theta_train_std)
+        @ prior.covariance_matrix
+        @ torch.diag(1 / theta_train_std)
+    )
+    prior_norm = torch.distributions.MultivariateNormal(
+        loc_norm.to(device), cov_norm.to(device)
+    )
+    prior_score_fn_norm = get_vpdiff_gaussian_score(
+        loc_norm.to(device), cov_norm.to(device), score_network.to(device)
+    )
 
     print("=======================================================================")
     print(
         f"Sampling from the approximate posterior: n_obs = {n_obs}, nsamples = {nsamples}."
     )
     print(f"======================================================================")
-    
+
     if langevin:
         print()
-        print(f"Using LANGEVIN sampler.")
+        print(f"Using LANGEVIN sampler, clip = {clip}.")
         print()
+
+        ext = ""
+        if "clip":
+            theta_clipping_range = (-3, 3)
+            ext = "_clip"
         start_time = time.time()
-        samples = score_network.predictor_corrector((nsamples,),
-                                                x=context_norm.to(device),
-                                                steps=400,
-                                                prior_score_fun=prior_score_fn_norm,
-                                                eta=1,
-                                                corrector_lda=0,
-                                                n_steps=5,
-                                                r=.5,
-                                                predictor_type='id',
-                                                verbose=True).cpu()
+        samples = score_network.predictor_corrector(
+            (nsamples,),
+            x=context_norm.to(device),
+            steps=400,
+            prior_score_fun=prior_score_fn_norm,
+            eta=1,
+            corrector_lda=0,
+            n_steps=5,
+            r=0.5,
+            predictor_type="id",
+            verbose=True,
+            theta_clipping_range=theta_clipping_range,
+        ).cpu()
         time_elapsed = time.time() - start_time
         results_dict = None
-        
+
         save_path += f"langevin_steps_400_5/"
-        samples_filename = save_path + f"posterior_samples_n_obs_{n_obs}.pkl"
-        time_filename = save_path + f"time_n_obs_{n_obs}.pkl"
+        samples_filename = save_path + f"posterior_samples_n_obs_{n_obs}{ext}.pkl"
+        time_filename = save_path + f"time_n_obs_{n_obs}{ext}.pkl"
     else:
         print()
-        print(f"Using EULER sampler.")
+        print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
 
-        # estimate cov 
-        cov_est = vmap(lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
-                    randomness='different')(context_norm.to(device))
-
+        # estimate cov
+        cov_est = vmap(
+            lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
+            randomness="different",
+        )(context_norm.to(device))
         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
 
-        if cov_mode == "GAUSS":
-            warmup = 0.0
-        else:
-            warmup = 0.5
+        cov_mode_name = cov_mode
+        theta_clipping_range = (None, None)
+        if "clip":
+            theta_clipping_range = (-3, 3)
+            cov_mode_name = cov_mode + "_clip"
+
         score_fn = partial(
             diffused_tall_posterior_score,
             prior=prior_norm,  # normalized prior
             prior_score_fn=prior_score_fn_norm,  # analytical prior score function
             x_obs=context_norm.to(device),  # observations
             nse=score_network,  # trained score network
-            cov_mode=cov_mode,
-            warmup_alpha=warmup,
-            psd_clipping=True if cov_mode == 'JAC' else False,
-            scale_gradlogL=True,
             dist_cov_est=cov_est,
+            cov_mode=cov_mode,
+            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
+            # psd_clipping=True if cov_mode == 'JAC' else False,
+            # scale_gradlogL=True,
         )
 
         # sample from tall posterior
@@ -203,10 +225,15 @@ def run_sample_sgm(
             # means_posterior_backward,
             # sigma_posterior_backward,
         ) = euler_sde_sampler(
-            score_fn, nsamples, dim_theta=theta_train_mean.shape[-1], beta=score_network.beta, device=device, debug=False,
-            theta_clipping_range=(-3,3)
+            score_fn,
+            nsamples,
+            dim_theta=theta_train_mean.shape[-1],
+            beta=score_network.beta,
+            device=device,
+            debug=False,
+            theta_clipping_range=theta_clipping_range,
         )
-        time_elapsed = time.time() - start_time # + time_cov_est
+        time_elapsed = time.time() - start_time  # + time_cov_est
 
         results_dict = {
             "all_theta_learned": all_samples,
@@ -218,9 +245,13 @@ def run_sample_sgm(
         }
 
         save_path += f"euler_steps_{steps}/"
-        samples_filename = save_path + f"posterior_samples_n_obs_{n_obs}_{cov_mode}.pkl"
-        results_dict_filename = save_path + f"results_dict_n_obs_{n_obs}_{cov_mode}.pkl"
-        time_filename = save_path + f"time_n_obs_{n_obs}_{cov_mode}.pkl"
+        samples_filename = (
+            save_path + f"posterior_samples_n_obs_{n_obs}_{cov_mode_name}.pkl"
+        )
+        results_dict_filename = (
+            save_path + f"results_dict_n_obs_{n_obs}_{cov_mode_name}.pkl"
+        )
+        time_filename = save_path + f"time_n_obs_{n_obs}_{cov_mode_name}.pkl"
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -249,16 +280,22 @@ if __name__ == "__main__":
         "--dim", type=int, default=2, help="dimension of the toy example"
     )
     parser.add_argument(
-        "--random_prior", action="store_true", help="whether to use random prior means and stds"
+        "--random_prior",
+        action="store_true",
+        help="whether to use random prior means and stds",
     )
     parser.add_argument(
-        "--run", type=str, default="train", choices=["train", "sample", "train_all", "sample_all"], help="run type"
+        "--run",
+        type=str,
+        default="train",
+        choices=["train", "sample", "train_all", "sample_all"],
+        help="run type",
     )
     parser.add_argument(
         "--n_train", type=int, default=10000, help="number of training data samples"
     )
     parser.add_argument(
-        "--n_epochs", type=int, default=1000, help="number of training epochs"
+        "--n_epochs", type=int, default=10000, help="number of training epochs"
     )
     parser.add_argument(
         "--batch_size", type=int, default=64, help="batch size for training"
@@ -276,20 +313,34 @@ if __name__ == "__main__":
         "--steps", type=int, default=1000, help="number of steps for ddim sampler"
     )
     parser.add_argument(
-        "--n_obs", type=int, default=1, help="number of context observations for sampling"
+        "--n_obs",
+        type=int,
+        default=1,
+        help="number of context observations for sampling",
     )
     parser.add_argument(
-        "--cov_mode", type=str, default="GAUSS", choices=COV_MODES, help="covariance mode"
+        "--cov_mode",
+        type=str,
+        default="GAUSS",
+        choices=COV_MODES,
+        help="covariance mode",
     )
     parser.add_argument(
-        "--langevin", action="store_true", help="whether to use langevin sampler (Geffner et al. 2023)"
+        "--langevin",
+        action="store_true",
+        help="whether to use langevin sampler (Geffner et al. 2023)",
+    )
+    parser.add_argument(
+        "--clip", action="store_true", help="whether to clip the samples"
     )
 
     # Parse Arguments
     args = parser.parse_args()
 
-    def run(dim=args.dim, n_obs=args.n_obs, run_type=args.run):
+    # Seed
+    torch.manual_seed(42)
 
+    def run(dim=args.dim, n_obs=args.n_obs, run_type=args.run):
         # Define task path
         task_path = PATH_EXPERIMENT + f"{dim}d"
         if args.random_prior:
@@ -297,7 +348,9 @@ if __name__ == "__main__":
         task_path += "/"
 
         # Define Experiment Path
-        save_path = task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+        save_path = (
+            task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+        )
         os.makedirs(save_path, exist_ok=True)
 
         print()
@@ -308,9 +361,9 @@ if __name__ == "__main__":
         # SBI Task: prior and simulator
         if args.random_prior:
             torch.manual_seed(42)
-            means = torch.rand(dim) * 20 - 10 # between -10 and 10
+            means = torch.rand(dim) * 20 - 10  # between -10 and 10
             torch.manual_seed(42)
-            stds = torch.rand(dim) * 25 + 0.1 # between 0.1 and 25.1
+            stds = torch.rand(dim) * 25 + 0.1  # between 0.1 and 25.1
             task = Gaussian_Gaussian_mD(dim=dim, means=means, stds=stds)
         else:
             task = Gaussian_Gaussian_mD(dim=dim)
@@ -328,15 +381,15 @@ if __name__ == "__main__":
             theta_train = prior.sample((args.n_train,))
             x_train = simulator(theta_train)
 
-            dataset_train = {
-                "theta": theta_train, "x": x_train
-            }
+            dataset_train = {"theta": theta_train, "x": x_train}
             torch.save(dataset_train, filename)
         # extract training data for given n_train
         theta_train, x_train = theta_train[: args.n_train], x_train[: args.n_train]
 
         # compute mean and std of training data
-        theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(dim=0)
+        theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(
+            dim=0
+        )
         x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
         means_stds_dict = {
             "theta_train_mean": theta_train_mean,
@@ -366,7 +419,8 @@ if __name__ == "__main__":
                 torch.manual_seed(1)
                 theta_true = prior.sample()
                 x_obs_100 = torch.cat(
-                    [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))], dim=0
+                    [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))],
+                    dim=0,
                 )
                 torch.save(theta_true, task_path + f"theta_true.pkl")
                 torch.save(x_obs_100, filename)
@@ -395,21 +449,62 @@ if __name__ == "__main__":
                 "theta_train_std": theta_train_std,  # for (un)normalization
                 "x_train_mean": x_train_mean,  # for (un)normalization
                 "x_train_std": x_train_std,  # for (un)normalization
-                "prior": prior, # for score function
+                "prior": prior,  # for score function
                 "cov_mode": args.cov_mode,
                 "langevin": args.langevin,
+                "clip": args.clip,
                 "save_path": save_path,
             }
-                    
+
         run_fn(**kwargs_run)
 
-    if args.run == "sample_all":
-        for dim in DIM_LIST:
-            for n_obs in N_OBS_LIST:
-                run(dim=dim, n_obs=n_obs, run_type="sample")
-    elif args.run == "train_all":
-        for dim in DIM_LIST:
-            run(dim=dim, run_type="train")
+    if not args.submitit:
+        if args.run == "sample_all":
+            for dim in DIM_LIST:
+                for n_obs in N_OBS_LIST:
+                    run(dim=dim, n_obs=n_obs, run_type="sample")
+        elif args.run == "train_all":
+            for dim in DIM_LIST:
+                run(dim=dim, run_type="train")
+        else:
+            run()
+
     else:
-        run()
-    
+        import submitit
+        import submitit
+
+        # function for submitit
+        def get_executor_marg(job_name, timeout_hour=60, n_cpus=40):
+            executor = submitit.AutoExecutor(job_name)
+            executor.update_parameters(
+                timeout_min=180,
+                slurm_job_name=job_name,
+                slurm_time=f"{timeout_hour}:00:00",
+                slurm_additional_parameters={
+                    "ntasks": 1,
+                    "cpus-per-task": n_cpus,
+                    "distribution": "block:block",
+                    # "partition": "parietal",
+                },
+            )
+            return executor
+
+        # subit job
+        executor = get_executor_marg(f"_gaussian_{args.run}_epochs_{args.n_epochs}")
+        # launch batches
+        with executor.batch():
+            print("Submitting jobs...", end="", flush=True)
+            tasks = []
+            if args.run == "sample_all":
+                for dim in DIM_LIST:
+                    for n_obs in N_OBS_LIST:
+                        tasks.append(
+                            executor.submit(
+                                run, dim=dim, n_obs=n_obs, run_type="sample"
+                            )
+                        )
+            elif args.run == "train_all":
+                for dim in DIM_LIST:
+                    tasks.append(executor.submit(run, dim=dim, run_type="train"))
+            else:
+                tasks.append(executor.submit(run))

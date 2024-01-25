@@ -56,9 +56,23 @@ def remove_outliers(samples, theta_true, threshold=100, percentage=None):
             samples[:, j][samples_coordj.square() > (theta_true[j].square()*threshold)] = theta_true[j]
     return samples
 
-def gaussien_wasserstein(X1, X2):
-    mean1 = torch.mean(X1, dim=1)
+def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
+    r"""
+    Power of a matrix using Eigen Decomposition.
+    Args:
+        matrix: matrix
+        p: power
+    Returns:
+        Power of a matrix
+    """
+    L, V = torch.linalg.eig(matrix)
+    L = L.real
+    V = V.real
+    return V @ torch.diag_embed(L.pow(p)) @ torch.linalg.inv(V)
+
+def gaussien_wasserstein(ref_mu, ref_cov, X2):
     mean2 = torch.mean(X2, dim=1)
-    cov1 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X1)
+    sqrtcov1 = _matrix_pow(ref_cov, .5)
     cov2 = torch.func.vmap(lambda x:  torch.cov(x.mT))(X2)
-    return (torch.linalg.norm(mean1 - mean2, dim=-1)**2 + torch.linalg.matrix_norm(cov1 - cov2, dim=(-2, -1))**2).item()
+    covterm = torch.func.vmap(torch.trace)(ref_cov + cov2 - 2 * _matrix_pow(sqrtcov1 @ cov2 @ sqrtcov1, .5))
+    return (1*torch.linalg.norm(ref_mu - mean2, dim=-1)**2 + 1*covterm)**.5
