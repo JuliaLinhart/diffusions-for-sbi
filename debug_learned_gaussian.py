@@ -277,6 +277,10 @@ if __name__ == "__main__":
         #         @ posterior_cov_0
         #         @ torch.diag(1 / theta_train.std(axis=0))
         # )
+        posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None].cuda() +
+                                   (1 - score_net.alpha(t).cuda())[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None].cuda())
+        posterior_mean_diffused = posterior_mean_0[None] * score_net.alpha(t)[:, None].cuda()
+
         posterior_cov_diffused_ = (posterior_cov_0_[None] * score_net.alpha(t)[:, None, None].cuda() +
                                    (1 - score_net.alpha(t).cuda())[:, None, None] * torch.eye(posterior_cov_0_.shape[0])[None].cuda())
         posterior_mean_diffused_ = posterior_mean_0_[None] * score_net.alpha(t)[:, None].cuda()
@@ -366,19 +370,4 @@ if __name__ == "__main__":
         #     ax.set_xlabel("theta_1")
         # for ax in axes[:, 0]:
         #     ax.set_ylabel("theta_2")
-        fig.show()
-        #
-        sw_fun = vmap(lambda x1, x2: max_sliced_wasserstein_distance(x1, x2, n_projections=1000), randomness='same')
-        sws = {}
-        for name, samples in samples_per_alg.items():
-            if name != 'Full Analytical':
-                sws[name] = gaussien_wasserstein(ref_mu=torch.flip(posterior_mean_diffused, dims=(0,)),
-                                                 ref_cov=torch.flip(posterior_cov_diffused, dims=(0,)),
-                                                 X2=samples)
-        fig, ax = plt.subplots(1, 1)
-        for name, sw in sws.items():
-            ax.plot(sw, label=name)
-        #ax.set_xlim(900, 1000)
-        ax.set_yscale('log')
-        fig.legend()
         fig.show()
