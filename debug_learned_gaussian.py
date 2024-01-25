@@ -55,8 +55,8 @@ def prec_matrix_backward(t, dist_cov, nse):
     sigma_t = nse.sigma(t)
     eye = torch.eye(dist_cov.shape[-1]).to(alpha_t.device)
     # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
-    return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
-    #return (torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * eye)
+    #return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
+    return (torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * eye)
 
 
 
@@ -124,8 +124,7 @@ def diffused_tall_posterior_score(
     prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
     prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
     lda = prec_prior_0_t*(1-n_obs) + prec_0_t.sum(dim=1)
-    weighted_scores = (prec_score_prior + (prec_score_post - prec_score_prior[:, None]).sum(dim=1)
-                       + (theta - (lda @ theta[..., None])[..., 0]) / (nse.sigma(t)**2))
+    weighted_scores = prec_score_prior + (prec_score_post - prec_score_prior[:, None]).sum(dim=1)
 
     total_score = torch.linalg.solve(A=lda, B=weighted_scores)
     return total_score #/ (1 + (1/n_obs)*torch.abs(total_score))
@@ -257,14 +256,30 @@ if __name__ == "__main__":
 
 
         t = torch.linspace(0, 1, 1000)
-        lik_cov = torch.FloatTensor([[1, task.rho], [task.rho, 1]])
-        posterior_cov_0 = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov) + torch.linalg.inv(prior.prior.covariance_matrix)))
-        posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None] +
-                                  (1 - score_net.alpha(t))[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None])
-        posterior_mean_0 = posterior_cov_0 @ (torch.linalg.inv(prior.prior.covariance_matrix) @ prior.prior.loc[:, None] +
-                                              torch.linalg.inv(lik_cov) @ x_obs_100[:N_OBS].sum(dim=0)[:, None])[..., 0]
-        posterior_mean_diffused = posterior_mean_0[None] * score_net.alpha(t)[:, None]
+        lik_cov = torch.FloatTensor([[1, task.rho], [task.rho, 1]]).cuda()
+        lik_cov_ = (
+                torch.diag(1 / theta_train.std(axis=0)).cuda()
+                @ lik_cov
+                @ torch.diag(1 / theta_train.std(axis=0)).cuda()
+        ).cuda()
+        posterior_cov_0 = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov) + torch.linalg.inv(prior.prior.covariance_matrix.cuda())))
 
+        posterior_cov_0_ = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov_) + torch.linalg.inv(prior_.covariance_matrix)))
+        #posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None] +
+        #                          (1 - score_net.alpha(t))[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None])
+        posterior_mean_0 = posterior_cov_0 @ (torch.linalg.inv(prior.prior.covariance_matrix.cuda()) @ prior.prior.loc[:, None].cuda() +
+                                              torch.linalg.inv(lik_cov) @ x_obs_100[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
+        posterior_mean_0_ = posterior_cov_0_ @ (torch.linalg.inv(prior_.covariance_matrix) @ prior_.loc[:, None] +
+                                              torch.linalg.inv(lik_cov_) @ x_obs_100_[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
+        # posterior_mean_0_ = posterior_mean_0 - theta_train.mean(dim=0)
+        # posterior_cov_0_ = (
+        #         torch.diag(1 / theta_train.std(axis=0))
+        #         @ posterior_cov_0
+        #         @ torch.diag(1 / theta_train.std(axis=0))
+        # )
+        posterior_cov_diffused_ = (posterior_cov_0_[None] * score_net.alpha(t)[:, None, None].cuda() +
+                                   (1 - score_net.alpha(t).cuda())[:, None, None] * torch.eye(posterior_cov_0_.shape[0])[None].cuda())
+        posterior_mean_diffused_ = posterior_mean_0_[None] * score_net.alpha(t)[:, None].cuda()
 
 
         score_fn_gauss = partial(
@@ -284,15 +299,9 @@ if __name__ == "__main__":
             cov_mode='JAC',
         )
         mse_scores = {'GAUSS': [], "JAC": []}
-        for mu, cov, t in zip(posterior_mean_diffused,
-                           posterior_cov_diffused,
-                           torch.linspace(0, 1, 1000)):
-            mu_ = (mu - theta_train.mean(axis=0)) / theta_train.std(axis=0)
-            cov_ = (
-                    torch.diag(1 / theta_train.std(axis=0))
-                    @ cov
-                    @ torch.diag(1 / theta_train.std(axis=0))
-            )
+        for mu_, cov_, t in zip(posterior_mean_diffused_,
+                                posterior_cov_diffused_,
+                                torch.linspace(0, 1, 1000)):
             dist = torch.distributions.MultivariateNormal(loc=mu_, covariance_matrix=cov_)
             ref_samples = dist.sample((1000,))
             ref_samples.requires_grad_(True)
@@ -301,67 +310,75 @@ if __name__ == "__main__":
             ref_samples.grad = None
             ref_samples.requires_grad_(False)
 
-            approx_score_gauss = score_fn_gauss(ref_samples.cuda(), t.cuda()).cpu()
-            approx_score_jac = score_fn_jac(ref_samples.cuda(), t.cuda()).cpu()
-            mse_scores["GAUSS"].append(torch.linalg.norm(approx_score_gauss - real_score).mean().item())
-            mse_scores["JAC"].append(torch.linalg.norm(approx_score_jac - real_score).mean().item())
-        plt.plot(mse_scores["GAUSS"], label='GAUSS')
-        plt.plot(mse_scores["JAC"], label='JAC')
+            approx_score_gauss = score_fn_gauss(ref_samples.cuda(), t.cuda())
+            approx_score_jac = score_fn_jac(ref_samples.cuda(), t.cuda())
+            error_gauss = torch.linalg.norm(approx_score_gauss - real_score, axis=-1)**2
+            error_jac = torch.linalg.norm(approx_score_jac - real_score, axis=-1)**2
+            error_mean = torch.linalg.norm(real_score - real_score.mean(dim=0)[None], dim=-1)**2
+            r2_score_gauss = 1 - (error_gauss.sum() / error_mean.sum())
+            r2_score_jac = 1 - (error_jac.sum() / error_mean.sum())
+            mse_scores["GAUSS"].append(r2_score_gauss.item())
+            mse_scores["JAC"].append(r2_score_jac.item())
+        plt.plot(torch.linspace(0, 1, 1000),mse_scores["GAUSS"], label='GAUSS', alpha=.8)
+        plt.plot(torch.linspace(0, 1, 1000),mse_scores["JAC"], label='JAC', alpha=.8)
         plt.suptitle(N_OBS)
         plt.legend()
-        plt.yscale('log')
+        plt.ylim(-1.1, 1.1)
+        #plt.yscale('log')
+        plt.ylabel('R2 score')
+        plt.xlabel('Diffusion time')
         plt.show()
         # compute results for learned and analytical score during sampling
         # where each euler step is updated with the learned tall posterior score
-        # samples_per_alg = {}
-        # for name, score_fun in [
-        #     ('NN / Gaussian cov', score_fn_gauss),
-        #     ('JAC', score_fn_jac),
-        #     #(f'Approx Cov (eps={EPS_PERT})', score_fn_ana_cov_est),
-        #     #(f'Approx score (mean) (eps={EPS_PERT})', score_fn_ana_perturb),
-        #     #('NN / Id', score_fn_net),
-        #     #('NN / Gaussian cov Wup', score_fn_gauss_warmup),
-        #     #('NN / Gaussian cov clip', score_fn_gauss_psd_clip),
-        #     #('2 order Tweedie clip_old', score_fn_jac_old),
-        #     #('2 order Tweedie scale', score_fn_jac_scale),
-        #     #('2 order Tweedie clip', score_fn_jac),
-        #
-        # ]:
-        #     samples_ = euler_sde_sampler(
-        #         score_fun, N_SAMPLES, beta=score_net.beta, device="cuda:0", theta_clipping_range=(-3, 3),
-        #     )
-        #     samples_per_alg[name] = samples_ * theta_train.std(axis=0)[None, None] + theta_train.mean(axis=0)[None, None]
-        #
-        # fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-        # fig.suptitle(f'N={N_OBS}')
-        # ref_samples = torch.distributions.MultivariateNormal(loc=posterior_mean_0, covariance_matrix=posterior_cov_0).sample((500,))
-        # ind_samples = torch.randint(low=0, high=N_SAMPLES, size=(500,))
-        # for ax, (name, all_thetas) in zip(axes.flatten(), samples_per_alg.items()):
-        #     ax.scatter(*ref_samples.T, label='Ground truth')
-        #     ax.scatter(*all_thetas[-1, ind_samples].T, label=name, alpha=.1)
-        #     #ax.set_ylim(140, 160)
-        #     #ax.set_xlim(0, -10)
-        #     ax.set_title(name)
-        #     leg = ax.legend()
-        #     for lh in leg.legendHandles:
-        #         lh.set_alpha(1)
+        samples_per_alg = {}
+        for name, score_fun in [
+            ('NN / Gaussian cov', score_fn_gauss),
+            ('JAC', score_fn_jac),
+            #(f'Approx Cov (eps={EPS_PERT})', score_fn_ana_cov_est),
+            #(f'Approx score (mean) (eps={EPS_PERT})', score_fn_ana_perturb),
+            #('NN / Id', score_fn_net),
+            #('NN / Gaussian cov Wup', score_fn_gauss_warmup),
+            #('NN / Gaussian cov clip', score_fn_gauss_psd_clip),
+            #('2 order Tweedie clip_old', score_fn_jac_old),
+            #('2 order Tweedie scale', score_fn_jac_scale),
+            #('2 order Tweedie clip', score_fn_jac),
+
+        ]:
+            samples_ = euler_sde_sampler(
+                score_fun, N_SAMPLES, beta=score_net.beta, device="cuda:0", theta_clipping_range=(-3, 3),
+            )
+            samples_per_alg[name] = samples_ * theta_train.std(axis=0)[None, None] + theta_train.mean(axis=0)[None, None]
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+        fig.suptitle(f'N={N_OBS}')
+        ref_samples = torch.distributions.MultivariateNormal(loc=posterior_mean_0, covariance_matrix=posterior_cov_0).sample((500,)).cpu()
+        ind_samples = torch.randint(low=0, high=N_SAMPLES, size=(1000,))
+        for ax, (name, all_thetas) in zip(axes.flatten(), samples_per_alg.items()):
+            ax.scatter(*ref_samples.T, label='Ground truth')
+            ax.scatter(*all_thetas[-1, ind_samples].T, label=name, alpha=.8)
+            ax.set_ylim(140, 160)
+            ax.set_xlim(0, -10)
+            ax.set_title(name)
+            leg = ax.legend()
+            for lh in leg.legendHandles:
+                lh.set_alpha(1)
         # for ax in axes[-1]:
         #     ax.set_xlabel("theta_1")
         # for ax in axes[:, 0]:
         #     ax.set_ylabel("theta_2")
-        # fig.show()
+        fig.show()
         #
-        # sw_fun = vmap(lambda x1, x2: max_sliced_wasserstein_distance(x1, x2, n_projections=1000), randomness='same')
-        # sws = {}
-        # for name, samples in samples_per_alg.items():
-        #     if name != 'Full Analytical':
-        #         sws[name] = gaussien_wasserstein(ref_mu=torch.flip(posterior_mean_diffused, dims=(0,)),
-        #                                          ref_cov=torch.flip(posterior_cov_diffused, dims=(0,)),
-        #                                          X2=samples)
-        # fig, ax = plt.subplots(1, 1)
-        # for name, sw in sws.items():
-        #     ax.plot(sw, label=name)
-        # #ax.set_xlim(900, 1000)
-        # ax.set_yscale('log')
-        # fig.legend()
-        # fig.show()
+        sw_fun = vmap(lambda x1, x2: max_sliced_wasserstein_distance(x1, x2, n_projections=1000), randomness='same')
+        sws = {}
+        for name, samples in samples_per_alg.items():
+            if name != 'Full Analytical':
+                sws[name] = gaussien_wasserstein(ref_mu=torch.flip(posterior_mean_diffused, dims=(0,)),
+                                                 ref_cov=torch.flip(posterior_cov_diffused, dims=(0,)),
+                                                 X2=samples)
+        fig, ax = plt.subplots(1, 1)
+        for name, sw in sws.items():
+            ax.plot(sw, label=name)
+        #ax.set_xlim(900, 1000)
+        ax.set_yscale('log')
+        fig.legend()
+        fig.show()
