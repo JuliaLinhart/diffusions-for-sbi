@@ -15,6 +15,9 @@ class SBIGaussian2d:
 
         self.prior = self.get_prior()
 
+        self.simulator_cov = torch.eye(2) * (1 - rho) + rho
+        self.simulator_precision = torch.linalg.inv(self.simulator_cov)
+
     def get_prior(self):
         if self.prior_type == "uniform":
             return UniformPrior()
@@ -24,8 +27,7 @@ class SBIGaussian2d:
             raise NotImplementedError
 
     def simulator(self, theta):
-        cov = torch.FloatTensor([[1, self.rho], [self.rho, 1]])
-        samples_x = MultivariateNormal(loc=theta, covariance_matrix=cov).sample()
+        samples_x = MultivariateNormal(loc=theta, covariance_matrix=self.simulator_cov).sample()
         return samples_x
 
     def true_posterior(self, x_obs, return_loc_cov=False):
@@ -46,6 +48,35 @@ class SBIGaussian2d:
                     loc=loc_posterior, covariance_matrix=cov_posterior, validate_args=False
                 )
             return loc_posterior, cov_posterior
+        
+    def true_tall_posterior(self, x_obs):
+        """Gets posterior for the case with multiple observations
+
+        Args:
+            x_obs: observations to condition on
+
+        Returns:
+            Posterior distribution
+        """
+
+        N = len(x_obs)
+
+        covariance_matrix = torch.linalg.inv(
+            self.prior.prior.precision_matrix
+            + N * self.simulator_precision
+        )
+        loc = covariance_matrix @ (
+            N * self.simulator_precision @ torch.mean(x_obs, dim=0).reshape(-1)
+            + self.prior.prior.precision_matrix @ self.prior.prior.loc
+        )
+
+        posterior = torch.distributions.MultivariateNormal(
+            loc=loc, covariance_matrix=covariance_matrix
+        )
+
+        return posterior
+
+
 
 class Gaussian_Gaussian_mD:
     def __init__(self, dim, rho=0.8, means=None, stds=None) -> None:
@@ -65,8 +96,9 @@ class Gaussian_Gaussian_mD:
         self.prior = torch.distributions.MultivariateNormal(
             loc=means, covariance_matrix=torch.diag_embed(stds.square())
         )
-    
-        self.simulator_cov = torch.diag_embed(torch.ones(self.dim) * self.rho)
+        
+        # cov is torch.eye with rho on the off-diagonal
+        self.simulator_cov = torch.eye(dim) * (1 - rho) + rho
         self.simulator_precision = torch.linalg.inv(self.simulator_cov)
 
     def simulator(self, theta):

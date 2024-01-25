@@ -27,9 +27,9 @@ def load_samples(task_name, n_train, lr, n_obs, cov_mode=None, langevin=False):
     return samples
 
 # compute mean distance to true theta over all observations 
-def compute_mean_distance_to_true_theta(task_name, n_train, n_obs, cov_mode=None, langevin=False, percentage=0.01):
+def compute_mean_distance_to_true_theta(task_name, n_train, n_obs, cov_mode=None, langevin=False, percentage=0):
     task = get_task(task_name)
-    samples = load_samples(task_name, n_train=n_train, lr=1e-3, n_obs=n_obs, cov_mode=cov_mode, langevin=langevin)
+    samples = load_samples(task_name, n_train=n_train, lr=1e-4, n_obs=n_obs, cov_mode=cov_mode, langevin=langevin)
     
     # outliers
     outliers = [count_outliers(samples[num_obs], task.get_true_parameters(num_obs) ) for num_obs in NUM_OBSERVATION_LIST]
@@ -87,9 +87,9 @@ if __name__ == '__main__':
                     mean_dist_g = []
                     std_dist_g = []
                     mean_out_g = []
-                    mean_dist_j = []
-                    std_dist_j = []
-                    mean_out_j = []
+                    # mean_dist_j = []
+                    # std_dist_j = []
+                    # mean_out_j = []
                     for n_obs in N_OBS:
                         # langevin
                         dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, langevin=True)
@@ -102,21 +102,21 @@ if __name__ == '__main__':
                         std_dist_g.append(dist_dict[metric]["std"])
                         mean_out_g.append(outlier_dict["mean"])
                         # jac
-                        if task_name in ["sir", "lotka_volterra"]:
-                            dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, cov_mode="JAC")
-                            mean_dist_j.append(dist_dict[metric]["mean"])
-                            std_dist_j.append(dist_dict[metric]["std"])
-                            mean_out_j.append(outlier_dict["mean"])
+                        # if task_name in ["sir", "lotka_volterra"]:
+                        #     dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, cov_mode="JAC")
+                        #     mean_dist_j.append(dist_dict[metric]["mean"])
+                        #     std_dist_j.append(dist_dict[metric]["std"])
+                        #     mean_out_j.append(outlier_dict["mean"])
                     mean_dist_l, std_dist_l = torch.FloatTensor(mean_dist_l), torch.FloatTensor(std_dist_l)
                     mean_dist_g, std_dist_g = torch.FloatTensor(mean_dist_g), torch.FloatTensor(std_dist_g)
-                    mean_dist_j, std_dist_j = torch.FloatTensor(mean_dist_j), torch.FloatTensor(std_dist_j)
+                    # mean_dist_j, std_dist_j = torch.FloatTensor(mean_dist_j), torch.FloatTensor(std_dist_j)
                     axs[i, j].fill_between(N_OBS, mean_dist_l - std_dist_l, mean_dist_l + std_dist_l, alpha=0.2)
                     axs[i, j].plot(N_OBS, mean_dist_l, label=f"{metric} (langevin)", linewidth=3, marker='o')
                     axs[i, j].fill_between(N_OBS, mean_dist_g - std_dist_g, mean_dist_g + std_dist_g, alpha=0.2)
                     axs[i, j].plot(N_OBS, mean_dist_g, label=f"{metric} (gauss)", linewidth=3, marker='o')
-                    if task_name in ["sir", "lotka_volterra"]:
-                        axs[i, j].fill_between(N_OBS, mean_dist_j - std_dist_j, mean_dist_j + std_dist_j, alpha=0.2)
-                        axs[i, j].plot(N_OBS, mean_dist_j, label=f"{metric} (jac)", linewidth=3, marker='o')
+                    # if task_name in ["sir", "lotka_volterra"]:
+                    #     axs[i, j].fill_between(N_OBS, mean_dist_j - std_dist_j, mean_dist_j + std_dist_j, alpha=0.2)
+                    #     axs[i, j].plot(N_OBS, mean_dist_j, label=f"{metric} (jac)", linewidth=3, marker='o')
                     axs[i, j].set_title(f"{task_name}, n_train={n_train}")
                     axs[i, j].set_xlabel("n_obs")
                     axs[i, j].set_xticks(N_OBS)
@@ -140,9 +140,9 @@ if __name__ == '__main__':
                         mean_dist_g = []
                         std_dist_g = []
                         mean_out_g = []
-                        mean_dist_j = []
-                        std_dist_j = []
-                        mean_out_j = []
+                        # mean_dist_j = []
+                        # std_dist_j = []
+                        # mean_out_j = []
                         for n_train in N_TRAIN:
                             # langevin
                             dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, langevin=True, percentage=percentage)
@@ -155,22 +155,22 @@ if __name__ == '__main__':
                             std_dist_g.append(dist_dict[metric]["std"])
                             mean_out_g.append(outlier_dict["mean"])
                             # jac
-                            if task_name in ["sir", "lotka_volterra"]:
-                                dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, cov_mode="JAC", percentage=percentage)
-                                mean_dist_j.append(dist_dict[metric]["mean"])
-                                std_dist_j.append(dist_dict[metric]["std"])
-                                mean_out_j.append(outlier_dict["mean"])
+                            # if task_name in ["sir", "lotka_volterra"]:
+                            #     dist_dict, outlier_dict = compute_mean_distance_to_true_theta(task_name, n_train=n_train, n_obs=n_obs, cov_mode="JAC", percentage=percentage)
+                            #     mean_dist_j.append(dist_dict[metric]["mean"])
+                            #     std_dist_j.append(dist_dict[metric]["std"])
+                            #     mean_out_j.append(outlier_dict["mean"])
                         mean_dist_l, std_dist_l = torch.FloatTensor(mean_dist_l), torch.FloatTensor(std_dist_l)
                         mean_dist_g, std_dist_g = torch.FloatTensor(mean_dist_g), torch.FloatTensor(std_dist_g)
-                        mean_dist_j, std_dist_j = torch.FloatTensor(mean_dist_j), torch.FloatTensor(std_dist_j)
+                        # mean_dist_j, std_dist_j = torch.FloatTensor(mean_dist_j), torch.FloatTensor(std_dist_j)
                         axs[i, j].fill_between(N_TRAIN, mean_dist_l - std_dist_l, mean_dist_l + std_dist_l, alpha=0.2)
                         axs[i, j].plot(N_TRAIN, mean_dist_l, label=f"{metric} (langevin)", linewidth=3, marker='o')
                         axs[i, j].fill_between(N_TRAIN, mean_dist_g - std_dist_g, mean_dist_g + std_dist_g, alpha=0.2)
                         axs[i, j].plot(N_TRAIN, mean_dist_g, label=f"{metric} (gauss)", linewidth=3, marker='o')
                         # outlier: {mean_out_g}
-                        if task_name in ["sir", "lotka_volterra"]:
-                            axs[i, j].fill_between(N_TRAIN, mean_dist_j - std_dist_j, mean_dist_j + std_dist_j, alpha=0.2)
-                            axs[i, j].plot(N_TRAIN, mean_dist_j, label=f"{metric} (jac)", linewidth=3, marker='o')
+                        # if task_name in ["sir", "lotka_volterra"]:
+                        #     axs[i, j].fill_between(N_TRAIN, mean_dist_j - std_dist_j, mean_dist_j + std_dist_j, alpha=0.2)
+                        #     axs[i, j].plot(N_TRAIN, mean_dist_j, label=f"{metric} (jac)", linewidth=3, marker='o')
                         axs[i, j].set_title(f"{task_name}, n_obs={n_obs}")
                         axs[i, j].set_xlabel("n_train")
                         axs[i, j].set_xticks(N_TRAIN)
@@ -224,8 +224,8 @@ if __name__ == '__main__':
                 outliers_std_langevin = []
                 outliers_mean_gauss = []
                 outliers_std_gauss = []
-                outliers_mean_jac = []
-                outliers_std_jac = []
+                # outliers_mean_jac = []
+                # outliers_std_jac = []
                 for k, n_obs in enumerate(N_OBS):
                     true_parameters = [task.get_true_parameters(num_obs) for num_obs in NUM_OBSERVATION_LIST]
                     # langevin
@@ -238,23 +238,23 @@ if __name__ == '__main__':
                     outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
                     outliers_mean_gauss.append(torch.FloatTensor(outliers).mean())
                     outliers_std_gauss.append(torch.FloatTensor(outliers).std())
-                    # jac
-                    if task_name in ["sir", "lotka_volterra"]:
-                        samples = load_samples(task_name, n_train, lr=1e-3, n_obs=n_obs, cov_mode="JAC")
-                        outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
-                        outliers_mean_jac.append(torch.FloatTensor(outliers).mean())
-                        outliers_std_jac.append(torch.FloatTensor(outliers).std())
+                    # # jac
+                    # if task_name in ["sir", "lotka_volterra"]:
+                    #     samples = load_samples(task_name, n_train, lr=1e-3, n_obs=n_obs, cov_mode="JAC")
+                    #     outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
+                    #     outliers_mean_jac.append(torch.FloatTensor(outliers).mean())
+                    #     outliers_std_jac.append(torch.FloatTensor(outliers).std())
 
                 outliers_mean_langevin, outliers_std_langevin = torch.FloatTensor(outliers_mean_langevin), torch.FloatTensor(outliers_std_langevin)
                 outliers_mean_gauss, outliers_std_gauss = torch.FloatTensor(outliers_mean_gauss), torch.FloatTensor(outliers_std_gauss)
-                outliers_mean_jac, outliers_std_jac = torch.FloatTensor(outliers_mean_jac), torch.FloatTensor(outliers_std_jac)
+                # outliers_mean_jac, outliers_std_jac = torch.FloatTensor(outliers_mean_jac), torch.FloatTensor(outliers_std_jac)
                 axs[i, j].fill_between(N_OBS, outliers_mean_langevin - outliers_std_langevin, outliers_mean_langevin + outliers_std_langevin, alpha=0.2)
                 axs[i, j].plot(N_OBS, outliers_mean_langevin, label=f"LANGEVIN", linewidth=3, marker='o')
                 axs[i, j].fill_between(N_OBS, outliers_mean_gauss - outliers_std_gauss, outliers_mean_gauss + outliers_std_gauss, alpha=0.2)
                 axs[i, j].plot(N_OBS, outliers_mean_gauss, label=f"GAUSS", linewidth=3, marker='o')
-                if task_name in ["sir", "lotka_volterra"]:
-                    axs[i, j].fill_between(N_OBS, outliers_mean_jac - outliers_std_jac, outliers_mean_jac + outliers_std_jac, alpha=0.2)
-                    axs[i, j].plot(N_OBS, outliers_mean_jac, label=f"JAC", linewidth=3, marker='o')
+                # if task_name in ["sir", "lotka_volterra"]:
+                #     axs[i, j].fill_between(N_OBS, outliers_mean_jac - outliers_std_jac, outliers_mean_jac + outliers_std_jac, alpha=0.2)
+                #     axs[i, j].plot(N_OBS, outliers_mean_jac, label=f"JAC", linewidth=3, marker='o')
                 axs[i, j].set_title(f"{task_name}, n_train={n_train}")
                 axs[i, j].set_xlabel("n_obs")
                 axs[i, j].set_xticks(N_OBS)
@@ -272,8 +272,8 @@ if __name__ == '__main__':
                 outliers_std_langevin = []
                 outliers_mean_gauss = []
                 outliers_std_gauss = []
-                outliers_mean_jac = []
-                outliers_std_jac = []
+                # outliers_mean_jac = []
+                # outliers_std_jac = []
                 for k, n_train in enumerate(N_TRAIN):
                     true_parameters = [task.get_true_parameters(num_obs) for num_obs in NUM_OBSERVATION_LIST]
                     # langevin
@@ -286,23 +286,23 @@ if __name__ == '__main__':
                     outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
                     outliers_mean_gauss.append(torch.FloatTensor(outliers).mean())
                     outliers_std_gauss.append(torch.FloatTensor(outliers).std())
-                    # jac
-                    if task_name in ["sir", "lotka_volterra"]:
-                        samples = load_samples(task_name, n_train, lr=1e-3, n_obs=n_obs, cov_mode="JAC")
-                        outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
-                        outliers_mean_jac.append(torch.FloatTensor(outliers).mean())
-                        outliers_std_jac.append(torch.FloatTensor(outliers).std())
+                    # # jac
+                    # if task_name in ["sir", "lotka_volterra"]:
+                    #     samples = load_samples(task_name, n_train, lr=1e-3, n_obs=n_obs, cov_mode="JAC")
+                    #     outliers = [count_outliers(samples[num_obs], true_parameters[num_obs -1]) for num_obs in NUM_OBSERVATION_LIST]
+                    #     outliers_mean_jac.append(torch.FloatTensor(outliers).mean())
+                    #     outliers_std_jac.append(torch.FloatTensor(outliers).std())
 
                 outliers_mean_langevin, outliers_std_langevin = torch.FloatTensor(outliers_mean_langevin), torch.FloatTensor(outliers_std_langevin)
                 outliers_mean_gauss, outliers_std_gauss = torch.FloatTensor(outliers_mean_gauss), torch.FloatTensor(outliers_std_gauss)
-                outliers_mean_jac, outliers_std_jac = torch.FloatTensor(outliers_mean_jac), torch.FloatTensor(outliers_std_jac)
+                # outliers_mean_jac, outliers_std_jac = torch.FloatTensor(outliers_mean_jac), torch.FloatTensor(outliers_std_jac)
                 axs[i, j].fill_between(N_TRAIN, outliers_mean_langevin - outliers_std_langevin, outliers_mean_langevin + outliers_std_langevin, alpha=0.2)
                 axs[i, j].plot(N_TRAIN, outliers_mean_langevin, label=f"LANGEVIN", linewidth=3, marker='o')
                 axs[i, j].fill_between(N_TRAIN, outliers_mean_gauss - outliers_std_gauss, outliers_mean_gauss + outliers_std_gauss, alpha=0.2)
                 axs[i, j].plot(N_TRAIN, outliers_mean_gauss, label=f"GAUSS", linewidth=3, marker='o')
-                if task_name in ["sir", "lotka_volterra"]:
-                    axs[i, j].fill_between(N_TRAIN, outliers_mean_jac - outliers_std_jac, outliers_mean_jac + outliers_std_jac, alpha=0.2)
-                    axs[i, j].plot(N_TRAIN, outliers_mean_jac, label=f"JAC", linewidth=3, marker='o')
+                # if task_name in ["sir", "lotka_volterra"]:
+                #     axs[i, j].fill_between(N_TRAIN, outliers_mean_jac - outliers_std_jac, outliers_mean_jac + outliers_std_jac, alpha=0.2)
+                #     axs[i, j].plot(N_TRAIN, outliers_mean_jac, label=f"JAC", linewidth=3, marker='o')
                 axs[i, j].set_title(f"{task_name}, n_obs={n_obs}")
                 axs[i, j].set_xlabel("n_train")
                 axs[i, j].set_xticks(N_TRAIN)

@@ -1,6 +1,6 @@
 import sys
 
-sys.path.append("tasks/toy_eamples/")
+sys.path.append("tasks/toy_examples/")
 
 import argparse
 import os
