@@ -1,3 +1,5 @@
+import os
+
 import matplotlib.pyplot as plt
 import torch
 
@@ -8,6 +10,7 @@ from debug_learned_gaussian_old import diffused_tall_posterior_score as diffused
 from ot.sliced import max_sliced_wasserstein_distance
 from tqdm import tqdm
 from functools import partial
+from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
 
 
 def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
@@ -23,7 +26,6 @@ def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
     L = L.real
     V = V.real
     return V @ torch.diag_embed(L.pow(p)) @ torch.linalg.inv(V)
-
 
 
 def mean_backward(theta, t, score_fn, nse, **kwargs):
@@ -57,7 +59,6 @@ def prec_matrix_backward(t, dist_cov, nse):
     # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
     #return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
     return (torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * eye)
-
 
 
 def tweedies_approximation(x, theta, t, score_fn, nse, dist_cov_est=None, mode='JAC', clip_mean_bounds = (None, None)):
@@ -130,8 +131,8 @@ def diffused_tall_posterior_score(
     return total_score #/ (1 + (1/n_obs)*torch.abs(total_score))
 
 
-def euler_sde_sampler(score_fn, nsamples, beta, device="cpu", theta_clipping_range=(None, None)):
-    theta_t = torch.randn((nsamples, 2)).to(device)  # (nsamples, 2)
+def euler_sde_sampler(score_fn, nsamples, dim, beta, device="cpu", theta_clipping_range=(None, None)):
+    theta_t = torch.randn((nsamples, dim)).to(device)  # (nsamples, 2)
     time_pts = torch.linspace(1, 0, 1000).to(device)  # (ntime_pts,)
     theta_list = [theta_t.clone().cpu()]
     for i in tqdm(range(len(time_pts) - 1)):
@@ -169,7 +170,7 @@ def gaussien_wasserstein(ref_mu, ref_cov, X2):
 
 
 if __name__ == "__main__":
-    from tasks.toy_examples.data_generators import SBIGaussian2d
+    #from tasks.toy_examples.data_generators import SBIGaussian2d
     from nse import NSE, NSELoss
     from sm_utils import train
 
@@ -179,16 +180,17 @@ if __name__ == "__main__":
     N_TRAIN = 10_000
     N_SAMPLES = 4096
 
-    TYPE_COV_EST = 'DDIM'
-    EPS_PERT = 3e-2
-    # Task
-    task = SBIGaussian2d(prior_type="gaussian")
-    # Prior and Simulator
-    prior = task.prior
-    simulator = task.simulator
+    DIM = 5# Task
 
     # Observations
-    theta_true = torch.FloatTensor([-5, 150])  # true parameters
+    torch.manual_seed(42)
+    means = torch.rand(DIM) * 20 - 10  # between -10 and 10
+    stds = torch.rand(DIM) * 25 + 0.1  # between 0.1 and 25.1
+    task = Gaussian_Gaussian_mD(dim=DIM, means=means, stds=stds)
+    prior = task.prior
+    simulator = task.simulator
+    theta_true = prior.sample(sample_shape=(1,))  # true parameters
+
     x_obs = simulator(theta_true)  # x_obs ~ simulator(theta_true)
     x_obs_100 = torch.cat(
         [simulator(theta_true).reshape(1, -1) for _ in range(100)], dim=0
@@ -209,30 +211,31 @@ if __name__ == "__main__":
     x_obs_ = (x_obs - x_train.mean(axis=0)) / x_train.std(axis=0)
     x_obs_100_ = (x_obs_100 - x_train.mean(axis=0)) / x_train.std(axis=0)
 
+    model_name = f"score_net_gauss_{DIM}.pkl"
     # # train score network
-    # dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
-    # score_net = NSE(theta_dim=2, x_dim=2, hidden_features=[128, 256, 128]).cuda()
+    if model_name not in os.listdir():
+        dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
+        score_net = NSE(theta_dim=DIM, x_dim=DIM, hidden_features=[128, 256, 128]).cuda()
 
-    # avg_score_net = train(
-    #     model=score_net,
-    #     dataset=dataset,
-    #     loss_fn=NSELoss(score_net),
-    #     n_epochs=200,
-    #     lr=1e-3,
-    #     batch_size=256,
-    #     prior_score=False, # learn the prior score via the classifier-free guidance approach
-    # )
-    # score_net = avg_score_net.module
-    # torch.save(score_net, "score_net.pkl")
-
-    # load score network
-    score_net = torch.load("score_net.pkl").cuda()
+        avg_score_net = train(
+            model=score_net,
+            dataset=dataset,
+            loss_fn=NSELoss(score_net),
+            n_epochs=2000,
+            lr=1e-3,
+            batch_size=256,
+            prior_score=False, # learn the prior score via the classifier-free guidance approach
+        )
+        score_net = avg_score_net.module
+        torch.save(score_net, model_name)
+    else:
+        score_net = torch.load(model_name).cuda()
 
     # normalize prior
-    loc_ = (prior.prior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
+    loc_ = (prior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
     cov_ = (
             torch.diag(1 / theta_train.std(axis=0))
-            @ prior.prior.covariance_matrix
+            @ prior.covariance_matrix
             @ torch.diag(1 / theta_train.std(axis=0))
     )
     prior_ = torch.distributions.MultivariateNormal(
@@ -256,18 +259,18 @@ if __name__ == "__main__":
 
 
         t = torch.linspace(0, 1, 1000)
-        lik_cov = torch.FloatTensor([[1, task.rho], [task.rho, 1]]).cuda()
+        lik_cov = task.simulator_cov.cuda()
         lik_cov_ = (
                 torch.diag(1 / theta_train.std(axis=0)).cuda()
                 @ lik_cov
                 @ torch.diag(1 / theta_train.std(axis=0)).cuda()
         ).cuda()
-        posterior_cov_0 = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov) + torch.linalg.inv(prior.prior.covariance_matrix.cuda())))
+        posterior_cov_0 = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov) + torch.linalg.inv(prior.covariance_matrix.cuda())))
 
         posterior_cov_0_ = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov_) + torch.linalg.inv(prior_.covariance_matrix)))
         #posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None] +
         #                          (1 - score_net.alpha(t))[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None])
-        posterior_mean_0 = posterior_cov_0 @ (torch.linalg.inv(prior.prior.covariance_matrix.cuda()) @ prior.prior.loc[:, None].cuda() +
+        posterior_mean_0 = posterior_cov_0 @ (torch.linalg.inv(prior.covariance_matrix.cuda()) @ prior.loc[:, None].cuda() +
                                               torch.linalg.inv(lik_cov) @ x_obs_100[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
         posterior_mean_0_ = posterior_cov_0_ @ (torch.linalg.inv(prior_.covariance_matrix) @ prior_.loc[:, None] +
                                               torch.linalg.inv(lik_cov_) @ x_obs_100_[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
@@ -349,7 +352,7 @@ if __name__ == "__main__":
 
         ]:
             samples_ = euler_sde_sampler(
-                score_fun, N_SAMPLES, beta=score_net.beta, device="cuda:0", theta_clipping_range=(-3, 3),
+                score_fun, N_SAMPLES, dim=DIM, beta=score_net.beta, device="cuda:0", theta_clipping_range=(-100, 100),
             )
             samples_per_alg[name] = samples_ * theta_train.std(axis=0)[None, None] + theta_train.mean(axis=0)[None, None]
 
@@ -358,10 +361,10 @@ if __name__ == "__main__":
         ref_samples = torch.distributions.MultivariateNormal(loc=posterior_mean_0, covariance_matrix=posterior_cov_0).sample((500,)).cpu()
         ind_samples = torch.randint(low=0, high=N_SAMPLES, size=(1000,))
         for ax, (name, all_thetas) in zip(axes.flatten(), samples_per_alg.items()):
-            ax.scatter(*ref_samples.T, label='Ground truth')
-            ax.scatter(*all_thetas[-1, ind_samples].T, label=name, alpha=.8)
-            ax.set_ylim(140, 160)
-            ax.set_xlim(0, -10)
+            ax.scatter(*ref_samples[..., :2].T, label='Ground truth')
+            ax.scatter(*all_thetas[-1, ind_samples, :2].T, label=name, alpha=.8)
+            ax.set_xlim(theta_true[0, 0] - 5, theta_true[0, 0] + 5)
+            ax.set_ylim(theta_true[0, 1] - 5, theta_true[0,1] + 5)
             ax.set_title(name)
             leg = ax.legend()
             for lh in leg.legendHandles:
