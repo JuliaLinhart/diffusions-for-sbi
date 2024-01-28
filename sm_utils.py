@@ -82,15 +82,13 @@ def train_with_validation(
     n_epochs=100,
     lr=1e-4,
     batch_size=128,
-    lr_decay=1e-2,
-    lr_update_freq=200,
-    validation_split=0.25,
+    lr_decay=1,
+    lr_update_freq=2000,
+    validation_split=0.2,
     early_stopping=False,
-    patience=1000,
+    patience=20000,
+    min_nb_epochs=100,
     prior_score=False,
-    save_path=None,
-    losses_filename="losses.pkl",
-    model_filename="score_network.pkl",
 ):
     # get train and validation loaders
     train_loader, val_loader = get_dataloaders(
@@ -99,6 +97,9 @@ def train_with_validation(
 
     # set up optimizer
     opt = torch.optim.Adam(model.parameters(), lr=lr)
+    ema_model = torch.optim.swa_utils.AveragedModel(model,
+                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+    
 
     # start training
     train_losses, val_losses = [], []
@@ -108,7 +109,7 @@ def train_with_validation(
         for e in tepoch:
             # update learning rate
             # lr_e = update_lr(lr, lr_decay, e, n_epochs)
-            if (e + 1) % lr_update_freq == 0:
+            if (e + 1) % lr_update_freq == 0 and (lr_decay < 1):
                 lr = lr * lr_decay
                 set_lr(opt, lr)
 
@@ -116,13 +117,18 @@ def train_with_validation(
             train_loss = 0
             for data in train_loader:
                 # get batch data
-                theta, x, kwargs_sn = get_batch_data(data, prior_score)
-
+                if len(data) > 1:
+                    theta, x, kwargs_sn = get_batch_data(data, prior_score)
+                    kwargs_sn["x"] = x
+                else:
+                    theta = data[0]
+                    kwargs_sn = {}
                 # training step
                 opt.zero_grad()
-                loss = loss_fn(theta, x, **kwargs_sn)
+                loss = loss_fn(theta, **kwargs_sn)
                 loss.backward()
                 opt.step()
+                ema_model.update_parameters(model)
 
                 # update loss
                 train_loss += loss.detach().item() * theta.shape[0]  # unnormalized loss
@@ -135,10 +141,14 @@ def train_with_validation(
                     val_loss = 0
                     for data in val_loader:
                         # get batch data
-                        theta, x, kwargs_sn = get_batch_data(data, prior_score)
-
+                        if len(data) > 1:
+                            theta, x, kwargs_sn = get_batch_data(data, prior_score)
+                            kwargs_sn["x"] = x
+                        else:
+                            theta = data[0]
+                            kwargs_sn = {}
                         # validation step
-                        loss = loss_fn(theta, x, **kwargs_sn)
+                        loss = loss_fn(theta, **kwargs_sn)
 
                         # update loss
                         val_loss += (
@@ -146,42 +156,31 @@ def train_with_validation(
                         )  # unnormalized loss
                     val_loss /= len(dataset) * validation_split  # normalized loss
                     val_losses.append(val_loss)
-
-            tepoch.set_postfix(loss=train_loss, lr=lr)
+                tepoch.set_postfix(train_loss=train_loss, val_loss=val_loss, lr=lr)
+            else:
+                tepoch.set_postfix(loss=train_loss, lr=lr)
 
             # early stopping
             if early_stopping:
                 assert (
                     validation_split > 0
                 ), "validation data is required for early stopping"
-                if best_loss is None or val_loss < best_loss:
+                if best_loss is None or val_loss < best_loss and e > min_nb_epochs:
                     best_loss = val_loss
-                    best_model = model
+                    best_model = ema_model
                     best_epoch = e
                 elif e - best_epoch > patience:
                     break
 
         if early_stopping:
-            model = best_model
+            ema_model = best_model
             e = best_epoch
             print(
                 f"EARLY STOPPING: best validation loss {best_loss} at epoch {best_epoch}"
             )
             print("Did not improve for {} epochs".format(min(patience, n_epochs - e)))
 
-        # save losses and best model
-        if save_path is not None:
-            torch.save(
-                {
-                    "train_losses": train_losses,
-                    "val_losses": val_losses,
-                    "best_epoch": e,
-                },
-                save_path + losses_filename,
-            )
-            torch.save(model, save_path + model_filename)
-
-    return model
+    return ema_model, train_losses, val_losses, e
 
 
 def get_dataloaders(dataset, batch_size, validation_split):

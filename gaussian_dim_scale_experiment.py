@@ -9,7 +9,7 @@ import time
 
 from functools import partial
 from nse import NSE, NSELoss
-from sm_utils import train
+from sm_utils import train_with_validation as train
 from torch.func import vmap
 from zuko.nn import MLP
 
@@ -80,15 +80,16 @@ def run_train_sgm(
     print()
 
     # Train Score Network
-    avg_score_net, train_losses, val_losses = train(
+    avg_score_net, train_losses, val_losses, best_epochs = train(
         score_network,
         dataset=data_train,
         loss_fn=NSELoss(score_network),
         n_epochs=n_epochs,
         lr=lr,
         batch_size=batch_size,
-        track_loss=True,
+        # track_loss=True,
         validation_split=0.2,
+        early_stopping=True,
     )
     score_network = avg_score_net.module
 
@@ -102,7 +103,7 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses},
+        {"train_losses": train_losses, "val_losses": val_losses, "best_epochs": best_epochs},
         save_path + f"train_losses.pkl",
     )
 
@@ -159,8 +160,9 @@ def run_sample_sgm(
         print(f"Using LANGEVIN sampler, clip = {clip}.")
         print()
 
+        theta_clipping_range = (None, None)
         ext = ""
-        if "clip":
+        if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
         start_time = time.time()
@@ -197,7 +199,7 @@ def run_sample_sgm(
 
         cov_mode_name = cov_mode
         theta_clipping_range = (None, None)
-        if "clip":
+        if clip:
             theta_clipping_range = (-3, 3)
             cov_mode_name = cov_mode + "_clip"
 
@@ -378,7 +380,7 @@ if __name__ == "__main__":
             theta_train = dataset_train["theta"][: args.n_train]
             x_train = dataset_train["x"][: args.n_train]
         else:
-            theta_train = prior.sample((args.n_train,))
+            theta_train = prior.sample((50000,))
             x_train = simulator(theta_train)
 
             dataset_train = {"theta": theta_train, "x": x_train}

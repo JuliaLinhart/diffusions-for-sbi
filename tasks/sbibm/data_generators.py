@@ -4,6 +4,13 @@ import torch
 import pyro
 import sbibm
 
+# from jax import random
+# import jax.numpy as jnp
+# from numpyro.infer import MCMC, NUTS
+
+from tasks.sbibm.gaussianlinear_multi_obs import GausianLinear_multiobs
+# from tasks.sbibm.gaussianmixture_multi_obs import model
+
 def get_task(task_name):
     if task_name == "gaussian_linear":
         task = sbibm.get_task("gaussian_linear", prior_scale=1.0)
@@ -40,3 +47,23 @@ def get_task(task_name):
         return sbibm.get_task(task_name)
     else:
         raise ValueError(f"Unknown task {task_name}")
+    
+def get_tall_posterior_samples(task_name, x_obs, num_samples=1000, save_path='/'):
+    if task_name == "gaussian_linear":
+        task = GausianLinear_multiobs(prior_scale=1., simulator_scale=torch.linspace(0.6, 1.4, 10))
+        samples = task._sample_reference_posterior_multiobs(num_samples, x_obs)
+    # elif task_name == "gaussian_mixture":
+    #     x_obs = jnp.array(x_obs)
+    #     kernel = NUTS(model)
+    #     mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples)
+    #     mcmc.run(
+    #         rng_key=random.PRNGKey(1),
+    #         x_obs=x_obs,
+    #         n_obs=x_obs.shape[0]
+    #     )
+    #     samples = mcmc.get_samples()["theta"]
+    else:
+        raise NotImplementedError
+    
+    return samples
+        

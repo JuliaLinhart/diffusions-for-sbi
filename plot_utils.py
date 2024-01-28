@@ -15,9 +15,20 @@ def set_plotting_style():
     plt.rcParams["font.size"] = 23.0
     plt.rcParams["axes.titlesize"] = 27.0
 
-    alpha_fill_between = 0.2
-    linewidth = 2.0
+METHODS_STYLE = {
+    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-"},
+    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--"},
+    # "JAC": {"label":"JAC", "color": "orange", "marker": "o"},
+    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--"},
+    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o"}, ##E87EA1
+    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--"},
+}
 
+METRICS_STYLE = {
+    "swd": {"label": "Sliced W2"},
+    "mmd": {"label": "MMD"},
+    "mmd_to_dirac": {"label": "MMD to Dirac"},
+}
 
 def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
     fig = None
@@ -71,6 +82,57 @@ def pairplot_with_groundtruth_2d(
         pg.axes.ravel()[2].set_xlim(plot_bounds[0])
         pg.axes.ravel()[3].set_xlim(plot_bounds[1])
         pg.axes.ravel()[2].set_ylim(plot_bounds[1])
+
+    return pg
+
+# Plot learned posterior P(theta | x_obs)
+def pairplot_with_groundtruth_md(
+    samples_list,
+    labels,
+    colors,
+    theta_true=None,
+    param_names=None,
+    plot_bounds=None,
+):
+    columns = [r"$\theta_1$", rf"$\theta_2$"]
+    if param_names is not None:
+        columns = param_names
+
+    dfs = []
+    for samples, label in zip(samples_list, labels):
+        df = pd.DataFrame(samples, columns=columns)
+        df["Distribution"] = label
+        dfs.append(df)
+
+    dfs = pd.concat(dfs, ignore_index=True)
+
+    pg = sns.pairplot(
+        dfs,
+        hue="Distribution",
+        corner=True,
+        palette=dict(zip(labels, colors)),
+    )
+
+    if theta_true is not None:
+        if theta_true.ndim > 1:
+            theta_true = theta_true[0]
+            dim = len(theta_true)
+        for i in range(dim):
+            # plot dirac on diagonal
+            pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], ls="--", linewidth=2, c="black")
+            # plot point on off-diagonal, lower triangle
+            for j in range(i):
+                pg.axes.ravel()[i*dim+j].scatter(
+                    theta_true[j], theta_true[i], marker="o", c="black", s=50, edgecolor="white"
+                )        
+
+    if plot_bounds is not None:
+        # set plot bounds
+        for i in range(dim):
+            pg.axes.ravel()[i*(dim+1)].set_xlim(plot_bounds[i])
+            for j in range(i):
+                pg.axes.ravel()[i*dim+j].set_xlim(plot_bounds[j])
+                pg.axes.ravel()[i*dim+j].set_ylim(plot_bounds[i])
 
     return pg
 
@@ -148,3 +210,6 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors, n_sa
     g.add_legend()
 
     return g
+
+
+
