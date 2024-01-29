@@ -18,7 +18,7 @@ def set_plotting_style():
 METHODS_STYLE = {
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-"},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--"},
-    # "JAC": {"label":"JAC", "color": "orange", "marker": "o"},
+    "JAC": {"label":"JAC", "color": "orange", "marker": "o"},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--"},
     "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o"}, ##E87EA1
     "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--"},

@@ -1,8 +1,6 @@
 import torch
 
-def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], percentage=0.01):
-    samples = samples.clone()
-
+def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], scaled=False, percentage=0):
     dict = {metric: [] for metric in metrics}
 
     if theta_true.ndim > 1:
@@ -18,11 +16,25 @@ def dist_to_dirac(samples, theta_true, metrics=["mse", "mmd"], percentage=0.01):
             dict["mse"].append((samples_coordj - theta_true[j]).square().mean())
         if "mmd" in metrics:
             sd = torch.sqrt(samples_coordj.var())
-            dict["mmd"].append((samples_coordj.var() * sd + (samples_coordj.mean() - theta_true[j]).square()))
+            if scaled:
+                mmd = (samples_coordj.var() + (samples_coordj.mean() - theta_true[j]).square()) / sd
+            else:
+                mmd = samples_coordj.var() + (samples_coordj.mean() - theta_true[j]).square()
+            dict["mmd"].append(mmd)
     for metric in metrics:
         dict[metric] = torch.stack(dict[metric]).mean()
 
     return dict
+
+# def dist_to_dirac(samples, theta_true):
+#     if theta_true.ndim > 1:
+#         theta_true = theta_true[0]
+#     wd = []
+#     for j in range(len(theta_true)):
+#         samples_coordj = samples[:, j]
+#         sd = torch.sqrt(samples_coordj.var())
+#         wd.append((samples_coordj.var() + (samples_coordj.mean() - theta_true[j])**2) / sd)
+#     return torch.stack(wd).mean()
 
 def count_outliers(samples, theta_true, threshold=100):
     if theta_true.ndim > 1:

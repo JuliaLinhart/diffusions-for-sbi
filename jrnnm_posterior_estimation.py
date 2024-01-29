@@ -8,7 +8,7 @@ import torch
 
 from functools import partial
 from nse import NSE, NSELoss
-from sm_utils import train
+from sm_utils import train_with_validation as train
 
 # from tasks.jrnnm.summary import summary_JRNMM
 from tasks.jrnnm.prior import prior_JRNMM
@@ -27,7 +27,7 @@ import time
 
 PATH_EXPERIMENT = "results/jrnnm/"
 N_OBS_LIST = [1, 8, 14, 22, 30]
-COV_MODES = ["GAUSS", "JAC", "GAUSS_clip"]
+COV_MODES = ["GAUSS", "JAC"]
 
 
 def run_train_sgm(
@@ -40,7 +40,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:3"
 
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
@@ -54,10 +54,18 @@ def run_train_sgm(
     )
 
     # Score network
+    # embedding nets
+    theta_dim = theta_train.shape[-1]
+    x_dim = x_train.shape[-1]
+    theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
+    x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
     score_network = NSE(
-        theta_dim=theta_train.shape[-1],
-        x_dim=x_train.shape[-1],
+        theta_dim=theta_dim,
+        x_dim=x_dim,
+        embedding_nn_theta=theta_embedding_net,
+        embedding_nn_x=x_embedding_net,
         hidden_features=[128, 256, 128],
+        freqs=32,
     ).to(device)
 
     # Train score network
@@ -75,15 +83,17 @@ def run_train_sgm(
     print()
 
     # Train Score Network
-    avg_score_net, train_losses, val_losses = train(
+    avg_score_net, train_losses, val_losses, best_epoch = train(
         score_network,
         dataset=data_train,
         loss_fn=NSELoss(score_network),
         n_epochs=n_epochs,
         lr=lr,
         batch_size=batch_size,
-        track_loss=True,
-        validation_split=0.1,
+        # track_loss=True,
+        validation_split=0.2,
+        early_stopping=True,
+        min_nb_epochs=n_epochs * 0.8, # 4000
     )
     score_network = avg_score_net.module
 
@@ -97,7 +107,7 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses},
+        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
         save_path + f"train_losses.pkl",
     )
 
@@ -115,12 +125,13 @@ def run_sample_sgm(
     prior,
     cov_mode,
     langevin,
+    clip,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:3"
 
     n_obs = context.shape[0]
 
@@ -141,8 +152,13 @@ def run_sample_sgm(
     print(f"======================================================================")
     if langevin:
         print()
-        print(f"Using LANGEVIN sampler.")
+        print(f"Using LANGEVIN sampler, clip = {clip}.")
         print()
+        ext = ""
+        theta_clipping_range = (None, None)
+        if clip:
+            theta_clipping_range = (-3, 3)
+            ext = "_clip"
         start_time = time.time()
         samples = score_network.predictor_corrector(
             (nsamples,),
@@ -155,6 +171,7 @@ def run_sample_sgm(
             r=0.5,
             predictor_type="id",
             verbose=True,
+            theta_clipping_range=theta_clipping_range,
         ).cpu()
         time_elapsed = time.time() - start_time
         results_dict = None
@@ -162,13 +179,13 @@ def run_sample_sgm(
         # save  path
         save_path += f"langevin_steps_400_5/"
         samples_filename = (
-            save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}.pkl"
+            save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
         )
-        time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}.pkl"
+        time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
 
     else:
         print()
-        print(f"Using EULER sampler.")
+        print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
         # estimate cov
         # start_time = time.time()
@@ -180,76 +197,71 @@ def run_sample_sgm(
         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
         # time_cov_est = time.time() - start_time
 
-        # # define score function for tall posterior
-        # score_fn = partial(
-        #     diffused_tall_posterior_score,
-        #     prior_score_fn=prior_score_fn_norm,
-        #     x_obs=context_norm.to(device),
-        #     nse=score_network.to(device),
-        # )
-
-        if cov_mode == "GAUSS":
-            warmup = 0.5
-        else:
-            warmup = 0.5
+        # define score function for tall posterior
         score_fn = partial(
             diffused_tall_posterior_score,
             prior_type="uniform",
-            prior=None,  # no need for tweedie prior
+            prior=None,  
             prior_score_fn=prior_score_fn_norm,  # analytical prior score function
             x_obs=context_norm.to(device),  # observations
             nse=score_network,  # trained score network
-            cov_mode=cov_mode if cov_mode in ["JAC", "GAUSS"] else "GAUSS",
-            warmup_alpha=warmup,
-            psd_clipping=True if cov_mode in ["JAC", "GAUSS_clip"] else False,
-            scale_gradlogL=True,
             dist_cov_est=cov_est,
+            cov_mode=cov_mode,
+            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
+            # psd_clipping=True if cov_mode == 'JAC' else False,
+            # scale_gradlogL=True,
         )
+
+        cov_mode_name = cov_mode
+        theta_clipping_range = (None, None)
+        if clip:
+            theta_clipping_range = (-3, 3)
+            cov_mode_name += "_clip"
 
         # sample from tall posterior
         start_time = time.time()
         (
             samples,
             all_samples,
-            gradlogL,
-            lda,
-            posterior_scores,
-            means_posterior_backward,
-            sigma_posterior_backward,
+            # gradlogL,
+            # lda,
+            # posterior_scores,
+            # means_posterior_backward,
+            # sigma_posterior_backward,
         ) = euler_sde_sampler(
             score_fn,
             nsamples,
             dim_theta=len(theta_true),
             beta=score_network.beta,
             device=device,
-            debug=True,
-            theta_clipping_range=(-3, 3),
+            debug=False,
+            theta_clipping_range=theta_clipping_range,
         )
         time_elapsed = time.time() - start_time  # + time_cov_est
 
         assert torch.isnan(samples).sum() == 0
 
-        results_dict = {
-            "all_theta_learned": all_samples,
-            "gradlogL": gradlogL,
-            "lda": lda,
-            "posterior_scores": posterior_scores,
-            "means_posterior_backward": means_posterior_backward,
-            "sigma_posterior_backward": sigma_posterior_backward,
-        }
+        # results_dict = {
+        #     "all_theta_learned": all_samples,
+        #     # "gradlogL": gradlogL,
+        #     # "lda": lda,
+        #     # "posterior_scores": posterior_scores,
+        #     # "means_posterior_backward": means_posterior_backward,
+        #     # "sigma_posterior_backward": sigma_posterior_backward,
+        # }
 
         # save  path
         save_path += f"euler_steps_{steps}/"
         samples_filename = (
             save_path
-            + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
+            + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
         )
-        results_dict_filename = (
-            save_path
-            + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
-        )
+        # results_dict_filename = (
+        #     save_path
+        #     + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
+        # )
         time_filename = (
-            save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode}.pkl"
+            save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
         )
 
     # unnormalize
@@ -257,15 +269,14 @@ def run_sample_sgm(
     samples = samples * theta_train_std + theta_train_mean
 
     # save  results
-    save_path += f"euler_steps_{steps}/"
     os.makedirs(
         save_path,
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
     torch.save(time_elapsed, time_filename)
-    if results_dict is not None:
-        torch.save(results_dict, results_dict_filename)
+    # if results_dict is not None:
+    #     torch.save(results_dict, results_dict_filename)
 
 
 if __name__ == "__main__":
@@ -287,10 +298,10 @@ if __name__ == "__main__":
         "--n_train", type=int, default=50_000, help="number of training data samples"
     )
     parser.add_argument(
-        "--n_epochs", type=int, default=10000, help="number of training epochs"
+        "--n_epochs", type=int, default=5000, help="number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=64, help="batch size for training"
+        "--batch_size", type=int, default=256, help="batch size for training"
     )
     parser.add_argument(
         "--lr", type=float, default=1e-4, help="learning rate for training"
@@ -334,6 +345,11 @@ if __name__ == "__main__":
         "--langevin",
         action="store_true",
         help="whether to use langevin sampler (Geffner et al., 2023)",
+    )
+    parser.add_argument(
+        "--clip",
+        action="store_true",
+        help="whether to clip the posterior samples",
     )
 
     # Parse Arguments
@@ -449,9 +465,17 @@ if __name__ == "__main__":
                 "prior": prior,  # for score function
                 "cov_mode": args.cov_mode,
                 "langevin": args.langevin,
+                "clip": args.clip,
                 "save_path": save_path,
             }
         run_fn(**kwargs_run)
+
+    if not args.submitit:
+        if args.run == "sample_all":
+            for n_obs in N_OBS_LIST:
+                run(n_obs=n_obs, run_type="sample")
+        else:
+            run()
 
     if args.submitit:
         import submitit

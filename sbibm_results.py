@@ -18,8 +18,9 @@ PATH_EXPERIMENT = "results/sbibm/"
 TASKS = {
     "gaussian_linear": "Gaussian Linear",
     "gaussian_mixture": "Gaussian Mixture",
-    # "sir": "SIR",
-    # "lotka_volterra": "Lotka-Volterra"
+    "sir": "SIR",
+    "lotka_volterra": "Lotka-Volterra",
+    "slcp": "SLCP",
 }
 N_TRAIN = [1000, 3000, 10000, 30000]
 BATCH_SIZE = 64
@@ -31,14 +32,26 @@ METRICS = ["swd", "mmd"]
 # METRICS = ["mmd_to_dirac"]
 
 def load_losses(task_name, n_train, lr, path,):
-    losses = torch.load(path + f'{task_name}/n_train_{n_train}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
+    if task_name in  ["gaussian_mixture", "slcp", "lotka_volterra"] and n_train == 30000:
+        n_epochs, batch_size = 5000, 256
+    elif task_name == "sir":
+        n_epochs = 5000
+        batch_size = 256 if n_train == 30000 else 64
+    else:
+        n_epochs, batch_size = N_EPOCHS, BATCH_SIZE
+    losses = torch.load(path + f'{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}/train_losses.pkl')
     train_losses = losses["train_losses"]
     val_losses = losses["val_losses"]
     best_epoch = losses["best_epoch"]
     return train_losses, val_losses, best_epoch
 
 def path_to_results(task_name, result_name, num_obs, n_train, lr, n_obs, cov_mode=None, langevin=False, clip=False):
-    path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/"
+    if task_name in  ["gaussian_mixture", "slcp", "lotka_volterra"] and n_train == 30000:
+        n_epochs, batch_size = 5000, 256
+    else:
+        n_epochs, batch_size = N_EPOCHS, BATCH_SIZE
+
+    path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}/"
     path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
     path  = path + result_name + f"_{num_obs}_n_obs_{n_obs}.pkl"
     if not langevin:
@@ -97,7 +110,7 @@ def compute_mean_distance_to_true_theta(
             # theta_true = task.get_true_parameters(num_obs)
             theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
             dist["mmd_to_dirac"] = dist_to_dirac(
-                samples[num_obs], theta_true, percentage=percentage
+                samples[num_obs], theta_true, percentage=percentage, scaled=True,
             )["mmd"]
         else:
             if samples_ref is None:
@@ -154,7 +167,7 @@ if __name__ == "__main__":
     if args.losses:
         # plot losses to select lr
         lr_list = [1e-4, 1e-3]
-        fig, axs = plt.subplots(4, 4, figsize=(20, 20), constrained_layout=True, sharex=True, sharey=True)
+        fig, axs = plt.subplots(5, 4, figsize=(20, 25), constrained_layout=True, sharex=True, sharey=True)
         for i, task_name in enumerate(TASKS.keys()):
             for j, n_train in enumerate(N_TRAIN):
                 best_val_loss = {}
@@ -164,7 +177,7 @@ if __name__ == "__main__":
                     )
                     best_val_loss[lr_] = val_losses[best_epoch]
                     # axs[i, j].plot(train_losses, label=f"train") #, lr={LR}")
-                    axs[i, j].plot(val_losses, label=f"val, lr={lr_}")
+                    axs[i, j].plot(val_losses, label=f"val, lr={lr_}", color=c)
                     axs[i, j].axvline(best_epoch, color=c, linestyle="--", linewidth=3)
                 # print(best_val_loss)
                 # get lr for min best val loss
@@ -172,7 +185,7 @@ if __name__ == "__main__":
                 best_lr = 1e-4
                 axs[i, j].set_title(TASKS[task_name] + f" \n n_train = {n_train}" + f" \n best_lr={best_lr}")
                 axs[i, j].set_ylim([0, 0.5])
-                # axs[i, j].set_xlim([0, 5000])
+                axs[i, j].set_xlim([0, 5000])
                 axs[i, j].legend()
                 if i == 3:
                     axs[i, j].set_xlabel("epochs")
@@ -236,7 +249,7 @@ if __name__ == "__main__":
                     if "sir" in task_name or "lotka_volterra" in task_name:
                         continue
                     else:
-                        if metric in ["swd", "mmd_to_dirac"]:
+                        if metric in ["swd"]: #, "mmd_to_dirac"]:
                             axs[i, j].set_ylim(0, 1)
                     axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
             handles, labels = axs[0, 0].get_legend_handles_labels()
@@ -301,7 +314,7 @@ if __name__ == "__main__":
                     if "sir" in task_name or "lotka_volterra" in task_name:
                         continue
                     else:
-                        if metric in ["swd", "mmd_to_dirac"]:
+                        if metric in ["swd"]: #, "mmd_to_dirac"]:
                             axs[i, j].set_ylim(0, 1)
                     axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
             handles, labels = axs[0, 0].get_legend_handles_labels()
@@ -394,28 +407,30 @@ if __name__ == "__main__":
     #         dist = dist_to_dirac(samples[num_obs], true_theta)
     #         print(task_name, num_obs, dist["mse"], dist["mmd"])
 
-    # n_train = 30000
+    # n_train = 10000
     # n_obs = 8
     # task_name = "gaussian_mixture"
 
     # for num_obs in NUM_OBSERVATION_LIST:
     #     true_theta = get_task(task_name).get_true_parameters(num_obs)[0]
-    #     for n_obs in N_OBS:
+    #     for n_obs in N_OBS[:1]:
     #         samples_ref = load_reference_samples(task_name, n_obs)
     #         plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.1)
-    #     plt.scatter(true_theta[0], true_theta[1], color="black")
-    #     plt.savefig(f"samples_{task_name}_{num_obs}.png")
-    #     plt.clf()
-    #     for n_obs in N_OBS:
     #         samples = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=True)
     #         plt.scatter(samples[num_obs][:, 0], samples[num_obs][:, 1], alpha=0.5, label=f"n_obs={n_obs}")
     #     plt.scatter(true_theta[0], true_theta[1], color="black")
-    #     plt.legend()
-    #     plt.savefig(f"samples_{task_name}_{num_obs}_clip.png")
+    #     plt.savefig(f"samples_{task_name}_{num_obs}_.png")
     #     plt.clf()
-    #     for n_obs in N_OBS:
-    #         samples = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=True)
-    #         plt.scatter(samples[num_obs][:, 0], samples[num_obs][:, 1], alpha=0.5, label=f"n_obs={n_obs}")
-    #     plt.scatter(true_theta[0], true_theta[1], color="black")
-    #     plt.savefig(f"samples_{task_name}_{num_obs}_langevin_clip.png")
-    #     plt.clf()
+        # for n_obs in N_OBS:
+        #     samples = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=True)
+        #     plt.scatter(samples[num_obs][:, 0], samples[num_obs][:, 1], alpha=0.5, label=f"n_obs={n_obs}")
+        # plt.scatter(true_theta[0], true_theta[1], color="black")
+        # plt.legend()
+        # plt.savefig(f"samples_{task_name}_{num_obs}_clip.png")
+        # plt.clf()
+        # for n_obs in N_OBS:
+        #     samples = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=True)
+        #     plt.scatter(samples[num_obs][:, 0], samples[num_obs][:, 1], alpha=0.5, label=f"n_obs={n_obs}")
+        # plt.scatter(true_theta[0], true_theta[1], color="black")
+        # plt.savefig(f"samples_{task_name}_{num_obs}_langevin_clip.png")
+        # plt.clf()

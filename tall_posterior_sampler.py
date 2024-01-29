@@ -4,6 +4,7 @@ from torch.func import vmap, jacrev
 from tqdm import tqdm
 from functools import partial
 from vp_diffused_priors import get_vpdiff_gaussian_score
+from nse import assure_positive_definitness
 
 
 def mean_backward(theta, t, score_fn, nse, **kwargs):
@@ -86,6 +87,23 @@ def tweedies_approximation(
         mean = mean.clip(*clip_mean_bounds)
     return prec, mean, score
 
+def tweedies_approximation_prior(theta, t, score_fn, nse, mode='vmap'):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+    if mode == 'vmap':
+        def score_jac(theta):
+            score = score_fn(theta=theta, t=t)
+            return score, score
+        jac_score, score = vmap(jacrev(score_jac, has_aux=True))(theta)
+    else:
+        raise NotImplemented
+    mean = 1 / (alpha_t**0.5) * (theta + sigma_t**2 * score)
+    cov = (sigma_t**2 / alpha_t) * (
+            torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
+    )
+    prec = torch.linalg.inv(cov)
+    return prec, mean, score
+
 
 def diffused_tall_posterior_score(
     theta,
@@ -97,8 +115,10 @@ def diffused_tall_posterior_score(
     score_fn=None,
     dist_cov_est=None,
     cov_mode="JAC",
+    prior_type="gaussian",
 ):
     n_obs = x_obs.shape[0]
+
 
     # Tweedies approx for p_{0|t}
     prec_0_t, _, scores = tweedies_approximation(
@@ -110,18 +130,32 @@ def diffused_tall_posterior_score(
         dist_cov_est=dist_cov_est,
         mode=cov_mode,
     )
-    prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, nse).repeat(
-        theta.shape[0], 1, 1
-    )
     prior_score = prior_score_fn(theta, t)
-    prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
-    prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
-    lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
-    weighted_scores = prec_score_prior + (
-        prec_score_post - prec_score_prior[:, None]
-    ).sum(dim=1)
+    
+    if prior_type == "gaussian":
+        prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, nse).repeat(
+            theta.shape[0], 1, 1
+        )
+        prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
+        prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+        lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
+        weighted_scores = prec_score_prior + (
+            prec_score_post - prec_score_prior[:, None]
+        ).sum(dim=1)
 
-    total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+        total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+    else:
+        total_score = (1 - n_obs) * prior_score + scores.sum(dim=1)
+        if (nse.alpha(t)**.5 > .5) and (n_obs > 1):
+            prec_prior_0_t, _, _ = tweedies_approximation_prior(theta, t, prior_score_fn, nse)
+            prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
+            prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+            lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
+            weighted_scores = prec_score_prior + (
+                prec_score_post - prec_score_prior[:, None]
+            ).sum(dim=1)
+
+            total_score = torch.linalg.solve(A=lda, B=weighted_scores)
     return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
 
 

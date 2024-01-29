@@ -38,7 +38,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:3"
 
     # Prepare training data
     # normalize theta
@@ -126,7 +126,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:3"
 
     n_obs = context.shape[0]
 
@@ -237,22 +237,22 @@ def run_sample_sgm(
         )
         time_elapsed = time.time() - start_time  # + time_cov_est
 
-        results_dict = {
-            "all_theta_learned": all_samples,
-            # "gradlogL": gradlogL,
-            # "lda": lda,
-            # "posterior_scores": posterior_scores,
-            # "means_posterior_backward": means_posterior_backward,
-            # "sigma_posterior_backward": sigma_posterior_backward,
-        }
+        # results_dict = {
+        #     "all_theta_learned": all_samples,
+        #     # "gradlogL": gradlogL,
+        #     # "lda": lda,
+        #     # "posterior_scores": posterior_scores,
+        #     # "means_posterior_backward": means_posterior_backward,
+        #     # "sigma_posterior_backward": sigma_posterior_backward,
+        # }
 
         save_path += f"euler_steps_{steps}/"
         samples_filename = (
             save_path + f"posterior_samples_n_obs_{n_obs}_{cov_mode_name}.pkl"
         )
-        results_dict_filename = (
-            save_path + f"results_dict_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        )
+        # results_dict_filename = (
+        #     save_path + f"results_dict_n_obs_{n_obs}_{cov_mode_name}.pkl"
+        # )
         time_filename = save_path + f"time_n_obs_{n_obs}_{cov_mode_name}.pkl"
 
     # unnormalize
@@ -266,8 +266,8 @@ def run_sample_sgm(
     )
     torch.save(samples, samples_filename)
     torch.save(time_elapsed, time_filename)
-    if results_dict is not None:
-        torch.save(results_dict, results_dict_filename)
+    # if results_dict is not None:
+    #     torch.save(results_dict, results_dict_filename)
 
 
 if __name__ == "__main__":
@@ -462,7 +462,7 @@ if __name__ == "__main__":
 
     if not args.submitit:
         if args.run == "sample_all":
-            for dim in DIM_LIST:
+            for dim in [2]:
                 for n_obs in N_OBS_LIST:
                     run(dim=dim, n_obs=n_obs, run_type="sample")
         elif args.run == "train_all":

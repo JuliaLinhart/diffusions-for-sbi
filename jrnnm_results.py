@@ -2,120 +2,138 @@ import torch
 import matplotlib.pyplot as plt
 
 # from ot import sliced_wasserstein_distance
-from experiment_utils import load_losses, dist_to_dirac
+from experiment_utils import dist_to_dirac
+from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style
 
 PATH_EXPERIMENT = "results/jrnnm/"
-TASKS = ["3d", "4d"]
-LR = [1e-3, 1e-4]
+DIMS = [3, 4]
 N_OBS = [1, 8, 14, 22, 30]
-METRICS = ["mse", "mmd"]
+METRICS = ["mmd_to_dirac"]
+N_EPOCHS = 1000
+LR = 1e-3
+
+def load_losses(dim, lr=LR, n_epochs=N_EPOCHS):
+    filename = PATH_EXPERIMENT + f"{dim}d/n_train_50000_n_epochs_{n_epochs}_lr_{lr}/train_losses.pkl"
+    losses = torch.load(filename)
+    train_losses = losses["train_losses"]
+    val_losses = losses["val_losses"]
+    return train_losses, val_losses
 
 
-def load_results(task_name, lr, n_obs, gain=0.0, cov_mode=None, langevin=False):
+def load_results(dim, result_name, n_obs, lr=LR, n_epochs=N_EPOCHS, gain=0.0, cov_mode=None, langevin=False, clip=False):
     theta_true = [135.0, 220.0, 2000.0, gain]
-    if task_name == "3d":
+    if dim == 3:
         theta_true = theta_true[:3]
-    if langevin:
-        filename = (
-            PATH_EXPERIMENT
-            + f"{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/langevin_steps_400_5/"
-        )
-    else:
-        filename = (
-            PATH_EXPERIMENT
-            + f"{task_name}/n_train_50000_n_epochs_1000_lr_{lr}/euler_steps_1000/"
-        )
-    filename_samples = filename + f"posterior_samples_{theta_true}_n_obs_{n_obs}.pkl"
-    filename_time = filename + f"time_{theta_true}_n_obs_{n_obs}.pkl"
-    if cov_mode is not None:
-        filename_samples = filename_samples[:-4] + f"_{cov_mode}.pkl"
-        filename_time = filename_time[:-4] + f"_{cov_mode}.pkl"
-    samples = torch.load(filename_samples)
-    time = torch.load(filename_time)
-    return samples, time
-
-
-# # plot losses function to select lr
-# fig, axs = plt.subplots(2, 1, figsize=(5, 5), constrained_layout=True)
-# for i, task_name in enumerate(TASKS):
-#     for j, lr in enumerate(LR):
-#         train_losses, val_losses = load_losses(task_name, n_train=50000, lr=lr, path=PATH_EXPERIMENT)
-#         axs[i].plot(train_losses, label=f"train, lr={lr}")
-#         axs[i].plot(val_losses, label=f"val, lr={lr}")
-#         axs[i].set_title(f"{task_name}")
-#         axs[i].set_xlabel("epochs")
-#         axs[i].set_ylim([0,0.5])
-#         axs[i].legend()
-# plt.savefig(PATH_EXPERIMENT + "losses.png")
-# plt.clf()
-
+    path = PATH_EXPERIMENT + f"{dim}d/n_train_50000_n_epochs_{n_epochs}_lr_{lr}/"
+    path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
+    path  = path + result_name + f"_{theta_true}_n_obs_{n_obs}.pkl"
+    if not langevin:
+        path = path[:-4] + f"_{cov_mode}.pkl"
+    if clip:
+        path = path[:-4] + "_clip.pkl"
+    results = torch.load(path)
+    return results
 
 # compute mean distance to true theta over all observations
-def compute_distance_to_true_theta(task_name, gain=0.0, cov_mode=None, langevin=False):
+def compute_distance_to_true_theta(dim, gain=0.0, cov_mode=None, langevin=False, clip=False):
     true_parameters = torch.tensor([135.0, 220.0, 2000.0, gain])
-    if task_name == "3d":
+    if dim == 3:
         true_parameters = true_parameters[:3]
     dist_dict = dict(zip(N_OBS, [[]] * len(N_OBS)))
     for n_obs in N_OBS:
-        samples, _ = load_results(
-            task_name,
-            lr=1e-3,
+        samples = load_results(
+            dim,
+            result_name="posterior_samples",
             n_obs=n_obs,
             gain=gain,
             cov_mode=cov_mode,
             langevin=langevin,
+            clip=clip,
         )
-        dist_dict[n_obs] = dist_to_dirac(samples, true_parameters)
+        dist_dict[n_obs] = dist_to_dirac(samples, true_parameters, metrics=["mmd"], scaled=True)
     return dist_dict
 
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--losses", action="store_true")
+    parser.add_argument("--w_dist", action="store_true")
 
-gain = 0.0
-# # plot mean distance to true theta as function of n_obs
-# for metric in METRICS:
-#     fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
-#     for i, task_name in enumerate(TASKS):
-#         for cov_mode in ["JAC", "GAUSS", "GAUSS_clip"]:
-#             dist_dict = compute_distance_to_true_theta(task_name, cov_mode=cov_mode)
-#             axs[i].plot(N_OBS, [dist_dict[n_obs][metric] for n_obs in N_OBS], marker = 'o', label=f"{metric} ({cov_mode})")
-#         dist_dict = compute_distance_to_true_theta(task_name, gain=gain, langevin=True)
-#         axs[i].plot(N_OBS, [dist_dict[n_obs][metric] for n_obs in N_OBS], marker = 'o', label=f"{metric} (langevin)")
-#         axs[i].set_xticks(N_OBS)
-#         axs[i].set_xlabel("n_obs")
-#         axs[i].legend()
-#         axs[i].set_title(f"{task_name}")
+    args = parser.parse_args()
 
-#     plt.suptitle(f"Distance to true theta = (135, 220, 2000, {gain})")
-#     plt.savefig(PATH_EXPERIMENT + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.png")
-#     plt.savefig(PATH_EXPERIMENT + f"{metric}_distance_to_true_theta_n_obs_g_{gain}.pdf")
-#     plt.clf()
+    set_plotting_style()
 
-# runtime comparison
-fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
-for i, task_name in enumerate(TASKS):
-    times_jac = []
-    times_gauss = []
-    times_langevin = []
-    for n_obs in N_OBS:
-        _, time_j = load_results(
-            task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="JAC"
-        )
-        _, time_g = load_results(
-            task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="GAUSS"
-        )
-        _, time_l = load_results(
-            task_name, lr=1e-3, n_obs=n_obs, gain=gain, langevin=True
-        )
-        times_jac.append(time_j)
-        times_gauss.append(time_g)
-        times_langevin.append(time_l)
-    axs[i].plot(N_OBS, times_jac, marker="o", label=f"JAC")
-    axs[i].plot(N_OBS, times_gauss, marker="o", label=f"GAUSS")
-    axs[i].plot(N_OBS, times_langevin, marker="o", label=f"langevin")
-    axs[i].set_xticks(N_OBS)
-    axs[i].set_xlabel("n_obs")
-    axs[i].legend()
-    axs[i].set_title(f"{task_name}")
-plt.suptitle(f"Runtime comparison")
-plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.png")
-plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.pdf")
-plt.clf()
+    if args.losses:
+
+        # plot losses function to select lr
+        fig, axs = plt.subplots(2, 1, figsize=(5, 5), constrained_layout=True)
+        for i, dim in enumerate(DIMS):
+            # for j, lr in enumerate(LR):
+            train_losses, val_losses = load_losses(dim)
+            axs[i].plot(train_losses, label=f"train")#, lr={lr}")
+            axs[i].plot(val_losses, label=f"val")#, lr={lr}")
+            axs[i].set_title(rf"${dim}$D")
+            axs[i].set_xlabel("epochs")
+            axs[i].set_ylabel("loss")
+            axs[i].set_ylim([0,0.5])
+            axs[i].legend()
+        plt.savefig(PATH_EXPERIMENT + "losses.png")
+        plt.clf()
+
+    if args.w_dist:
+        gain = 0.0
+
+        # plot mean distance to true theta as function of n_obs
+        for metric in METRICS:
+            fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
+            for i, dim in enumerate(DIMS):
+                for method in METHODS_STYLE.keys():
+                    dist_dict = compute_distance_to_true_theta(
+                        dim, 
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        clip=True if "clip" in method else False,
+                    )
+                    axs[i].plot(N_OBS, [dist_dict[n_obs]["mmd"] for n_obs in N_OBS], alpha=0.7, linewidth=3, **METHODS_STYLE[method])
+                axs[i].set_xticks(N_OBS)
+                axs[i].set_xlabel(r"$n$")
+                axs[i].set_ylabel(f"{METRICS_STYLE[metric]['label']}")
+                # axs[i].set_ylim([0, 1000])
+                axs[i].legend()
+                axs[i].set_title(rf"${dim}$D")
+
+            # plt.suptitle(rf"MMD to $\theta^\star = (135, 220, 2000, {gain})$")
+            plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs_g_{gain}.png")
+            plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs_g_{gain}.pdf")
+            plt.clf()
+
+    # # runtime comparison
+    # fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
+    # for i, task_name in enumerate(TASKS):
+    #     times_jac = []
+    #     times_gauss = []
+    #     times_langevin = []
+    #     for n_obs in N_OBS:
+    #         _, time_j = load_results(
+    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="JAC"
+    #         )
+    #         _, time_g = load_results(
+    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="GAUSS"
+    #         )
+    #         _, time_l = load_results(
+    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, langevin=True
+    #         )
+    #         times_jac.append(time_j)
+    #         times_gauss.append(time_g)
+    #         times_langevin.append(time_l)
+    #     axs[i].plot(N_OBS, times_jac, marker="o", label=f"JAC")
+    #     axs[i].plot(N_OBS, times_gauss, marker="o", label=f"GAUSS")
+    #     axs[i].plot(N_OBS, times_langevin, marker="o", label=f"langevin")
+    #     axs[i].set_xticks(N_OBS)
+    #     axs[i].set_xlabel("n_obs")
+    #     axs[i].legend()
+    #     axs[i].set_title(f"{task_name}")
+    # plt.suptitle(f"Runtime comparison")
+    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.png")
+    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.pdf")
+    # plt.clf()
