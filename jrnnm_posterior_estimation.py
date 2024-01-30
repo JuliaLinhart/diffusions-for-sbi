@@ -127,6 +127,7 @@ def run_sample_sgm(
     langevin,
     clip,
     save_path=PATH_EXPERIMENT,
+    single_obs=None,
 ):
     # Set Device
     device = "cpu"
@@ -178,10 +179,16 @@ def run_sample_sgm(
 
         # save  path
         save_path += f"langevin_steps_400_5/"
-        samples_filename = (
-            save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
-        )
-        time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+        if single_obs is not None:
+            save_path += f"single_obs/"
+            samples_filename = (
+                save_path + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+            )
+        else:
+            samples_filename = (
+                save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+            )
+            time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
 
     else:
         print()
@@ -252,10 +259,17 @@ def run_sample_sgm(
 
         # save  path
         save_path += f"euler_steps_{steps}/"
-        samples_filename = (
-            save_path
-            + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        )
+        if single_obs is not None:
+            save_path += f"single_obs/"
+            samples_filename = (
+                save_path
+                + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
+            )
+        else:
+            samples_filename = (
+                save_path
+                + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
+            )
         # results_dict_filename = (
         #     save_path
         #     + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
@@ -274,7 +288,8 @@ def run_sample_sgm(
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
-    torch.save(time_elapsed, time_filename)
+    if single_obs is None:
+        torch.save(time_elapsed, time_filename)
     # if results_dict is not None:
     #     torch.save(results_dict, results_dict_filename)
 
@@ -350,6 +365,11 @@ if __name__ == "__main__":
         "--clip",
         action="store_true",
         help="whether to clip the posterior samples",
+    )
+    parser.add_argument(
+        "--single_obs",
+        action="store_true",
+        help="whether to sample for every observation seperately with n_obs = 1",
     )
 
     # Parse Arguments
@@ -451,23 +471,46 @@ if __name__ == "__main__":
             x_train_mean = means_stds_dict["x_train_mean"]
             x_train_std = means_stds_dict["x_train_std"]
 
-            run_fn = run_sample_sgm
-            kwargs_run = {
-                "theta_true": theta_true,
-                "context": x_obs_100[:n_obs],
-                "nsamples": args.nsamples,
-                "score_network": score_network,
-                "steps": args.steps,
-                "theta_train_mean": theta_train_mean,  # for (un)normalization
-                "theta_train_std": theta_train_std,  # for (un)normalization
-                "x_train_mean": x_train_mean,  # for (un)normalization
-                "x_train_std": x_train_std,  # for (un)normalization
-                "prior": prior,  # for score function
-                "cov_mode": args.cov_mode,
-                "langevin": args.langevin,
-                "clip": args.clip,
-                "save_path": save_path,
-            }
+            if args.single_obs:
+                for i,x_obs in enumerate(x_obs_100[:n_obs]):
+                    run_fn = run_sample_sgm
+                    kwargs_run = {
+                        "theta_true": theta_true,
+                        "context": x_obs.unsqueeze(0),
+                        "nsamples": args.nsamples,
+                        "score_network": score_network,
+                        "steps": args.steps,
+                        "theta_train_mean": theta_train_mean,  # for (un)normalization
+                        "theta_train_std": theta_train_std,  # for (un)normalization
+                        "x_train_mean": x_train_mean,  # for (un)normalization
+                        "x_train_std": x_train_std,  # for (un)normalization
+                        "prior": prior,  # for score function
+                        "cov_mode": args.cov_mode,
+                        "langevin": args.langevin,
+                        "clip": args.clip,
+                        "save_path": save_path,
+                        "single_obs": i,
+                    }
+                    run_fn(**kwargs_run)
+                run_fn = lambda **kwargs: None
+            else:
+                run_fn = run_sample_sgm
+                kwargs_run = {
+                    "theta_true": theta_true,
+                    "context": x_obs_100[:n_obs],
+                    "nsamples": args.nsamples,
+                    "score_network": score_network,
+                    "steps": args.steps,
+                    "theta_train_mean": theta_train_mean,  # for (un)normalization
+                    "theta_train_std": theta_train_std,  # for (un)normalization
+                    "x_train_mean": x_train_mean,  # for (un)normalization
+                    "x_train_std": x_train_std,  # for (un)normalization
+                    "prior": prior,  # for score function
+                    "cov_mode": args.cov_mode,
+                    "langevin": args.langevin,
+                    "clip": args.clip,
+                    "save_path": save_path,
+                }
         run_fn(**kwargs_run)
 
     if not args.submitit:

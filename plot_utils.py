@@ -14,14 +14,18 @@ def set_plotting_style():
     plt.rcParams["axes.labelsize"] = 23.0
     plt.rcParams["font.size"] = 23.0
     plt.rcParams["axes.titlesize"] = 27.0
+    alpha = 0.9
+    alpha_fill = 0.1
+    return alpha, alpha_fill
 
+markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
-    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-"},
-    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--"},
-    "JAC": {"label":"JAC", "color": "orange", "marker": "o"},
-    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--"},
-    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o"}, ##E87EA1
-    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--"},
+    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "JAC": {"label":"JAC", "color": "orange", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
+    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
 }
 
 METRICS_STYLE = {
@@ -137,11 +141,13 @@ def pairplot_with_groundtruth_md(
     return pg
 
 
-def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors, n_samples=10000):
+def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
+    dim = len(theta_gt[0])
+
     dfs = []
     for n in range(len(samples)):
         df = pd.DataFrame(
-            samples[n].detach().numpy(), columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"]
+            samples[n].detach().numpy(), columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"][:dim]
         )
         df["Distribution"] = labels[n]
         dfs.append(df)
@@ -153,13 +159,13 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors, n_sa
         hue="Distribution",
         palette=dict(zip(labels, colors)),
         diag_sharey=False,
-        corner=True,
+        corner=True
     )
     
     g.fig.set_size_inches(8, 8)
 
-    g.map_lower(sns.kdeplot, linewidths=1)
-    g.map_diag(sns.kdeplot, fill=True, linewidths=1)
+    g.map_lower(sns.kdeplot, linewidths=3, constrained_layout=False)
+    g.map_diag(sns.kdeplot, fill=True, linewidths=3)
 
     g.axes[1][0].set_xlim(10.0, 300.0)  # C
     g.axes[1][0].set_ylim(50.0, 500.0)  # mu
@@ -173,41 +179,49 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors, n_sa
     g.axes[2][1].set_ylim(100.0, 5000.0)  # sigma
     # g.axes[2][1].set_xticks([])
 
-    g.axes[3][0].set_xlim(10.0, 300.0)  # C
-    g.axes[3][0].set_ylim(-22.0, 22.0)  # gain
-    g.axes[3][0].set_yticks([-20, 0, 20])
-    g.axes[3][0].set_xticks([100, 250])
+    if dim == 4:
+        g.axes[3][0].set_xlim(10.0, 300.0)  # C
+        g.axes[3][0].set_ylim(-22.0, 22.0)  # gain
+        g.axes[3][0].set_yticks([-20, 0, 20])
+        g.axes[3][0].set_xticks([100, 250])
 
-    g.axes[3][1].set_xlim(50.0, 500.0)  # mu
-    g.axes[3][1].set_ylim(-22.0, 22.0)  # gain
-    g.axes[3][1].set_xticks([200, 400])
+        g.axes[3][1].set_xlim(50.0, 500.0)  # mu
+        g.axes[3][1].set_ylim(-22.0, 22.0)  # gain
+        g.axes[3][1].set_xticks([200, 400])
 
-    g.axes[3][2].set_xlim(100.0, 5000.0)  # sigma
-    g.axes[3][2].set_ylim(-22.0, 22.0)  # gain
-    g.axes[3][2].set_xticks([1000, 3500])
+        g.axes[3][2].set_xlim(100.0, 5000.0)  # sigma
+        g.axes[3][2].set_ylim(-22.0, 22.0)  # gain
+        g.axes[3][2].set_xticks([1000, 3500])
 
-    g.axes[3][3].set_xlim(-22.0, 22.0)  # gain
+        g.axes[3][3].set_xlim(-22.0, 22.0)  # gain
 
     if theta_gt is not None:
         # get groundtruth parameters
         for gt in theta_gt:
-            C, mu, sigma, gain = gt
+            C, mu, sigma = gt[:3]
+            gain = gt[3] if dim == 4 else None
 
             # plot points
             g.axes[1][0].scatter(C, mu, color="black", zorder=2, s=8)
             g.axes[2][0].scatter(C, sigma, color="black", zorder=2, s=8)
             g.axes[2][1].scatter(mu, sigma, color="black", zorder=2, s=8)
-            g.axes[3][0].scatter(C, gain, color="black", zorder=2, s=8)
-            g.axes[3][1].scatter(mu, gain, color="black", zorder=2, s=8)
-            g.axes[3][2].scatter(sigma, gain, color="black", zorder=2, s=8)
+            if dim == 4:
+                g.axes[3][0].scatter(C, gain, color="black", zorder=2, s=8)
+                g.axes[3][1].scatter(mu, gain, color="black", zorder=2, s=8)
+                g.axes[3][2].scatter(sigma, gain, color="black", zorder=2, s=8)
 
             # plot dirac
             g.axes[0][0].axvline(x=C, ls="--", c="black", linewidth=1)
             g.axes[1][1].axvline(x=mu, ls="--", c="black", linewidth=1)
             g.axes[2][2].axvline(x=sigma, ls="--", c="black", linewidth=1)
-            g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1)
+            if dim == 4:
+                g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1)
 
-    g.add_legend()
+    handles, labels = g.axes[0][0].get_legend_handles_labels()
+    # make handle lines larger
+    for h in handles:
+        h.set_linewidth(3)
+    g.add_legend(handles=handles, labels=labels, title="")
 
     return g
 

@@ -39,7 +39,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     # Prepare training data
     # normalize theta
@@ -136,7 +136,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -546,8 +546,8 @@ if __name__ == "__main__":
     if not args.submitit:
         if args.run == "sample_all":
             # for n_train in N_TRAIN_LIST:
-            for num_obs in NUM_OBSERVATION_LIST:
-                for n_obs in N_OBS_LIST:
+            for num_obs in [8,9,10]:
+                for n_obs in [8,14,22,30]:
                     run(
                         # n_train=n_train,
                         num_obs=num_obs,

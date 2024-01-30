@@ -4,14 +4,14 @@ import torch
 import pyro
 import sbibm
 
-# from jax import random
-# import jax.numpy as jnp
-# from numpyro.infer import MCMC, NUTS
-# from numpyro.infer.initialization import init_to_uniform
+from jax import random
+import jax.numpy as jnp
+from numpyro.infer import MCMC, NUTS
+from numpyro.infer.initialization import init_to_uniform
 
 from tasks.sbibm.gaussianlinear_multi_obs import GausianLinear_multiobs
-# from tasks.sbibm.gaussianmixture_multi_obs import model as model_gmm
-# from tasks.sbibm.slcp_multi_obs import model as model_slcp
+from tasks.sbibm.gaussianmixture_multi_obs import model as model_gmm
+from tasks.sbibm.slcp_multi_obs import model as model_slcp
 
 def get_task(task_name):
     if task_name == "gaussian_linear":
@@ -54,28 +54,28 @@ def get_tall_posterior_samples(task_name, x_obs, num_samples=1000, save_path='/'
     if task_name == "gaussian_linear":
         task = GausianLinear_multiobs(prior_scale=1., simulator_scale=torch.linspace(0.6, 1.4, 10))
         samples = task._sample_reference_posterior_multiobs(num_samples, x_obs)
-    # elif task_name == "gaussian_mixture":
-    #     x_obs = jnp.array(x_obs)
-    #     kernel = NUTS(model_gmm)
-    #     mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples)
-    #     mcmc.run(
-    #         rng_key=random.PRNGKey(1),
-    #         x_obs=x_obs,
-    #         n_obs=x_obs.shape[0]
-    #     )
-    #     samples = mcmc.get_samples()["theta"]
-    # elif task_name == "slcp":
-    #     task = get_task(task_name)
-    #     data = {f'obs_{i}': jnp.array(task.unflatten_data(x_obs[i,:]).unsqueeze(0)) for i in range(x_obs.shape[0])}
-    #     kernel = NUTS(model_slcp,
-    #                   init_strategy=init_to_uniform(None, radius=3))
-    #     mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples, num_chains=4)
-    #     mcmc.run(
-    #         rng_key=random.PRNGKey(1),
-    #         x_obs=data,
-    #         n_obs=x_obs.shape[0]
-    #     )
-    #     samples = jnp.stack([mcmc.get_samples()[f"theta_{i+1}"] for i in range(5)])
+    elif task_name == "gaussian_mixture":
+        x_obs = jnp.array(x_obs)
+        kernel = NUTS(model_gmm)
+        mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples)
+        mcmc.run(
+            rng_key=random.PRNGKey(1),
+            x_obs=x_obs,
+            n_obs=x_obs.shape[0]
+        )
+        samples = mcmc.get_samples()["theta"]
+    elif task_name == "slcp":
+        task = get_task(task_name)
+        data = {f'obs_{i}': jnp.array(task.unflatten_data(x_obs[i,:]).unsqueeze(0)) for i in range(x_obs.shape[0])}
+        kernel = NUTS(model_slcp,
+                      init_strategy=init_to_uniform(None, radius=3))
+        mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples, num_chains=4)
+        mcmc.run(
+            rng_key=random.PRNGKey(1),
+            x_obs=data,
+            n_obs=x_obs.shape[0]
+        )
+        samples = jnp.stack([mcmc.get_samples()[f"theta_{i+1}"] for i in range(5)])
     else:
         raise NotImplementedError
     
