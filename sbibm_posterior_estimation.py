@@ -15,7 +15,7 @@ from torch.func import vmap
 from tqdm import tqdm
 from zuko.nn import MLP
 
-from tasks.sbibm.data_generators import get_task, get_tall_posterior_samples
+from tasks.sbibm.data_generators import get_task #, get_multiobs_task
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
 
@@ -301,13 +301,20 @@ def run_sample_sgm(
     # if results_dict is not None:
     #     torch.save(results_dict, results_dict_filename)
 
-def run_sample_reference(task_name, x_obs, num_obs, save_path):
+def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
     print("=======================================================================")
     print(
         f"Sampling from the reference posterior for observation {num_obs}: n_obs = {len(x_obs)} ."
     )
     print(f"======================================================================")
-    samples_ref = get_tall_posterior_samples(task_name, x_obs)
+    if theta_true.ndim > 1:
+        theta_true = theta_true[0]
+
+    task_multiobs = get_multiobs_task(task_name)
+    kwargs = {}
+    if task_name in ["lotka_volterra", "sir"]:
+        kwargs = {"theta_true": theta_true}
+    samples_ref = task_multiobs._sample_reference_posterior_multiobs(1000, x_obs, **kwargs)
 
     # save  results
     os.makedirs(
@@ -315,7 +322,6 @@ def run_sample_reference(task_name, x_obs, num_obs, save_path):
         exist_ok=True,
     )
     torch.save(samples_ref, save_path + f"true_posterior_samples_num_{num_obs}_n_obs_{len(x_obs)}.pkl")
-
 
 
 if __name__ == "__main__":
@@ -405,6 +411,8 @@ if __name__ == "__main__":
 
     # Define task path
     task_path = PATH_EXPERIMENT + f"{args.task}/"
+    if args.task == "lotka_volterra":
+        task_path = PATH_EXPERIMENT + f"{args.task}_f2/"
 
     def run(
         n_train=args.n_train, num_obs=args.num_obs, n_obs=args.n_obs, run_type=args.run
@@ -434,8 +442,8 @@ if __name__ == "__main__":
         if os.path.exists(filename):
             print(f"Loading training data from {filename}")
             dataset_train = torch.load(filename)
-            theta_train = dataset_train["theta"][:n_train]
-            x_train = dataset_train["x"][:n_train]
+            theta_train = dataset_train["theta"][:n_train].float()
+            x_train = dataset_train["x"][:n_train].float()
         else:
             theta_train = prior(50000)
             x_train = simulator(theta_train)
@@ -476,19 +484,17 @@ if __name__ == "__main__":
             }
         elif run_type == "sample":
             # # Reference parameter and observations
-            # theta_true_list = [
-            #     task.get_true_parameters(num_observation=n)
-            #     for n in NUM_OBSERVATION_LIST
-            # ]
             if os.path.exists(task_path + f"theta_true_list.pkl"):
                 theta_true_list = torch.load(task_path + f"theta_true_list.pkl")
             else:
-                theta_true_list = [prior(1) for n in NUM_OBSERVATION_LIST]
+                theta_true_list = [prior(1) for _ in NUM_OBSERVATION_LIST]
                 torch.save(theta_true_list, task_path + f"theta_true_list.pkl")
 
             theta_true = theta_true_list[num_obs - 1]
 
             filename = task_path + f"x_obs_100_num_{num_obs}_new.pkl"
+            if args.task in ["lotka_volterra", "sir"]:
+                filename = task_path + f"x_obs_100_num_{num_obs}_plcr.pkl"
             if os.path.exists(filename):
                 x_obs_100 = torch.load(filename)
             else:
@@ -497,7 +503,7 @@ if __name__ == "__main__":
                     dim=0,
                 )
                 torch.save(x_obs_100, filename)
-            context = x_obs_100[:n_obs]
+            context = x_obs_100[:n_obs].reshape(n_obs, -1)
 
             if args.reference:
                 run_fn = run_sample_reference
@@ -505,6 +511,7 @@ if __name__ == "__main__":
                     "task_name": args.task,
                     "x_obs": context,
                     "num_obs": num_obs,
+                    "theta_true": theta_true,
                     "save_path": task_path + f"reference_posterior_samples/",
                 }
             else:
@@ -546,8 +553,8 @@ if __name__ == "__main__":
     if not args.submitit:
         if args.run == "sample_all":
             # for n_train in N_TRAIN_LIST:
-            for num_obs in [8,9,10]:
-                for n_obs in [8,14,22,30]:
+            for num_obs in NUM_OBSERVATION_LIST:
+                for n_obs in N_OBS_LIST:
                     run(
                         # n_train=n_train,
                         num_obs=num_obs,

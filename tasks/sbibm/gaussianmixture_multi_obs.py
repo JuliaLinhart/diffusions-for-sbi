@@ -1,12 +1,15 @@
 from jax import random
 import jax.numpy as jnp
 import numpyro
+import pyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.handlers import condition
 import seaborn as sns
 import matplotlib.pyplot as plt
 import torch
+
+from sbibm.tasks.gaussian_mixture.task import GaussianMixture
 
 rng_key = random.PRNGKey(1)
 
@@ -38,6 +41,33 @@ def model(x_obs=None, n_obs=1):
                 mixture,
                 obs=x_obs[i] #, 0] 
             )
+
+class GaussianMixture_multiobs(GaussianMixture):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.model = model
+        self.prior_dist = pyro.distributions.MultivariateNormal(
+            torch.zeros(10), torch.eye(10)
+        )
+        self.simulator_params = {
+            "mixture_locs_factor": torch.tensor([1.0, 1.0]),
+            "mixture_scales": torch.tensor([2.25, 1/9]),
+            "mixture_weights": torch.tensor([0.5, 0.5]),
+        }
+    
+    def _sample_reference_posterior_multiobs(self, num_samples, x_obs):
+        n_obs = x_obs.shape[0]
+        x_obs = jnp.array(x_obs)
+        kernel = NUTS(self.model)
+        mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples)
+        mcmc.run(
+            rng_key=random.PRNGKey(1),
+            x_obs=x_obs,
+            n_obs=n_obs
+        )
+        samples = mcmc.get_samples()["theta"]
+        return samples
 
 if __name__ == "__main__":
     

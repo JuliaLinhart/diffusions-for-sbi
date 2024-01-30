@@ -7,6 +7,7 @@ import numpyro.distributions as dist
 from numpyro.handlers import condition
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.initialization import init_to_uniform
+from sbibm.tasks.slcp.task import SLCP
 
 
 rng_key = random.PRNGKey(1)
@@ -40,6 +41,30 @@ def model(x_obs=None, n_obs=1):
                 sample_shape=(4,),
                 obs=x_obs[f"obs_{i}"]
             )
+
+class SLCP_multiobs(SLCP):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.model = model
+
+    def get_simulator(self):
+        return self.simulator
+    
+    def _sample_reference_posterior_multiobs(self, num_samples, x_obs):
+        n_obs = x_obs.shape[0]
+        data = {f'obs_{i}': jnp.array(self.unflatten_data(x_obs[i,:]).unsqueeze(0)) for i in range(n_obs)}
+        kernel = NUTS(self.model,
+                      init_strategy=init_to_uniform(None, radius=3))
+        mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples, num_chains=4)
+        mcmc.run(
+            rng_key=rng_key,
+            x_obs=data,
+            n_obs=n_obs
+        )
+        samples = jnp.stack([mcmc.get_samples()[f"theta_{i+1}"] for i in range(5)])
+        return samples
+
 
 
 if __name__ == "__main__":
@@ -106,4 +131,4 @@ if __name__ == "__main__":
     ax.set_xlim(-3.5, 3.5)
     ax.legend()
     # fig.show()
-    fig.savefig('slcp-pyro.png')
+    fig.savefig('slcp-multiobs.png')
