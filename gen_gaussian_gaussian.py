@@ -1,16 +1,13 @@
 import os
 
-import matplotlib.pyplot as plt
 import torch
 
 from torch.func import vmap, jacrev
 from vp_diffused_priors import get_vpdiff_gaussian_score
-from debug_learned_gaussian_old import diffused_tall_posterior_score as diffused_tall_posterior_score_old
-from ot.sliced import max_sliced_wasserstein_distance
 from tqdm import tqdm
-from functools import partial
 from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
 import time
+
 
 def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
     r"""
@@ -199,11 +196,10 @@ class FakeFNet(torch.nn.Module):
 
 
 if __name__ == "__main__":
-    #from tasks.toy_examples.data_generators import SBIGaussian2d
-    from nse import NSE, NSELoss
-    from sm_utils import train
+    import sys
+    from nse import NSE
 
-
+    path_to_save = sys.argv[1]
 
     torch.manual_seed(1)
     N_TRAIN = 10_000
@@ -326,20 +322,5 @@ if __name__ == "__main__":
                     all_exps.append(infos)
                     print(N_OBS, eps)
                     torch.save(all_exps,
-                               '/mnt/data/gabriel/sbi/gaussian_exp.pt')
-                # fig, axes = plt.subplots(1, 3, figsize=(12, 8))
-                # fig.suptitle(f'N={N_OBS} eps={eps}')
-                # axes[0].scatter(*samples_gauss[..., :2].T)#, label='Ground truth')
-                # axes[0].scatter(*ref_samples[..., :2].T)
-                # axes[0].set_title('GAUSS')
-                # axes[1].scatter(*samples_jac[..., :2].T)#, label='Ground truth')
-                # axes[1].scatter(*ref_samples[..., :2].T)
-                # axes[1].set_title('JAC')
-                # axes[1].scatter(*lang_samples[..., :2].T)#, label='Ground truth')
-                # axes[1].scatter(*ref_samples[..., :2].T)
-                # axes[1].set_title('JAC')
-                # # for ax in axes[-1]:
-                # #     ax.set_xlabel("theta_1")
-                # # for ax in axes[:, 0]:
-                # #     ax.set_ylabel("theta_2")
-                # fig.show()
+                               os.path.join(path_to_save, 'gaussian_exp.pt'))
+

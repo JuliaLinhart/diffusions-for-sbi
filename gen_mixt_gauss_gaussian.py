@@ -1,17 +1,12 @@
 import os
-#from pyro.infer import MCMC, HMC
-import matplotlib.pyplot as plt
 import torch
 
-from torch.func import vmap, jacrev, grad
+from torch.func import vmap, grad
 from vp_diffused_priors import get_vpdiff_gaussian_score
-from ot.sliced import max_sliced_wasserstein_distance
 from tqdm import tqdm
-from functools import partial
 from tasks.toy_examples.data_generators import Gaussian_MixtGaussian_mD
 import time
 from nse import mean_backward, prec_matrix_backward
-
 
 
 class EpsilonNet(torch.nn.Module):
@@ -80,42 +75,11 @@ def MALA(x,
     return x
 
 
-def get_hmc_samples(task, prior, x_obs_100, N_OBS):
-    posteriors = [task.true_posterior(x) for x in x_obs_100[:N_OBS]]
-    def posterior_fun(theta):
-        lk = 0
-        for p in posteriors:
-            lk += p.log_prob(theta)
-        return lk
-    def potential(theta_dic):
-        theta = theta_dic["theta"]
-        potential = vmap(lambda theta: (1 - N_OBS) * prior.log_prob(theta) + posterior_fun(theta).sum(dim=0))(
-            theta
-        ).sum()
-        return potential
-
-    from pyro.infer import MCMC, HMC
-    kern = HMC(
-        potential_fn=potential,
-        step_size=1e-4 / N_OBS,
-        num_steps=100
-    )
-    hmc = MCMC(
-        kernel=kern,
-        num_samples=100,
-        warmup_steps=500,
-        initial_params=
-        {"theta": torch.randn((10_000, DIM)).cuda() + x_obs[:N_OBS].mean()}
-    )
-    hmc.run()
-    ref_samples = hmc.get_samples()["theta"][-1].detach()
-    return ref_samples.cpu()
-
-
 if __name__ == "__main__":
-    #from tasks.toy_examples.data_generators import SBIGaussian2d
-    from nse import NSE, NSELoss
-    from sm_utils import train
+    from nse import NSE
+    import sys
+
+    path_to_save = sys.argv[1]
 
     torch.manual_seed(1)
     N_TRAIN = 10_000
@@ -163,13 +127,6 @@ if __name__ == "__main__":
                     )
                     prior_score = prior_score_fn(theta, t)
                     return prior_score, mean_prior_0_t, prec_prior_0_t
-                #samples = score_net.ddim(shape=(1000,), x=x_obs_100.mean(dim=0)[None].repeat(1000, 1), steps=1000)
-                #sanity check
-                # fig, ax = plt.subplots(1, 1)
-                # ax.scatter(*task.true_posterior(x_obs_100.mean(dim=0)).sample((1000,))[:, :2].cpu().T)
-                # ax.scatter(*samples.cpu()[:, :2].T)
-                # ax.scatter(*theta_true[:2].cpu())
-                # fig.show()
 
                 for N_OBS in [2, 4, 8, 16, 32, 64, 90][::-1]:
                     ref_samples = MALA(
@@ -226,27 +183,10 @@ if __name__ == "__main__":
                         dt_gauss = tstart_jac - tstart_gauss
                         dt_jac = tstart_lang - tstart_jac
                         dt_lang = t_end_lang - tstart_lang
-                        #     true_posterior_cov = torch.linalg.inv(inv_lik*N_OBS + inv_prior)
-                        #     true_posterior_mean = (true_posterior_cov @ (inv_prior_prior + inv_lik @ x_obs_100[:N_OBS].sum(dim=0).cuda()))
-                        #     ref_samples = torch.distributions.MultivariateNormal(loc=true_posterior_mean, covariance_matrix=true_posterior_cov).sample((1000,)).cpu()
                         infos["exps"]["Langevin"].append({"dt": dt_lang, "samples": lang_samples, "n_steps": sampling_steps})
                         infos["exps"]["GAUSS"].append({"dt": dt_gauss, "samples": samples_gauss, "n_steps": sampling_steps})
                         infos["exps"]["JAC"].append({"dt": dt_jac, "samples": samples_jac, "n_steps": sampling_steps})
                         all_exps.append(infos)
                         print(N_OBS, eps)
                         torch.save(all_exps,
-                                   '/mnt/data/gabriel/sbi/gaussian_mixture_exp.pt')
-                        # fig, axes = plt.subplots(1, 1, figsize=(12, 8))
-                        # fig.suptitle(f'N={N_OBS} eps={eps}')
-                        # axes.scatter(*samples_gauss[..., :2].T, label='Gauss', alpha=.2)#, label='Ground truth')
-                        # axes.scatter(*samples_jac[..., :2].T, label='Jac', alpha=.2)#, label='Ground truth')
-                        # axes.scatter(*ref_samples[..., :2].T, label='Ref', alpha=.2)
-                        # axes.scatter(*lang_samples[..., :2].T, label='Lang', alpha=.2)#, label='Ground truth')
-                        #
-                        # axes.legend()
-                        # #axes[0].scatter(*ref_samples[..., :2].T)
-                        # # for ax in axes[-1]:
-                        # #     ax.set_xlabel("theta_1")
-                        # # for ax in axes[:, 0]:
-                        # #     ax.set_ylabel("theta_2")
-                        # fig.show()
+                                   os.path.join(path_to_save, 'gaussian_mixture_exp.pt'))

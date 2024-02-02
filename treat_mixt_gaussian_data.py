@@ -10,7 +10,8 @@ import tqdm
 
 
 if __name__ == "__main__":
-    destination_folder = "/mnt/data/gabriel/sbi"
+    import sys
+    destination_folder = sys.argv[1]
     data = torch.load(f"{destination_folder}/gaussian_mixture_exp.pt")
     try:
         all_data = pd.read_csv(f"{destination_folder}/gaussian_mixture_exp_treated.csv").set_index(keys=['N_OBS', 'dim', 'seed', 'eps'])

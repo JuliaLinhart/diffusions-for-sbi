@@ -6,7 +6,9 @@ import numpy as np
 
 
 if __name__ == '__main__':
-    destination_folder = "/mnt/data/gabriel/sbi"
+    import sys
+    destination_folder = sys.argv[1]
+
 
     # Read all the data!
     all_data = pd.read_csv(f"{destination_folder}/gaussian_mixture_exp_treated.csv").reset_index()
