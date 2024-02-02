@@ -5,20 +5,28 @@ from tqdm import tqdm
 
 
 def train(
-    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False
+        nse,
+        dataset,
+        n_epochs=5000,
+        lr=3e-4,
+        batch_size=32,
+        prior_score=False,
+        val_fn=None,
+        val_period=10000,
 ):
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
-    ema_model = torch.optim.swa_utils.AveragedModel(model,
+    opt = torch.optim.Adam(nse.net.parameters(), lr=lr)
+    ema_model = torch.optim.swa_utils.AveragedModel(nse.net,
                                                     multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
     dloader = torch.utils.data.DataLoader(dataset,
                                           batch_size=batch_size,
                                           shuffle=True,)
                                         #   generator=torch.Generator(device=next(model.parameters()).device),)
-
-    with tqdm(range(n_epochs), desc="Training epochs") as tepoch:
-        for _ in tepoch:
+    losses = {"train": [], "val": []}
+    pbar_infos = {}
+    with tqdm(range(n_epochs), desc="Training epochs", ncols=100) as tepoch:
+        for ep in tepoch:
             total_loss = 0
-            for data in dloader:
+            for batch_idx, data in enumerate(dloader):
                 # get batch data
                 if len(data) > 1:
                     theta, x, kwargs_sn = get_batch_data(data, prior_score)
@@ -28,16 +36,21 @@ def train(
                     kwargs_sn = {}
                 # train step
                 opt.zero_grad()
-                loss = loss_fn(theta, **kwargs_sn)
+                loss = nse.loss(theta, **kwargs_sn)
                 loss.backward()
                 opt.step()
-                ema_model.update_parameters(model)
+                ema_model.update_parameters(nse.net)
 
                 # running stats
-                total_loss = total_loss + loss.detach().item() * theta.shape[0]
-
-            tepoch.set_postfix(loss=total_loss / len(dataset))
-    return ema_model
+                total_loss = total_loss + loss.detach().item()
+            losses["train"].append(total_loss / (batch_idx + 1))
+            pbar_infos["train_loss"] = losses["train"][-1]
+            if ep % val_period == 0:
+                metric_name, metric = val_fn(nse.eval())
+                pbar_infos[metric_name] = metric
+                losses["val"].append(metric)
+            tepoch.set_postfix(pbar_infos)
+    return ema_model.module, losses
 
 # Training with validation and early stopping as in
 # https://github.com/smsharma/mining-for-substructure-lens/blob/master/inference/trainer.py

@@ -5,13 +5,12 @@ import torch
 
 from torch.func import vmap, jacrev
 from vp_diffused_priors import get_vpdiff_gaussian_score
-from nse import assure_positive_definitness
 from debug_learned_gaussian_old import diffused_tall_posterior_score as diffused_tall_posterior_score_old
 from ot.sliced import max_sliced_wasserstein_distance
 from tqdm import tqdm
 from functools import partial
 from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
-
+import time
 
 def _matrix_pow(matrix: torch.Tensor, p: float) -> torch.Tensor:
     r"""
@@ -77,10 +76,11 @@ def tweedies_approximation(x, theta, t, score_fn, nse, dist_cov_est=None, mode='
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
         # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
         prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
-        score = vmap(lambda theta: vmap(partial(score_fn, t=t),
-                                        in_dims=(None, 0),
-                                        randomness='different')(theta, x),
-                     randomness='different')(theta)
+        score = score_fn(theta[:, None], x[None], t[None])
+        # score = vmap(lambda theta: vmap(partial(score_fn, t=t),
+        #                                 in_dims=(None, 0),
+        #                                 randomness='different')(theta, x),
+        #              randomness='different')(theta)
     else:
         raise NotImplemented("Available methods are GAUSS, PSEUDO, JAC")
     mean = (1 / (alpha_t**0.5) * (theta[:, None] + sigma_t**2 * score))
@@ -168,6 +168,35 @@ def gaussien_wasserstein(ref_mu, ref_cov, X2):
     covterm = torch.func.vmap(torch.trace)(ref_cov + cov2 - 2 * _matrix_pow(sqrtcov1 @ cov2 @ sqrtcov1, .5))
     return (1*torch.linalg.norm(ref_mu - mean2, dim=-1)**2 + 1*covterm)**.5
 
+class EpsilonNet(torch.nn.Module):
+
+    def __init__(self, DIM):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(2*DIM + 1, 5*DIM),
+            torch.nn.ReLU(),
+            torch.nn.Linear(5*DIM, DIM),
+            torch.nn.Tanh()
+        )
+
+    def forward(self, theta, x, t):
+        return self.net(torch.cat((theta, x, t), dim=-1))
+
+class FakeFNet(torch.nn.Module):
+
+    def __init__(self, real_eps_fun, eps_net, eps_net_max):
+        super().__init__()
+        self.real_eps_fun = real_eps_fun
+        self.eps_net = eps_net
+        self.eps_net_max = eps_net_max
+
+    def forward(self, theta, x, t):
+        if len(t.shape) == 0:
+            t = t[None, None].repeat(theta.shape[0], 1)
+        real_eps = self.real_eps_fun(theta, x, t)
+        perturb = self.eps_net(theta, x, t)
+        return real_eps + self.eps_net_max * perturb
+
 
 if __name__ == "__main__":
     #from tasks.toy_examples.data_generators import SBIGaussian2d
@@ -179,198 +208,138 @@ if __name__ == "__main__":
     torch.manual_seed(1)
     N_TRAIN = 10_000
     N_SAMPLES = 4096
+    all_exps = []
+    for DIM in [2, 4, 8, 10, 16, 32, 64]:
+        for eps in [0, 1e-3, 1e-2, 1e-1]:
+            for seed in tqdm(range(5), desc=f'Dim {DIM} eps {eps}'):
 
-    DIM = 5# Task
+                # Observations
+                torch.manual_seed(seed)
+                means = torch.rand(DIM) * 20 - 10  # between -10 and 10
+                stds = torch.rand(DIM) * 25 + 0.1  # between 0.1 and 25.1
+                task = Gaussian_Gaussian_mD(dim=DIM, means=means, stds=stds)
+                prior = task.prior
+                simulator = task.simulator
+                theta_true = prior.sample(sample_shape=(1,))  # true parameters
 
-    # Observations
-    torch.manual_seed(42)
-    means = torch.rand(DIM) * 20 - 10  # between -10 and 10
-    stds = torch.rand(DIM) * 25 + 0.1  # between 0.1 and 25.1
-    task = Gaussian_Gaussian_mD(dim=DIM, means=means, stds=stds)
-    prior = task.prior
-    simulator = task.simulator
-    theta_true = prior.sample(sample_shape=(1,))  # true parameters
+                x_obs = simulator(theta_true)  # x_obs ~ simulator(theta_true)
+                x_obs_100 = torch.cat(
+                    [simulator(theta_true).reshape(1, -1) for _ in range(100)], dim=0
+                )
 
-    x_obs = simulator(theta_true)  # x_obs ~ simulator(theta_true)
-    x_obs_100 = torch.cat(
-        [simulator(theta_true).reshape(1, -1) for _ in range(100)], dim=0
-    )
+                # True posterior: p(theta|x_obs)
+                true_posterior = task.true_posterior(x_obs)
 
-    # True posterior: p(theta|x_obs)
-    true_posterior = task.true_posterior(x_obs)
+                # Train data
+                theta_train = task.prior.sample((N_TRAIN,))
+                x_train = simulator(theta_train)
 
-    # Train data
-    theta_train = task.prior.sample((N_TRAIN,))
-    x_train = simulator(theta_train)
+                score_net = NSE(theta_dim=DIM, x_dim=DIM)
 
-    # normalize theta
-    theta_train_ = (theta_train - theta_train.mean(axis=0)) / theta_train.std(axis=0)
+                t = torch.linspace(0, 1, 1000).cuda()
+                idm = torch.eye(DIM).cuda()
+                inv_lik = torch.linalg.inv(task.simulator_cov).cuda()
+                inv_prior = torch.linalg.inv(prior.covariance_matrix).cuda()
+                posterior_cov = torch.linalg.inv(inv_lik + inv_prior)
 
-    # normalize x
-    x_train_ = (x_train - x_train.mean(axis=0)) / x_train.std(axis=0)
-    x_obs_ = (x_obs - x_train.mean(axis=0)) / x_train.std(axis=0)
-    x_obs_100_ = (x_obs_100 - x_train.mean(axis=0)) / x_train.std(axis=0)
+                inv_prior_prior = inv_prior @ prior.loc.cuda()
+                def real_eps(theta, x, t):
+                    posterior_cov_diff = (posterior_cov[None] * score_net.alpha(t)[..., None] + (1 - score_net.alpha(t))[..., None] * idm[None])
+                    posterior_mean_0 = (posterior_cov @ (inv_prior_prior[:, None] + inv_lik @ x.mT)).mT
+                    posterior_mean_diff = (score_net.alpha(t)**.5) * posterior_mean_0
+                    score = - (torch.linalg.inv(posterior_cov_diff) @ (theta - posterior_mean_diff)[..., None])[..., 0]
+                    return - score_net.sigma(t) * score
 
-    model_name = f"score_net_gauss_{DIM}.pkl"
-    # # train score network
-    if model_name not in os.listdir():
-        dataset = torch.utils.data.TensorDataset(theta_train_.cuda(), x_train_.cuda())
-        score_net = NSE(theta_dim=DIM, x_dim=DIM, hidden_features=[128, 256, 128]).cuda()
+                score_net.net = FakeFNet(real_eps_fun=real_eps,
+                                         eps_net=EpsilonNet(DIM),
+                                         eps_net_max=eps)
+                score_net.cuda()
 
-        avg_score_net = train(
-            model=score_net,
-            dataset=dataset,
-            loss_fn=NSELoss(score_net),
-            n_epochs=2000,
-            lr=1e-3,
-            batch_size=256,
-            prior_score=False, # learn the prior score via the classifier-free guidance approach
-        )
-        score_net = avg_score_net.module
-        torch.save(score_net, model_name)
-    else:
-        score_net = torch.load(model_name).cuda()
+                t = torch.linspace(0, 1, 1000)
+                prior_score_fn = get_vpdiff_gaussian_score(prior.loc.cuda(), prior.covariance_matrix.cuda(), score_net)
 
-    # normalize prior
-    loc_ = (prior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
-    cov_ = (
-            torch.diag(1 / theta_train.std(axis=0))
-            @ prior.covariance_matrix
-            @ torch.diag(1 / theta_train.std(axis=0))
-    )
-    prior_ = torch.distributions.MultivariateNormal(
-        loc=loc_.cuda(), covariance_matrix=cov_.cuda()
-    )
-    # Normalize posterior
-    loc_ = (true_posterior.loc - theta_train.mean(axis=0)) / theta_train.std(axis=0)
-    cov_ = (
-            torch.diag(1 / theta_train.std(axis=0))
-            @ true_posterior.covariance_matrix
-            @ torch.diag(1 / theta_train.std(axis=0))
-    )
-    true_posterior_ = torch.distributions.MultivariateNormal(
-        loc=loc_.cuda(), covariance_matrix=cov_.cuda()
-    )
-
-    for N_OBS in [2, 30, 40, 50, 60, 70, 80, 90]:
-        cov_est = vmap(lambda x: score_net.ddim(shape=(1000,), x=x, steps=100, eta=.5), randomness='different')(x_obs_100_[:N_OBS].cuda())
-        #normalize posterior
-        cov_est = vmap(lambda x:torch.cov(x.mT))(cov_est)
+                def prior_score(theta, t):
+                    mean_prior_0_t = mean_backward(theta, t, prior_score_fn, score_net)
+                    prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix.cuda(), score_net).repeat(
+                        theta.shape[0], 1, 1
+                    )
+                    prior_score = prior_score_fn(theta, t)
+                    return prior_score, mean_prior_0_t, prec_prior_0_t,
 
 
-        t = torch.linspace(0, 1, 1000)
-        lik_cov = task.simulator_cov.cuda()
-        lik_cov_ = (
-                torch.diag(1 / theta_train.std(axis=0)).cuda()
-                @ lik_cov
-                @ torch.diag(1 / theta_train.std(axis=0)).cuda()
-        ).cuda()
-        posterior_cov_0 = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov) + torch.linalg.inv(prior.covariance_matrix.cuda())))
+                for N_OBS in [2, 4, 8, 16, 32, 64, 90]:
+                    true_posterior_cov = torch.linalg.inv(inv_lik*N_OBS + inv_prior)
+                    true_posterior_mean = (true_posterior_cov @ (inv_prior_prior + inv_lik @ x_obs_100[:N_OBS].sum(dim=0).cuda()))
+                    infos = {"true_posterior_mean": true_posterior_mean,
+                             "true_posterior_cov": true_posterior_cov,
+                             "true_theta": theta_true,
+                             "N_OBS": N_OBS,
+                             "seed": seed,
+                             "dim": DIM,
+                             "eps": eps,
+                             "exps":{"Langevin": [],
+                                     "GAUSS": [],
+                                     "JAC": []}
+                             }
+                    for sampling_steps, eta in zip([50, 150, 400, 1000], [.2, .5, .8, 1]):
+                        tstart_gauss = time.time()
+                        samples_ddim = score_net.ddim(shape=(1000*N_OBS,),
+                                                      x=x_obs_100[None, :N_OBS].repeat(1000, 1, 1).reshape(1000*N_OBS, -1).cuda(),
+                                                      steps=100,
+                                                      eta=.5).detach().reshape(1000, N_OBS, -1).cpu()
+                        #normalize posterior
+                        cov_est = vmap(lambda x:torch.cov(x.mT))(samples_ddim.permute(1, 0, 2))
 
-        posterior_cov_0_ = torch.linalg.inv((N_OBS * torch.linalg.inv(lik_cov_) + torch.linalg.inv(prior_.covariance_matrix)))
-        #posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None] +
-        #                          (1 - score_net.alpha(t))[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None])
-        posterior_mean_0 = posterior_cov_0 @ (torch.linalg.inv(prior.covariance_matrix.cuda()) @ prior.loc[:, None].cuda() +
-                                              torch.linalg.inv(lik_cov) @ x_obs_100[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
-        posterior_mean_0_ = posterior_cov_0_ @ (torch.linalg.inv(prior_.covariance_matrix) @ prior_.loc[:, None] +
-                                              torch.linalg.inv(lik_cov_) @ x_obs_100_[:N_OBS].sum(dim=0).cuda()[:, None])[..., 0]
-        # posterior_mean_0_ = posterior_mean_0 - theta_train.mean(dim=0)
-        # posterior_cov_0_ = (
-        #         torch.diag(1 / theta_train.std(axis=0))
-        #         @ posterior_cov_0
-        #         @ torch.diag(1 / theta_train.std(axis=0))
-        # )
-        posterior_cov_diffused = (posterior_cov_0[None] * score_net.alpha(t)[:, None, None].cuda() +
-                                   (1 - score_net.alpha(t).cuda())[:, None, None] * torch.eye(posterior_cov_0.shape[0])[None].cuda())
-        posterior_mean_diffused = posterior_mean_0[None] * score_net.alpha(t)[:, None].cuda()
-
-        posterior_cov_diffused_ = (posterior_cov_0_[None] * score_net.alpha(t)[:, None, None].cuda() +
-                                   (1 - score_net.alpha(t).cuda())[:, None, None] * torch.eye(posterior_cov_0_.shape[0])[None].cuda())
-        posterior_mean_diffused_ = posterior_mean_0_[None] * score_net.alpha(t)[:, None].cuda()
-
-
-        score_fn_gauss = partial(
-            diffused_tall_posterior_score,
-            prior=prior_, # normalized prior# analytical posterior
-            x_obs=x_obs_100_[:N_OBS].cuda(), # observations
-            nse=score_net, # trained score network
-            dist_cov_est=cov_est,
-            cov_mode='GAUSS',
-        )
-
-        score_fn_jac = partial(
-            diffused_tall_posterior_score,
-            prior=prior_, # normalized prior# analytical posterior
-            x_obs=x_obs_100_[:N_OBS].cuda(), # observations
-            nse=score_net, # trained score network
-            cov_mode='JAC',
-        )
-        mse_scores = {'GAUSS': [], "JAC": []}
-        for mu_, cov_, t in zip(posterior_mean_diffused_,
-                                posterior_cov_diffused_,
-                                torch.linspace(0, 1, 1000)):
-            dist = torch.distributions.MultivariateNormal(loc=mu_, covariance_matrix=cov_)
-            ref_samples = dist.sample((1000,))
-            ref_samples.requires_grad_(True)
-            dist.log_prob(ref_samples).sum().backward()
-            real_score = ref_samples.grad.clone()
-            ref_samples.grad = None
-            ref_samples.requires_grad_(False)
-
-            approx_score_gauss = score_fn_gauss(ref_samples.cuda(), t.cuda())
-            approx_score_jac = score_fn_jac(ref_samples.cuda(), t.cuda())
-            error_gauss = torch.linalg.norm(approx_score_gauss - real_score, axis=-1)**2
-            error_jac = torch.linalg.norm(approx_score_jac - real_score, axis=-1)**2
-            error_mean = torch.linalg.norm(real_score - real_score.mean(dim=0)[None], dim=-1)**2
-            r2_score_gauss = 1 - (error_gauss.sum() / error_mean.sum())
-            r2_score_jac = 1 - (error_jac.sum() / error_mean.sum())
-            mse_scores["GAUSS"].append(r2_score_gauss.item())
-            mse_scores["JAC"].append(r2_score_jac.item())
-        plt.plot(torch.linspace(0, 1, 1000),mse_scores["GAUSS"], label='GAUSS', alpha=.8)
-        plt.plot(torch.linspace(0, 1, 1000),mse_scores["JAC"], label='JAC', alpha=.8)
-        plt.suptitle(N_OBS)
-        plt.legend()
-        plt.ylim(-1.1, 1.1)
-        #plt.yscale('log')
-        plt.ylabel('R2 score')
-        plt.xlabel('Diffusion time')
-        plt.show()
-        # compute results for learned and analytical score during sampling
-        # where each euler step is updated with the learned tall posterior score
-        samples_per_alg = {}
-        for name, score_fun in [
-            ('NN / Gaussian cov', score_fn_gauss),
-            ('JAC', score_fn_jac),
-            #(f'Approx Cov (eps={EPS_PERT})', score_fn_ana_cov_est),
-            #(f'Approx score (mean) (eps={EPS_PERT})', score_fn_ana_perturb),
-            #('NN / Id', score_fn_net),
-            #('NN / Gaussian cov Wup', score_fn_gauss_warmup),
-            #('NN / Gaussian cov clip', score_fn_gauss_psd_clip),
-            #('2 order Tweedie clip_old', score_fn_jac_old),
-            #('2 order Tweedie scale', score_fn_jac_scale),
-            #('2 order Tweedie clip', score_fn_jac),
-
-        ]:
-            samples_ = euler_sde_sampler(
-                score_fun, N_SAMPLES, dim=DIM, beta=score_net.beta, device="cuda:0", theta_clipping_range=(-100, 100),
-            )
-            samples_per_alg[name] = samples_ * theta_train.std(axis=0)[None, None] + theta_train.mean(axis=0)[None, None]
-
-        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
-        fig.suptitle(f'N={N_OBS}')
-        ref_samples = torch.distributions.MultivariateNormal(loc=posterior_mean_0, covariance_matrix=posterior_cov_0).sample((500,)).cpu()
-        ind_samples = torch.randint(low=0, high=N_SAMPLES, size=(1000,))
-        for ax, (name, all_thetas) in zip(axes.flatten(), samples_per_alg.items()):
-            ax.scatter(*ref_samples[..., :2].T, label='Ground truth')
-            ax.scatter(*all_thetas[-1, ind_samples, :2].T, label=name, alpha=.8)
-            ax.set_xlim(theta_true[0, 0] - 5, theta_true[0, 0] + 5)
-            ax.set_ylim(theta_true[0, 1] - 5, theta_true[0,1] + 5)
-            ax.set_title(name)
-            leg = ax.legend()
-            for lh in leg.legendHandles:
-                lh.set_alpha(1)
-        # for ax in axes[-1]:
-        #     ax.set_xlabel("theta_1")
-        # for ax in axes[:, 0]:
-        #     ax.set_ylabel("theta_2")
-        fig.show()
+                        samples_gauss = score_net.ddim(shape=(1000,),
+                                                       x=x_obs_100[:N_OBS].cuda(),
+                                                       eta=eta,
+                                                       steps=sampling_steps,
+                                                       prior_score_fn=prior_score,
+                                                       dist_cov_est=cov_est.cuda(),
+                                                       cov_mode='GAUSS').cpu()
+                        tstart_jac = time.time()
+                        samples_jac = score_net.ddim(shape=(1000,),
+                                                     x=x_obs_100[:N_OBS].cuda(),
+                                                     eta=eta,
+                                                     steps=sampling_steps,
+                                                     prior_score_fn=prior_score,
+                                                     cov_mode='JAC').cpu()
+                        tstart_lang = time.time()
+                        with torch.no_grad():
+                            lang_samples = score_net.annealed_langevin_geffner(shape=(1000,),
+                                                                               x=x_obs_100[:N_OBS].cuda(),
+                                                                               prior_score_fn=prior_score,
+                                                                               lsteps=5,
+                                                                               steps=sampling_steps)
+                        t_end_lang = time.time()
+                        dt_gauss = tstart_jac - tstart_gauss
+                        dt_jac = tstart_lang - tstart_jac
+                        dt_lang = t_end_lang - tstart_lang
+                        true_posterior_cov = torch.linalg.inv(inv_lik*N_OBS + inv_prior)
+                        true_posterior_mean = (true_posterior_cov @ (inv_prior_prior + inv_lik @ x_obs_100[:N_OBS].sum(dim=0).cuda()))
+                        ref_samples = torch.distributions.MultivariateNormal(loc=true_posterior_mean, covariance_matrix=true_posterior_cov).sample((1000,)).cpu()
+                        infos["exps"]["Langevin"].append({"dt": dt_lang, "samples": lang_samples, "n_steps": sampling_steps})
+                        infos["exps"]["GAUSS"].append({"dt": dt_gauss, "samples": samples_gauss, "n_steps": sampling_steps})
+                        infos["exps"]["JAC"].append({"dt": dt_jac, "samples": samples_jac, "n_steps": sampling_steps})
+                        if 'DDIM' not in infos:
+                            infos['DDIM'] = {"samples": samples_ddim.cpu(), "steps": 100, "eta": .5}
+                    all_exps.append(infos)
+                    print(N_OBS, eps)
+                    torch.save(all_exps,
+                               '/mnt/data/gabriel/sbi/gaussian_exp.pt')
+                # fig, axes = plt.subplots(1, 3, figsize=(12, 8))
+                # fig.suptitle(f'N={N_OBS} eps={eps}')
+                # axes[0].scatter(*samples_gauss[..., :2].T)#, label='Ground truth')
+                # axes[0].scatter(*ref_samples[..., :2].T)
+                # axes[0].set_title('GAUSS')
+                # axes[1].scatter(*samples_jac[..., :2].T)#, label='Ground truth')
+                # axes[1].scatter(*ref_samples[..., :2].T)
+                # axes[1].set_title('JAC')
+                # axes[1].scatter(*lang_samples[..., :2].T)#, label='Ground truth')
+                # axes[1].scatter(*ref_samples[..., :2].T)
+                # axes[1].set_title('JAC')
+                # # for ax in axes[-1]:
+                # #     ax.set_xlabel("theta_1")
+                # # for ax in axes[:, 0]:
+                # #     ax.set_ylabel("theta_2")
+                # fig.show()

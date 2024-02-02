@@ -15,14 +15,184 @@ from torch.autograd.functional import jacobian
 from functools import partialmethod, partial
 from torch.func import jacrev, vmap
 
-def assure_positive_definitness(m, lim_inf=0, lim_sup=1e20):
-    if (lim_inf is not None) and (lim_sup is not None):
-        L, V = torch.linalg.eig(.5 * (m + m.mT))
-        L = L.real
-        V = V.real
 
-        return V @ torch.diag_embed(L.abs().clip(lim_inf, lim_sup)) @ torch.linalg.inv(V)
-    return m
+
+def mean_backward(theta, t, score_fn, nse, **kwargs):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+
+    return (
+            1
+            / (alpha_t**0.5)
+            * (theta + sigma_t**2 * score_fn(theta=theta, t=t, **kwargs))
+    )
+
+
+def sigma_backward(t, dist_cov, nse):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+    eye = torch.eye(dist_cov.shape[-1]).to(alpha_t.device)
+    # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+    if (alpha_t**.5) < 0.5:
+        return torch.linalg.inv(torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * eye)
+    return (((sigma_t ** 2) / alpha_t) * eye
+            - (((sigma_t ** 2)**2 / alpha_t)) * torch.linalg.inv(
+                alpha_t * (dist_cov.to(alpha_t.device) - eye)
+                + eye))
+
+
+def prec_matrix_backward(t, dist_cov, nse):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+    eye = torch.eye(dist_cov.shape[-1]).to(alpha_t.device)
+    # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+    #return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
+    return (torch.linalg.inv(dist_cov) + (alpha_t / sigma_t ** 2) * eye)
+
+
+def tweedies_approximation(theta, x, t, score_fn, nse, dist_cov_est=None, mode='JAC', clip_mean_bounds = (None, None)):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+
+    def score_jac(theta, x):
+        n_theta = theta.shape[0]
+        n_x = x.shape[0]
+        score = score_fn(theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+                         t=t[None, None].repeat(n_theta * n_x, 1),
+                         x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1))
+        score = score.reshape(n_theta, n_x, -1)
+        return score, score
+
+    if mode == 'JAC':
+        def score_jac(theta, x):
+            score = score_fn(theta=theta[None, :],
+                             t=t[None, None],
+                             x=x[None, ...])[0]
+            return score, score
+        jac_score, score = vmap(lambda theta: vmap(jacrev(score_jac, has_aux=True))(theta[None].repeat(x.shape[0], 1), x))(
+            theta)
+        cov = (sigma_t**2 / alpha_t) * (torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2)*jac_score)
+        prec = torch.linalg.inv(cov)
+    elif mode == 'GAUSS':
+        prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
+        # eye = torch.eye(dist_cov_est.shape[-1]).to(alpha_t.device)
+        # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+        # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
+        prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
+        score = score_jac(theta, x)[0]
+        # score = vmap(lambda theta: vmap(partial(score_fn, t=t),
+        #                                 in_dims=(None, 0),
+        #                                 randomness='different')(theta, x),
+        #              randomness='different')(theta)
+    else:
+        raise NotImplemented("Available methods are GAUSS, PSEUDO, JAC")
+    mean = (1 / (alpha_t**0.5) * (theta[:, None] + sigma_t**2 * score))
+    if clip_mean_bounds[0]:
+        mean = mean.clip(*clip_mean_bounds)
+    return prec, mean, score
+
+class PositionalEncodingVector(nn.Module):
+
+    def __init__(self, d_model: int, M: int):
+        super().__init__()
+        div_term = 1 / M**(2 * torch.arange(0, d_model, 2) / d_model)
+        self.register_buffer('div_term', div_term)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Arguments:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        """
+        exp_div_term = self.div_term.reshape(*(1,)*(len(x.shape) - 1), -1)
+        return torch.cat((torch.sin(x*exp_div_term), torch.cos(x*exp_div_term)), dim=-1)
+
+
+
+class _FBlock(torch.nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 emb_channels,
+                 dropout=0,
+                 eps=1e-5,
+                 ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+
+        self.norm0 = torch.nn.GroupNorm(num_groups=16, num_channels=in_channels, eps=eps)
+        self.conv0 = torch.nn.Linear(in_features=in_channels, out_features=out_channels)
+        self.affine = torch.nn.Linear(in_features=emb_channels, out_features=out_channels)
+        self.norm1 = torch.nn.GroupNorm(num_groups=16, num_channels=out_channels, eps=eps)
+        self.conv1 = torch.nn.Linear(in_features=out_channels, out_features=out_channels)
+
+        self.skip = None
+        if out_channels != in_channels:
+            self.skip = torch.nn.Linear(in_features=in_channels, out_features=out_channels)
+        self.skip_scale = .5 ** .5
+
+    def forward(self, x, emb):
+        silu = torch.nn.functional.silu
+        orig = x
+        x = self.conv0(silu(self.norm0(x)))
+
+        params = self.affine(emb)
+
+        x = silu(self.norm1(x.add_(params)))
+
+        x = self.conv1(torch.nn.functional.dropout(x, p=self.dropout, training=self.training))
+        x = x.add_(self.skip(orig) if self.skip is not None else orig)
+        x = x * self.skip_scale
+        return x
+
+
+class FNet(torch.nn.Module):
+
+    def     __init__(self,
+                     dim_input,
+                     dim_cond,
+                     dim_embedding=512,
+                     n_layers=3):
+        super().__init__()
+        self.input_layer = torch.nn.Sequential(
+            torch.nn.Linear(dim_input, dim_embedding),
+            # torch.nn.SiLU(),
+            # torch.nn.Linear
+        )
+        self.cond_layer = torch.nn.Linear(dim_cond, dim_embedding)
+
+        self.embedding_map = torch.nn.Sequential(
+            torch.nn.Linear(dim_embedding, 2*dim_embedding),
+            torch.nn.GroupNorm(num_groups=16,
+                               num_channels=2*dim_embedding),
+            torch.nn.SiLU(),
+            torch.nn.Linear(2*dim_embedding, dim_embedding)
+        )
+        self.res_layers = torch.nn.ModuleList([_FBlock(in_channels=dim_embedding // 2**i,
+                                                       out_channels=dim_embedding // 2**(i+1),
+                                                       emb_channels=dim_embedding,
+                                                       dropout=.1) for i in range(n_layers)])
+        self.final_layer = torch.nn.Sequential(torch.nn.GroupNorm(num_groups=16, num_channels=dim_embedding // 2**(n_layers)),
+                                               torch.nn.SiLU(),
+                                               torch.nn.Linear(dim_embedding // 2**(n_layers),
+                                                               dim_input, bias=False))
+        self.time_embedding = PositionalEncodingVector(d_model=dim_embedding, M=1000)
+
+    def forward(self, theta, x, t):
+        if isinstance(t, int):
+            t = torch.tensor([t], device=theta.device)
+        theta_emb = self.input_layer(theta)
+        x_emb = self.cond_layer(x)
+        t_emb = self.time_embedding(t)
+        # theta_emb = theta_emb.reshape(-1, theta_emb.shape[-1])
+        # x_emb = x_emb.reshape(-1, x_emb.shape[-1])
+        # t_emb = t_emb.reshape(-1, t_emb.shape[-1])
+        emb = self.embedding_map(t_emb + x_emb)
+        for lr in self.res_layers:
+            theta_emb = lr(x=theta_emb, emb=emb)
+        return self.final_layer(theta_emb).reshape(*theta.shape) #- theta
 
 
 class NSE(nn.Module):
@@ -43,37 +213,59 @@ class NSE(nn.Module):
             self,
             theta_dim: int,
             x_dim: int,
-            freqs: int = 3,
-            build_net: Callable[[int, int], nn.Module] = MLP,
-            embedding_nn_theta: nn.Module = nn.Identity(),
-            embedding_nn_x: nn.Module = nn.Identity(),
+            beta_min: float = 0.1,
+            beta_max: float = 40,
+            M: int = 1000,
+            eps_t: float = 1e-10,
+            sampling_dist: str = 'Uniform',
             **kwargs,
     ):
         super().__init__()
+        self.eps_t = eps_t
+        self.initialize_sampling_fun(sampling_dist)
+        self.beta_min = beta_min
+        self.beta_d = (beta_max - beta_min)
+        self.M = M
+        self.net = FNet(dim_input=theta_dim,
+                        dim_cond=x_dim,
+                        dim_embedding=128,
+                        n_layers=1)
 
-        self.embedding_nn_theta = embedding_nn_theta
-        self.embedding_nn_x = embedding_nn_x
-        self.theta_emb_dim, self.x_emb_dim = self.get_theta_x_embedding_dim(
-            theta_dim, x_dim
-        )
-
-        self.net = build_net(
-            self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
-        )
-
-        self.register_buffer("freqs", torch.arange(1, freqs + 1) * math.pi)
         self.register_buffer("zeros", torch.zeros(theta_dim))
         self.register_buffer("ones", torch.ones(theta_dim))
 
-    def get_theta_x_embedding_dim(self, theta_dim, x_dim) -> int:
-        r"""Returns the dimensionality of the embeddings for :math:`\theta` and :math:`x`."""
-        theta, x = torch.ones((1, theta_dim)), torch.ones((1, x_dim))
-        return (
-            self.embedding_nn_theta(theta).shape[-1],
-            self.embedding_nn_x(x).shape[-1],
-        )
+    def initialize_sampling_fun(self, sampling_dist):
+        if sampling_dist == 'Uniform':
+            self._dist = torch.distributions.Uniform(low=self.eps_t, high=1)
+            def sampling_fun(n_samples):
+                return self._dist.sample((n_samples,))
+        elif sampling_dist == 'LogNormal':
+            self._dist = torch.distributions.LogNormal(loc=-1.2, scale=1)
+            def sampling_fun(n_samples):
+                samples = self._dist.sample((n_samples,))
+                return samples.clip(self.eps_t, 1)
+        else:
+            raise NotImplemented
+        self.sampling_fun = sampling_fun
 
-    def forward(self, theta: Tensor, x: Tensor, t: Tensor) -> Tensor:
+    def save(self, path, meta_info):
+        self.net.eval()
+        self.net.cpu()
+        torch.save({
+            "state_dict_f_net": self.net.state_dict(),
+            "meta": meta_info,
+        },
+            path)
+
+    def load(self, path):
+        infos = torch.load(path)
+        self.net.load_state_dict(infos["state_dict_f_net"])
+        return infos["meta"]
+
+    def forward(self,
+                theta: Tensor,
+                x: Tensor,
+                t: Tensor) -> Tensor:
         r"""
         Arguments:
             theta: The parameters :math:`\theta`, with shape :math:`(*, D)`.
@@ -83,16 +275,26 @@ class NSE(nn.Module):
         Returns:
             The estimated noise :math:`\epsilon_\phi(\theta, x, t)`, with shape :math:`(*, D)`.
         """
+        return self.net(theta, x, t)
 
-        t = self.freqs * t[..., None]
-        t = torch.cat((t.cos(), t.sin()), dim=-1)
+    def loss(self, theta, x, **kwargs):
+        inv_std = self.sampling_fun(theta.shape[0]).to(theta.device)
+        c_sigma = (self.M - 1)*inv_std
+        scaling = 1 / (1 + (1 / inv_std)**2)**.5
+        sigma = scaling / inv_std
+        c_in = 1 / scaling
+        c_out = 1 #/ sigma
 
-        theta = self.embedding_nn_theta(theta)
-        x = self.embedding_nn_x(x)
+        #t = torch.rand(theta.shape[0], dtype=theta.dtype, device=theta.device)
 
-        theta, x, t = broadcast(theta, x, t, ignore=1)
+        eps = torch.randn_like(theta)
+        theta_t = scaling[:, None] * theta + sigma[:, None] * eps
+        eps_est = self.net(c_in[:, None] * theta_t,
+                           x,
+                           c_sigma[:, None], **kwargs) #/ c_out[:, None, None]
+        errors = ((eps_est - eps) / sigma[:, None]).square().sum(dim=-1)
+        return errors.mean()
 
-        return self.net(torch.cat((theta, x, t), dim=-1))
 
     # The following function define the VP SDE with linear noise schedule beta(t):
     # dtheta = f(t) theta dt + g(t) dW = -0.5 * beta(t) theta dt + sqrt(beta(t)) dW
@@ -104,7 +306,7 @@ class NSE(nn.Module):
         r"""Linear noise schedule of the VP SDE:
         .. math:: \beta(t) = 32 t .
         """
-        return 32 * t
+        return self.beta_d * t + self.beta_min
 
     def f(self, t: Tensor) -> Tensor:
         """Drift of the VP SDE:
@@ -122,7 +324,12 @@ class NSE(nn.Module):
         r"""Mean of the transition kernel of the VP SDE:
         .. math: `alpha(t) = \exp ( -0.5 \int_0^t \beta(s)ds)`.
         """
-        return torch.exp(-16 * t**2)
+        log_alpha = .5 * self.beta_d * (t**2) + self.beta_min*t
+        return torch.exp(-.5 * log_alpha)#torch.exp(-16 * t**2)
+
+    def std_karas(self, t):
+        log_alpha = .5 * self.beta_d * (t ** 2) + self.beta_min * t
+        return (torch.exp(log_alpha) - 1)**.5
 
     def sigma(self, t: Tensor) -> Tensor:
         r"""Standard deviation of the transition kernel of the VP SDE:
@@ -130,6 +337,7 @@ class NSE(nn.Module):
         where C is such that :math: `\sigma^2(1) = 1, \sigma^2(0)  = \epsilon \approx 1e-4`.
         """
         return torch.sqrt(1 - self.alpha(t) + math.exp(-16))
+
 
     def bridge_mean(self, alpha_t: Tensor, alpha_t_1: Tensor, theta_t: Tensor, theta_0: Tensor, bridge_std: float) -> Tensor:
         est_noise = (theta_t - (alpha_t**.5) * theta_0) / ((1 - alpha_t)**.5)
@@ -164,10 +372,11 @@ class NSE(nn.Module):
     def ddim(
             self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, eta: float = 1., **kwargs
     ):
-        if len(x.shape) == 1:
+        if x.shape[0] == shape[0]:
             score_fun = self.score
         else:
             score_fun = partial(self.factorized_score, **kwargs)
+
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
 
@@ -214,7 +423,7 @@ class NSE(nn.Module):
                             predictor_type='ddim',
                             corrector_type='langevin',
                             **kwargs
-    ):
+                            ):
         if len(x.shape) == 1:
             score_fun = self.score
         else:
@@ -262,13 +471,14 @@ class NSE(nn.Module):
 
         return theta
 
-    def annealed_langevin(
+    def annealed_langevin_geffner(
             self,
             shape: Size,
             x: Tensor,
+            prior_score_fn: Callable[[torch.tensor, torch.tensor], torch.tensor],
             steps: int = 64,
-            lsteps: int = 1000,
-            tau: float = 1,
+            lsteps: int = 5,
+            tau: float = .5,
             verbose: bool = False,
             **kwargs,
     ):
@@ -276,17 +486,24 @@ class NSE(nn.Module):
 
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
 
-        for t in tqdm(time[:-1], disable=not verbose):
+        for i, t in enumerate(tqdm(time[:-1], disable=not verbose)):
+            if i < steps - 1:
+                gamma_t = self.alpha(t) / self.alpha(t - time[-2])
+            else:
+                gamma_t = self.alpha(t)
+            delta = tau * (1 - gamma_t) / (gamma_t ** .5)
             for _ in range(lsteps):
                 z = torch.randn_like(theta)
-                score = self(theta, x, t, **kwargs) / -self.sigma(t)
-                # delta = tau * self.alpha(t) / score.square().mean()
-                delta = (
-                        tau
-                        * (self.alpha(t)**.5)
-                        * min(self.sigma(t) ** 2, 1 / score.square().mean())
-                )
-                theta = theta + delta * score + torch.sqrt(2 * delta) * z
+                n_x, n_theta = x.shape[0], theta.shape[0]
+                post_score = self(theta[:, None, :].repeat(1, n_x, 1).reshape(n_x*n_theta, -1),
+                             x[None, :, :].repeat(n_theta, 1, 1).reshape(n_x*n_theta, -1),
+                             t[None, None].repeat(n_theta*n_x, 1),
+                             **kwargs) / -self.sigma(t)
+                post_score = post_score.reshape(n_theta, n_x, -1)
+                prior_score, mean_prior_0_t, prec_prior_0_t = prior_score_fn(theta, t)
+                score = post_score.sum(dim=1) + (1 - n_x) * prior_score
+                #delta = step_size
+                theta = theta + delta * score + ((2 * delta)**.5) * z
 
         return theta
 
@@ -330,80 +547,33 @@ class NSE(nn.Module):
         mean, score = out
         return mean, (upsilon / (alpha_t ** .5))*grad_mean, score
 
-    def log_L(self,
-              means_posterior: Tensor,
-              covar_posteriors: Tensor,
-              mean_prior: Tensor,
-              covar_prior: Tensor):
-        '''
-        Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...) Following http://www.lucamartino.altervista.org/2003-003.pdf
-        Parameters
-        ----------
-        pred_means
-        pred_covs
+    def factorized_score(self,
+                         theta,
+                         x_obs,
+                         t,
+                         prior_score_fn,
+                         dist_cov_est=None,
+                         cov_mode='JAC',
+                         ):
+        # device
+        n_obs = x_obs.shape[0]
 
-        Returns
-        -------
+        prec_0_t, mean_0_t, scores = tweedies_approximation(x=x_obs,
+                                                            theta=theta,
+                                                            nse=self,
+                                                            t=t,
+                                                            score_fn=self.score,
+                                                            dist_cov_est=dist_cov_est,
+                                                            mode=cov_mode)
 
-        '''
-        def from_canonical_to_sufficient(mean, covar):
-            lda = torch.linalg.inv(covar)
-            eta = (lda @ mean[..., None])[..., 0]
-            return lda, eta, -.5 * (-torch.linalg.slogdet(lda).logabsdet + (mean[..., None].mT @ lda @ mean[..., None])[...,0, 0])
+        prior_score, mean_prior_0_t, prec_prior_0_t = prior_score_fn(theta, t)
+        prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
+        prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+        lda = prec_prior_0_t*(1-n_obs) + prec_0_t.sum(dim=1)
+        weighted_scores = prec_score_prior + (prec_score_post - prec_score_prior[:, None]).sum(dim=1)
 
-        n_observations = means_posterior.shape[-2]
-        lambdas_posterior, etas_posterior, zetas_posterior = from_canonical_to_sufficient(means_posterior, covar_posteriors)
-        lda_prior, eta_prior, zeta_prior = from_canonical_to_sufficient(mean_prior, covar_prior)
-
-        sum_zetas = zetas_posterior.sum(axis=1) + (1 - n_observations)*zeta_prior
-
-        final_gaussian_etas = (1 - n_observations)*eta_prior + etas_posterior.sum(axis=1) 
-        final_gaussian_ldas = (1 - n_observations)*lda_prior + lambdas_posterior.sum(axis=1)
-        final_gaussian_zeta = -.5 * (-torch.linalg.slogdet(final_gaussian_ldas).logabsdet
-                                     + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
-        return sum_zetas - final_gaussian_zeta
-
-    def factorized_score(self, theta, x, t, prior_score_fun, corrector_lda=0, **kwargs):
-        # Defining stuff
-        n_observations = x.shape[0]
-        n_samples = theta.shape[0]
-        alpha_t = self.alpha(t)
-        upsilon = 1 - alpha_t
-        theta_ = theta.clone().requires_grad_(True)
-
-        # Calculating m, Sigma and scores for the posteriors
-        predicted_mean, predicted_covar, scores = self.gaussian_approximation(theta=theta_[:, None].repeat(1, n_observations, 1),
-                                                                              x=x[None, :].repeat(n_samples, 1, 1),
-                                                                              t=t)
-
-        # Calculating m, Sigma and score of the prior
-        def pred_mean_prior(theta):
-            prior_score = prior_score_fun(theta[None], t)[0]
-            prior_predicted_mean = self.mean_pred(theta, prior_score, alpha_t)
-            return prior_predicted_mean, (prior_predicted_mean, prior_score)
-
-        grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
-        prior_predicted_mean, prior_score = out
-        prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
-        prior_predicted_covar = prior_predicted_covar
-        predicted_covar = assure_positive_definitness(predicted_covar.detach())
-        prior_predicted_covar = assure_positive_definitness(prior_predicted_covar.detach())
-        # Calculating correction term
-        log_L = self.log_L(predicted_mean,
-                           predicted_covar,
-                           prior_predicted_mean,
-                           prior_predicted_covar)
-
-        log_L.sum().backward()
-        langevin_grad = (1 - n_observations) * prior_score + scores.sum(axis=1)
-        correction = theta_.grad * (n_observations > 1)
-        #print(torch.linalg.norm(langevin_grad + correction, axis=-1).mean() / torch.linalg.norm(correction, axis=-1).mean() )
-        aggregated_score = langevin_grad + corrector_lda*correction
-        theta_.detach()
-        # real_score = self.score(theta, x, t)
-        # res = torch.linalg.norm(aggregated_score - real_score, axis=-1)
-        # print((res/torch.linalg.norm(real_score, axis=-1)).max().item())
-        return aggregated_score
+        total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+        return total_score #/ (1 + (1/n_obs)*torch.abs(total_score))
 
 
 class NSELoss(nn.Module):
@@ -426,9 +596,9 @@ class NSELoss(nn.Module):
         estimator: A regression network :math:`\epsilon_\phi(\theta, x, t)`.
     """
 
-    def __init__(self, estimator: NSE):
+    def __init__(self, estimator: NSE, eps_t: float = 1e-5):
         super().__init__()
-
+        self.eps_t = eps_t
         self.estimator = estimator
 
     def forward(self, theta: Tensor, x: Tensor, **kwargs) -> Tensor:
@@ -442,15 +612,6 @@ class NSELoss(nn.Module):
             The scalar loss :math:`l`.
         """
 
-        t = torch.rand(theta.shape[0], dtype=theta.dtype, device=theta.device)
-
-        scaling = self.estimator.alpha(t)**.5
-        sigma = self.estimator.sigma(t)
-
-        eps = torch.randn_like(theta)
-        theta_t = scaling[:, None] * theta + sigma[:, None] * eps
-
-        return (self.estimator(theta_t, x, t, **kwargs) - eps).square().mean()
 
 
 if __name__ == "__main__":

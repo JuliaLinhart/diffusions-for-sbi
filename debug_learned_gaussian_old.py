@@ -3,7 +3,6 @@ import torch
 
 from torch.func import vmap, jacrev
 from vp_diffused_priors import get_vpdiff_gaussian_score
-from nse import assure_positive_definitness
 
 
 # def assure_positive_definitness(m, lim_inf=0, lim_sup=1e20):
