@@ -8,19 +8,19 @@ from tueplots import fonts, axes
 def set_plotting_style():
     plt.rcParams.update(fonts.neurips2022())
     plt.rcParams.update(axes.color(base="black"))
-    plt.rcParams["legend.fontsize"] = 23.0
-    plt.rcParams["xtick.labelsize"] = 23.0
-    plt.rcParams["ytick.labelsize"] = 23.0
-    plt.rcParams["axes.labelsize"] = 23.0
-    plt.rcParams["font.size"] = 23.0
-    plt.rcParams["axes.titlesize"] = 27.0
+    plt.rcParams["legend.fontsize"] = 25.0
+    plt.rcParams["xtick.labelsize"] = 25.0
+    plt.rcParams["ytick.labelsize"] = 25.0
+    plt.rcParams["axes.labelsize"] = 50.0
+    plt.rcParams["font.size"] = 30.0
+    plt.rcParams["axes.titlesize"] = 30.0
     alpha = 0.9
     alpha_fill = 0.1
     return alpha, alpha_fill
 
 markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
-    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize + 0.5},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
     "JAC": {"label":"JAC", "color": "orange", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
@@ -29,8 +29,9 @@ METHODS_STYLE = {
 }
 
 METRICS_STYLE = {
-    "swd": {"label": "Sliced W2"},
+    "swd": {"label": "sW"},
     "mmd": {"label": "MMD"},
+    "c2st": {"label": "C2ST"},
     "mmd_to_dirac": {"label": "MMD to Dirac"},
 }
 
@@ -142,6 +143,9 @@ def pairplot_with_groundtruth_md(
 
 
 def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
+    plt.rcParams["xtick.labelsize"] = 20.0
+    plt.rcParams["ytick.labelsize"] = 20.0
+
     dim = len(theta_gt[0])
 
     dfs = []
@@ -211,11 +215,11 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
                 g.axes[3][2].scatter(sigma, gain, color="black", zorder=2, s=8)
 
             # plot dirac
-            g.axes[0][0].axvline(x=C, ls="--", c="black", linewidth=1)
-            g.axes[1][1].axvline(x=mu, ls="--", c="black", linewidth=1)
-            g.axes[2][2].axvline(x=sigma, ls="--", c="black", linewidth=1)
+            g.axes[0][0].axvline(x=C, ls="--", c="black", linewidth=1, zorder=100)
+            g.axes[1][1].axvline(x=mu, ls="--", c="black", linewidth=1, zorder=100)
+            g.axes[2][2].axvline(x=sigma, ls="--", c="black", linewidth=1, zorder=100)
             if dim == 4:
-                g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1)
+                g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1, zorder=100)
 
     handles, labels = g.axes[0][0].get_legend_handles_labels()
     # make handle lines larger
