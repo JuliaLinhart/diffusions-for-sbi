@@ -11,7 +11,7 @@ def set_plotting_style():
     plt.rcParams["legend.fontsize"] = 25.0
     plt.rcParams["xtick.labelsize"] = 25.0
     plt.rcParams["ytick.labelsize"] = 25.0
-    plt.rcParams["axes.labelsize"] = 50.0
+    plt.rcParams["axes.labelsize"] = 30.0
     plt.rcParams["font.size"] = 30.0
     plt.rcParams["axes.titlesize"] = 30.0
     alpha = 0.9
@@ -20,10 +20,10 @@ def set_plotting_style():
 
 markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
-    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize + 0.5},
-    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
-    "JAC": {"label":"JAC", "color": "orange", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
-    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
+    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
+    "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
+    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
     "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
     "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
 }

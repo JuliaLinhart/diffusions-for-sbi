@@ -14,19 +14,21 @@ from sbibm.metrics import mmd
 
 PATH_EXPERIMENT = "results/gaussian/"
 N_OBS = [1, 8, 14, 22, 30]
-N_TRAIN = 10000
-N_EPOCHS = 10000
+N_TRAIN = 30000 #10000
+N_EPOCHS = 5000 #10000
+BATCH_SIZE = 256
 DIM_LR_DICT = {
     2: 1e-4, 
     4: 1e-4, 
     8: 1e-4, 
     16: 1e-4, 
-    32: 1e-3}
+    32: 1e-4} # 32: 1e-3}
 
 METRICS = ["swd", "mmd", "mmd_to_dirac"]
 
 def load_losses(task_name, n_train, lr, path):
-    losses = torch.load(path + f'{task_name}/n_train_{n_train}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
+    # losses = torch.load(path + f'{task_name}/n_train_{n_train}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
+    losses = torch.load(path + f'{task_name}/n_train_{n_train}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
     train_losses = losses["train_losses"]
     val_losses = losses["val_losses"]
     best_epoch = losses["best_epochs"]
@@ -37,7 +39,8 @@ def path_to_results(dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=
     if random_prior:
         path += "random_prior"
     theta_true_path = path + "/theta_true.pkl"
-    path += f"/n_train_{N_TRAIN}_n_epochs_{N_EPOCHS}_lr_{lr}/"
+    # path += f"/n_train_{N_TRAIN}_n_epochs_{N_EPOCHS}_lr_{lr}/"
+    path += f"/n_train_{N_TRAIN}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/"
     path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
     runtimes_path = path + f"time_n_obs_{n_obs}.pkl"
     samples_path = path + f"posterior_samples_n_obs_{n_obs}.pkl"
@@ -139,11 +142,11 @@ if __name__ == "__main__":
 
 
     if args.w_dist:
-        fig, axs = plt.subplots(2, 5, figsize=(25, 10), constrained_layout=True)
+        fig, axs = plt.subplots(3, 5, figsize=(25, 15), constrained_layout=True)
         for j, n_obs in enumerate(N_OBS):
             wdist_dict = {method: [] for method in METHODS_STYLE.keys()}
             mmd_dict = {method: [] for method in METHODS_STYLE.keys()}
-            # mmd_to_dirac_dict = {method: [] for method in METHODS_STYLE.keys()}
+            mmd_to_dirac_dict = {method: [] for method in METHODS_STYLE.keys()}
             for dim, lr in DIM_LR_DICT.items():
                 task = Gaussian_Gaussian_mD(dim=dim)
                 x_obs = torch.load(PATH_EXPERIMENT + f"{dim}d/x_obs_100.pkl")[:n_obs]
@@ -156,15 +159,15 @@ if __name__ == "__main__":
                     samples, theta_true = load_samples(dim, n_obs, lr, cov_mode=method.split("_")[0], langevin=langevin, clip=clip)
                     wdist_dict[method].append(sliced_wasserstein_distance(samples_analytic, samples, n_projections=100))
                     mmd_dict[method].append(mmd(samples_analytic, samples))
-                    # mmd_to_dirac_dict[method].append(dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"])
+                    mmd_to_dirac_dict[method].append(dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"])
 
             for k, v in wdist_dict.items():
-                axs[0, j].plot(list(DIM_LR_DICT.keys()), v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
+                axs[0, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
             for k, v in mmd_dict.items():
-                axs[1, j].plot(list(DIM_LR_DICT.keys()), v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
-            # for k, v in mmd_to_dirac_dict.items():
-            #     axs[2, j].plot(list(DIM_LR_DICT.keys()), v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
-            for i, metric in enumerate(["swd", "mmd"]):
+                axs[1, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
+            for k, v in mmd_to_dirac_dict.items():
+                axs[2, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
+            for i, metric in enumerate(["swd", "mmd", "mmd_to_dirac"]):
                 axs[i, j].set_title(rf"$n={n_obs}$")
                 axs[i, j].set_xlabel(r"Dimenson ($m$)")
                 axs[i, j].set_xscale("log", base=2)
@@ -180,7 +183,7 @@ if __name__ == "__main__":
 
 
         # same but with one subfigure per dim and plots as function of n_obs
-        fig, axs = plt.subplots(1, 5, figsize=(25, 5), constrained_layout=True)
+        fig, axs = plt.subplots(3, 5, figsize=(25,15), constrained_layout=True)
         for j, (dim, lr) in enumerate(DIM_LR_DICT.items()):
             wdist_dict = {method: [] for method in METHODS_STYLE.keys()}
             mmd_dict = {method: [] for method in METHODS_STYLE.keys()}
@@ -195,23 +198,22 @@ if __name__ == "__main__":
                     clip = True if "clip" in method else False
                     langevin = True if "LANGEVIN" in method else False
                     samples, theta_true = load_samples(dim, n_obs, lr, cov_mode=method.split("_")[0], langevin=langevin, clip=clip)
-                    # wdist_dict[method].append(sliced_wasserstein_distance(samples_analytic, samples, n_projections=100))
-                    # mmd_dict[method].append(mmd(samples_analytic, samples))
+                    wdist_dict[method].append(sliced_wasserstein_distance(samples_analytic, samples, n_projections=100))
+                    mmd_dict[method].append(mmd(samples_analytic, samples))
                     mmd_to_dirac_dict[method].append(dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"])
 
-            # for k, v in wdist_dict.items():
-            #     axs[0, j].plot(N_OBS, v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
-            # for k, v in mmd_dict.items():
-            #     axs[1, j].plot(N_OBS, v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
+            for k, v in wdist_dict.items():
+                axs[0, j].plot(N_OBS, v, alpha=0.7, **METHODS_STYLE[k])
+            for k, v in mmd_dict.items():
+                axs[1, j].plot(N_OBS, v, alpha=0.7, **METHODS_STYLE[k])
             for k, v in mmd_to_dirac_dict.items():
-                axs[j].plot(N_OBS, v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
-            # for i, metric in enumerate(METRICS):
-            axs[j].set_title(fr"${dim}$D")
-            axs[j].set_xlabel(r"$n$")
-            axs[j].set_xticks(N_OBS)
-            axs[j].set_ylabel(METRICS_STYLE["mmd_to_dirac"]["label"])
-            axs[j].set_ylim(0, 0.8)
-        axs[j].legend()
+                axs[2, j].plot(N_OBS, v, alpha=0.7, **METHODS_STYLE[k])
+            for i, metric in enumerate(["swd", "mmd", "mmd_to_dirac"]):
+                axs[i, j].set_title(fr"${dim}$D")
+                axs[i, j].set_xlabel(r"$n$")
+                axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
+                axs[i, j].set_ylim(0, 0.8)
+        axs[i, j].legend()
 
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_per_dim.png")
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_per_dim.pdf")
@@ -219,27 +221,27 @@ if __name__ == "__main__":
             
 
 
-    # dim = 16
-    # task = Gaussian_Gaussian_mD(dim=dim)
+    dim = 2
+    task = Gaussian_Gaussian_mD(dim=dim)
 
-    # x_obs = torch.load(PATH_EXPERIMENT + f"{dim}d/x_obs_100.pkl")
-    # fig, axs = plt.subplots(1, 5, figsize=(25, 5), constrained_layout=True)
-    # for i, n_obs in enumerate(N_OBS):
-    #     x_obs_ = x_obs[:n_obs]
-    #     true_posterior = task.true_tall_posterior(x_obs_)
-    #     samples_analytic = true_posterior.sample((1000,))
-    #     # samples_jac, _ = load_samples(dim, n_obs, cov_mode="JAC")
-    #     # samples_jac_clip, _ = load_samples(dim, n_obs, cov_mode="JAC_clip")
-    #     # samples, _ = load_samples(dim, n_obs, langevin=True)
-    #     samples_gauss, theta_true = load_samples(dim, n_obs, cov_mode="GAUSS")
+    x_obs = torch.load(PATH_EXPERIMENT + f"{dim}d/x_obs_100.pkl")
+    fig, axs = plt.subplots(1, 5, figsize=(25, 5), constrained_layout=True)
+    for i, n_obs in enumerate(N_OBS):
+        x_obs_ = x_obs[:n_obs]
+        true_posterior = task.true_tall_posterior(x_obs_)
+        samples_analytic = true_posterior.sample((1000,))
+        # samples_jac, _ = load_samples(dim, n_obs, cov_mode="JAC")
+        # samples_jac_clip, _ = load_samples(dim, n_obs, cov_mode="JAC_clip")
+        # samples, _ = load_samples(dim, n_obs, langevin=True)
+        samples_gauss, theta_true = load_samples(dim, n_obs, lr=DIM_LR_DICT[dim], cov_mode="GAUSS") #, clip=True)
 
-    #     axs[i].scatter(samples_analytic[:, 0], samples_analytic[:, 1], label="Analytic")
-    #     axs[i].scatter(samples_gauss[:, 0], samples_gauss[:, 1], label="GAUSS")
-    #     # axs[i].scatter(samples_jac[:, 0], samples_jac[:, 1], label="JAC")
-    #     # axs[i].scatter(samples_jac_clip[:, 0], samples_jac_clip[:, 1], label="JAC (clip)")
-    #     # axs[i].scatter(samples[:,0], samples[:,1], label="langevin")
-    #     axs[i].scatter(theta_true[0], theta_true[1], label="theta_true", color="black")
-    #     axs[i].set_title(f"{n_obs} observations")
-    #     axs[i].legend()
-    # plt.savefig(PATH_EXPERIMENT + f"{dim}d/samples.png")
-    # plt.clf()
+        axs[i].scatter(samples_analytic[:, 0], samples_analytic[:, 1], label="Analytic")
+        axs[i].scatter(samples_gauss[:, 0], samples_gauss[:, 1], label="GAUSS")
+        # axs[i].scatter(samples_jac[:, 0], samples_jac[:, 1], label="JAC")
+        # axs[i].scatter(samples_jac_clip[:, 0], samples_jac_clip[:, 1], label="JAC (clip)")
+        # axs[i].scatter(samples[:,0], samples[:,1], label="langevin")
+        axs[i].scatter(theta_true[0], theta_true[1], label="theta_true", color="black")
+        axs[i].set_title(f"{n_obs} observations")
+        axs[i].legend()
+    plt.savefig(PATH_EXPERIMENT + f"{dim}d/samples.png")
+    plt.clf()

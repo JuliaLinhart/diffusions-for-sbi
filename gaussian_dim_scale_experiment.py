@@ -38,7 +38,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     # Prepare training data
     # normalize theta
@@ -54,15 +54,15 @@ def run_train_sgm(
     # embedding nets
     theta_dim = theta_train.shape[-1]
     x_dim = x_train.shape[-1]
-    theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
-    x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
+    # theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
+    # x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
     score_network = NSE(
         theta_dim=theta_dim,
         x_dim=x_dim,
-        embedding_nn_theta=theta_embedding_net,
-        embedding_nn_x=x_embedding_net,
-        hidden_features=[128, 256, 128],
-        freqs=32,
+        # embedding_nn_theta=theta_embedding_net,
+        # embedding_nn_x=x_embedding_net,
+        hidden_features=[256, 256, 256],
+        # freqs=32,
     ).to(device)
 
     # Train score network
@@ -90,6 +90,7 @@ def run_train_sgm(
         # track_loss=True,
         validation_split=0.2,
         early_stopping=True,
+        min_nb_epochs=2000,
     )
     score_network = avg_score_net.module
 
@@ -126,7 +127,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -294,10 +295,10 @@ if __name__ == "__main__":
         help="run type",
     )
     parser.add_argument(
-        "--n_train", type=int, default=10000, help="number of training data samples"
+        "--n_train", type=int, default=50000, help="number of training data samples"
     )
     parser.add_argument(
-        "--n_epochs", type=int, default=10000, help="number of training epochs"
+        "--n_epochs", type=int, default=5000, help="number of training epochs"
     )
     parser.add_argument(
         "--batch_size", type=int, default=64, help="batch size for training"
@@ -351,7 +352,7 @@ if __name__ == "__main__":
 
         # Define Experiment Path
         save_path = (
-            task_path + f"n_train_{args.n_train}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+            task_path + f"n_train_{args.n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
         )
         os.makedirs(save_path, exist_ok=True)
 
@@ -377,8 +378,8 @@ if __name__ == "__main__":
         if os.path.exists(filename):
             print(f"Loading training data from {filename}")
             dataset_train = torch.load(filename)
-            theta_train = dataset_train["theta"][: args.n_train]
-            x_train = dataset_train["x"][: args.n_train]
+            theta_train = dataset_train["theta"]
+            x_train = dataset_train["x"]
         else:
             theta_train = prior.sample((50000,))
             x_train = simulator(theta_train)
@@ -462,9 +463,9 @@ if __name__ == "__main__":
 
     if not args.submitit:
         if args.run == "sample_all":
-            for dim in [2]:
-                for n_obs in N_OBS_LIST:
-                    run(dim=dim, n_obs=n_obs, run_type="sample")
+            # for dim in [2]:
+            for n_obs in N_OBS_LIST:
+                run(n_obs=n_obs, run_type="sample")
         elif args.run == "train_all":
             for dim in DIM_LIST:
                 run(dim=dim, run_type="train")

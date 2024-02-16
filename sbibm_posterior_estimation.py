@@ -34,12 +34,13 @@ def run_train_sgm(
     n_epochs,
     batch_size,
     lr,
+    embed=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:3"
 
     # Prepare training data
     # normalize theta
@@ -57,16 +58,24 @@ def run_train_sgm(
     # embedding nets
     theta_dim = theta_train.shape[-1]
     x_dim = x_train.shape[-1]
-    theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
-    x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
-    score_network = NSE(
-        theta_dim=theta_dim,
-        x_dim=x_dim,
-        embedding_nn_theta=theta_embedding_net,
-        embedding_nn_x=x_embedding_net,
-        hidden_features=[128, 256, 128],
-        freqs=32,
-    ).to(device)
+    if embed:
+        print("Using embedding nets.")
+        theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
+        x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
+        score_network = NSE(
+            theta_dim=theta_dim,
+            x_dim=x_dim,
+            embedding_nn_theta=theta_embedding_net,
+            embedding_nn_x=x_embedding_net,
+            hidden_features=[256, 256, 256],
+            freqs=16,
+        ).to(device)
+    else:
+        score_network = NSE(
+            theta_dim=theta_dim,
+            x_dim=x_dim,
+            hidden_features=[256, 256, 256],
+        ).to(device)
 
     # Train score network
     print(
@@ -81,7 +90,8 @@ def run_train_sgm(
     print()
 
     if theta_train.shape[0] > 10000:
-        min_nb_epochs = n_epochs * 0.8 # 4000
+        # min_nb_epochs = n_epochs * 0.8 # 4000
+        min_nb_epochs = 2000
     else:
         min_nb_epochs = 100
     
@@ -131,18 +141,19 @@ def run_sample_sgm(
     langevin=False,
     clip=False,
     log_space=False,
+    x_log_space=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:3"
 
     n_obs = context.shape[0]
 
-    # # normalize context
-    # if log_space:
-    #     context = torch.log(context)
+    # normalize context
+    if x_log_space:
+        context = torch.log(context)
     context_norm = (context - x_train_mean) / x_train_std
     # replace nan by 0 (due to std in sir for n_train = 1000)
     context_norm = torch.nan_to_num(context_norm, nan=0.0, posinf=0.0, neginf=0.0)
@@ -265,7 +276,7 @@ def run_sample_sgm(
         )
         time_elapsed = time.time() - start_time  # + time_cov_est
 
-        assert torch.isnan(samples).sum() == 0
+        assert torch.isnan(samples).sum() == 0, f"NaN in samples: {torch.isnan(samples).sum()}"
 
         # results_dict = {
         #     "all_theta_learned": all_samples,
@@ -356,7 +367,7 @@ if __name__ == "__main__":
         "--n_epochs", type=int, default=5000, help="number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=64, help="batch size for training"
+        "--batch_size", type=int, default=256, help="batch size for training"
     )
     parser.add_argument(
         "--lr",
@@ -402,6 +413,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reference", action="store_true", help="whether to sample from ref. posterior"
     )
+    parser.add_argument(
+        "--embed", action="store_true", help="whether to use embedding nets"
+    )
 
     # Parse Arguments
     args = parser.parse_args()
@@ -411,20 +425,30 @@ if __name__ == "__main__":
 
     # Define task path
     task_path = PATH_EXPERIMENT + f"{args.task}/"
-    if args.task == "lotka_volterra":
-        task_path = PATH_EXPERIMENT + f"{args.task}_f2/"
+    if args.task in ["slcp", "sir", "lotka_volterra"]:
+        task_path = PATH_EXPERIMENT + f"{args.task}_good/"
 
     def run(
         n_train=args.n_train, num_obs=args.num_obs, n_obs=args.n_obs, run_type=args.run
     ):
         batch_size = args.batch_size
-        if n_train > 10000:
-            batch_size = 256
+        # if n_train > 10000:
+        #     batch_size = 256
         # Define Experiment Path
         save_path = (
-            task_path
-            + f"n_train_{n_train}_bs_{batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
-        )
+                task_path
+                + f"n_train_{n_train}_bs_{batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new/"
+            )
+        if args.task == "lotka_volterra":
+            save_path = (
+                task_path
+                + f"n_train_{n_train}_bs_{batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_log/"
+            )
+        if args.embed:
+            save_path = (
+                task_path
+                + f"n_train_{n_train}_bs_{batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_embed/"
+            )
         os.makedirs(save_path, exist_ok=True)
 
         print()
@@ -457,7 +481,8 @@ if __name__ == "__main__":
             # transform theta to log space
             print("Transforming data to log space.")
             theta_train = torch.log(theta_train)
-            # x_train = torch.log(x_train)
+            if args.task == "lotka_volterra":
+                x_train = torch.log(x_train)
 
         # compute mean and std of training data
         theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(
@@ -493,7 +518,7 @@ if __name__ == "__main__":
             theta_true = theta_true_list[num_obs - 1]
 
             filename = task_path + f"x_obs_100_num_{num_obs}_new.pkl"
-            if args.task in ["lotka_volterra", "sir"]:
+            if args.task in ["lotka_volterra", "sir", "slcp"]:
                 filename = task_path + f"x_obs_100_num_{num_obs}_plcr.pkl"
             if os.path.exists(filename):
                 x_obs_100 = torch.load(filename)
@@ -512,6 +537,7 @@ if __name__ == "__main__":
                     "x_obs": context,
                     "num_obs": num_obs,
                     "theta_true": theta_true,
+                    "embed": args.embed,
                     "save_path": task_path + f"reference_posterior_samples/",
                 }
             else:
@@ -545,6 +571,7 @@ if __name__ == "__main__":
                     "clip": args.clip,  # for clipping
                     "langevin": args.langevin,
                     "log_space": args.task in ["lotka_volterra", "sir"],
+                    "x_log_space": args.task == "lotka_volterra",
                     "save_path": save_path,
                 }
 
@@ -552,7 +579,7 @@ if __name__ == "__main__":
 
     if not args.submitit:
         if args.run == "sample_all":
-            # for n_train in N_TRAIN_LIST:
+            # for n_train in N_TRAIN_LIST[:-1]:
             for num_obs in NUM_OBSERVATION_LIST:
                 for n_obs in N_OBS_LIST:
                     run(
@@ -562,7 +589,7 @@ if __name__ == "__main__":
                         run_type="sample",
                     )
         elif args.run == "train_all":
-            for n_train in N_TRAIN_LIST:
+            for n_train in N_TRAIN_LIST[:-1]:
                 run(n_train=n_train, run_type="train")
         else:
             run()
@@ -592,18 +619,18 @@ if __name__ == "__main__":
             print("Submitting jobs...", end="", flush=True)
             tasks = []
             if args.run == "sample_all":
-                for n_train in N_TRAIN_LIST:
-                    for num_obs in NUM_OBSERVATION_LIST:
-                        for n_obs in N_OBS_LIST:
-                            tasks.append(
-                                executor.submit(
-                                    run,
-                                    n_train=n_train,
-                                    num_obs=num_obs,
-                                    n_obs=n_obs,
-                                    run_type="sample",
-                                )
+                # for n_train in N_TRAIN_LIST:
+                for num_obs in NUM_OBSERVATION_LIST:
+                    for n_obs in N_OBS_LIST:
+                        tasks.append(
+                            executor.submit(
+                                run,
+                                # n_train=n_train,
+                                num_obs=num_obs,
+                                n_obs=n_obs,
+                                run_type="sample",
                             )
+                        )
             elif args.run == "train_all":
                 for n_train in N_TRAIN_LIST:
                     tasks.append(

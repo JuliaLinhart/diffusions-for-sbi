@@ -18,43 +18,37 @@ PATH_EXPERIMENT = "results/sbibm/"
 TASKS = {
     # "gaussian_linear": "Gaussian Linear",
     # "gaussian_mixture": "Gaussian Mixture",
-    "slcp": "SLCP",
-    "lotka_volterra_f2": "Lotka-Volterra",
-    "sir": "SIR",
+    # "slcp_good": "SLCP",
+    "lotka_volterra_good": "Lotka-Volterra",
+    "sir_good": "SIR",
 }
 N_TRAIN = [1000, 3000, 10000, 30000]
-BATCH_SIZE = 64
-N_EPOCHS = 10000
+BATCH_SIZE = 256 # 64, 128
+N_EPOCHS = 5000 
 LR = 1e-4
 N_OBS = [1, 8, 14, 22, 30]
-NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] 
+NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-def load_losses(task_name, n_train, lr, path,):
-    batch_size = 256 if n_train == 30000 else BATCH_SIZE
-    n_epochs = 5000 if n_train == 30000 else N_EPOCHS
-    if task_name in ["sir", "lotka_volterra_f2"]:
-        n_epochs = 5000
-        # old sir
-        # if lr == 1e-3 and n_train in [3000, 10000]:
-        #     n_epochs = 10000
-    losses = torch.load(path + f'{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}/train_losses.pkl')
+def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
+    # batch_size = 256 if n_train >= 30000 else BATCH_SIZE
+    batch_size = BATCH_SIZE
+    if task_name == "lotka_volterra_good":
+        path = path + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new_log/"
+    else:
+        path = path + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new/"
+    losses = torch.load(path + f'train_losses.pkl')
     train_losses = losses["train_losses"]
     val_losses = losses["val_losses"]
     best_epoch = losses["best_epoch"]
     return train_losses, val_losses, best_epoch
 
 def path_to_results(task_name, result_name, num_obs, n_train, lr, n_obs, cov_mode=None, langevin=False, clip=False):
-    batch_size = 256 if n_train == 30000 else 64
-    n_epochs = 5000 if n_train == 30000 else 10000
-    if task_name in ["sir", "lotka_volterra_f2"]:
-        n_epochs = 5000
-    if task_name == "lotka_volterra_f2" and n_train == 30000:
-        lr = 1e-3 
-        # old sir
-        # if lr == 1e-3 and n_train in [3000, 10000]:
-        #     n_epochs = 10000
-
-    path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}/"
+    # batch_size = 256 if n_train >= 30000 else 64
+    batch_size = BATCH_SIZE
+    if task_name == "lotka_volterra_good":
+        path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new_log/"
+    else:
+        path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new/"
     path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
     path  = path + result_name + f"_{num_obs}_n_obs_{n_obs}.pkl"
     if not langevin:
@@ -83,10 +77,18 @@ def load_reference_samples(task_name, n_obs):
     for num_obs in NUM_OBSERVATION_LIST:
         filename = path + f"true_posterior_samples_num_{num_obs}_n_obs_{n_obs}.pkl"
         samples_ref[num_obs] = torch.load(filename)
-        if task_name == "slcp":
+        if task_name == "slcp_good":
             samples_ref[num_obs] = samples_ref[num_obs].reshape(-1, 5)
         samples_ref[num_obs] = samples_ref[num_obs][:1000]
     return samples_ref
+
+def ignore_num_obs(task_name, num_obs):
+    ignore = False
+    # if task_name == "sir_good" and num_obs == 4:
+    #     ignore = True
+    # if task_name == "lotka_volterra_good" and num_obs == 6:
+    #     ignore = True
+    return ignore
 
 
 # compute mean distance to true theta over all observations
@@ -103,20 +105,20 @@ def compute_mean_distance(
         clip=clip,
     )
 
-    # load results if already computed
-    filename = PATH_EXPERIMENT + f"{task_name}/metrics/cov_mode{cov_mode}_langevin{langevin}_clip{clip}/n_train{n_train}_n_obs{n_obs}_metric{metric}.pkl"
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    if os.path.exists(filename):
-        dist_dict = torch.load(filename)
-        return dist_dict
-    else:
+    # # load results if already computed
+    # filename = PATH_EXPERIMENT + f"{task_name}/metrics/cov_mode{cov_mode}_langevin{langevin}_clip{clip}/n_train{n_train}_n_obs{n_obs}_metric{metric}.pkl"
+    # os.makedirs(os.path.dirname(filename), exist_ok=True)
+    # if os.path.exists(filename):
+    #     dist_dict = torch.load(filename)
+    #     return dist_dict
+    # else:
 
-        dist_list = []
+    dist_list = []
 
-        if metric in ["mmd", "swd", "c2st"]:
-            samples_ref = load_reference_samples(task_name, n_obs)
-            print(samples_ref[1].shape)
-            for num_obs in NUM_OBSERVATION_LIST:
+    if metric in ["mmd", "swd", "c2st"]:
+        samples_ref = load_reference_samples(task_name, n_obs)
+        for num_obs in NUM_OBSERVATION_LIST:
+            if not ignore_num_obs(task_name, num_obs):
                 # mmd
                 if metric == "mmd":
                     dist = mmd(
@@ -131,8 +133,9 @@ def compute_mean_distance(
                     dist = c2st(torch.tensor(np.array(samples_ref[num_obs])), samples[num_obs])
 
                 dist_list.append(dist)
-        if metric == "mmd_to_dirac":
-            for num_obs in NUM_OBSERVATION_LIST:
+    if metric == "mmd_to_dirac":
+        for num_obs in NUM_OBSERVATION_LIST:
+            if not ignore_num_obs(task_name, num_obs):
                 # mmd to dirac
                 theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
                 dist = dist_to_dirac(
@@ -140,66 +143,21 @@ def compute_mean_distance(
                 )["mmd"]
 
                 dist_list.append(dist)
-            
-        dist_dict = {
-            "mean": torch.tensor(dist_list).mean(),
-            "std": torch.tensor(dist_list).std(),
-            }
-        torch.save(dist_dict, filename)
+        
+    dist_dict = {
+        "mean": torch.tensor(dist_list).mean(),
+        "std": torch.tensor(dist_list).std(),
+        }
+    # torch.save(dist_dict, filename)
 
     return dist_dict
 
 def ignore_method_n_obs(metric, method, task_name, n_obs):
     ignore = False
-    if metric == "swd" and method == "JAC":
-        if task_name == "gaussian_linear" and n_obs in [14]:
-            ignore = True
-        if task_name == "gaussian_mixture" and n_obs in [8, 14, 22, 30]:
-            ignore = True
-        if task_name in ["lotka_volterra_f2", "sir"]:
-            ignore = True
-    if metric == "swd" and method == "LANGEVIN":
-        if task_name in ["gaussian_linear", "gaussian_mixture", "slcp"] and n_obs > 1:
-            ignore = True
-    if metric == "mmd" and method == "JAC" and n_obs == 14 and task_name == "slcp":
-        ignore = True
-    if metric == "mmd_to_dirac" and method == "JAC":
-        if task_name in ["lotka_volterra_f2", "sir"]:
-            ignore = True
-        if task_name in ["slcp"] and n_obs in [22,30]:
-            ignore = True
-        if task_name in ["gaussian_mixture"] and n_obs > 1:
-            ignore = True
-    if metric == "mmd_to_dirac" and method == "LANGEVIN":
-        if task_name in ["sir", "slcp"] and n_obs in [22, 30]:
-            ignore = True
-        if task_name == "lotka_volterra_f2" and n_obs ==30:
-            ignore = True
     return ignore
 
 def ignore_method_n_train(metric, method, task_name, n_train):
     ignore = False
-    if metric == "swd" and method == "JAC":
-        ignore = True
-    if metric == "swd" and method == "LANGEVIN" and task_name in ["gaussian_linear", "gaussian_mixture"]:
-        ignore = True
-    if metric == "swd" and method == "LANGEVIN" and task_name == "lotka_volterra_f2" and n_train in [1000]:
-        ignore = True
-    
-    if metric == "mmd" and method == "JAC" and n_train == 3000 and task_name == "slcp":
-        ignore = True
-    if metric == "mmd_to_dirac" and method == "JAC":
-        if task_name in ["lotka_volterra_f2", "sir"]:
-            ignore = True
-        if task_name == "gaussian_mixture" and n_train in [10000, 30000]:
-            ignore = True
-        if task_name == "slcp" and n_train in [3000, 10000, 30000]:
-            ignore = True
-    if metric == "mmd_to_dirac" and method == "LANGEVIN":
-        if task_name == "sir" and n_train in [30000]:
-            ignore = True
-        if task_name == "lotka_volterra_f2" and n_train in [1000]:
-            ignore = True
     return ignore
 
 
@@ -220,7 +178,7 @@ if __name__ == "__main__":
 
     if args.losses:
         # plot losses to select lr
-        lr_list = [1e-4, 1e-3]
+        lr_list = [1e-4] #, 1e-3]
         n_rows = len(TASKS)
         n_cols = len(N_TRAIN)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows), sharex=True, sharey=True) #, constrained_layout=True)
@@ -250,16 +208,10 @@ if __name__ == "__main__":
                 # label yaxis only at the left
                 if j == 0:
                     axs[i, j].set_ylabel(TASKS[task_name])
-                # axs[i, j].set_title(TASKS[task_name] + " \n" + r"$N_\mathrm{train}$" + rf"$={n_train}$") #+ f" \n best_lr={best_lr}")
                 axs[i, j].set_ylim([0, 0.5])
-                axs[i, j].set_xlim([0, 5000])
-                # if i == len(TASKS) - 1:
-                #     axs[i, j].set_xlabel("epochs")
-                # if j == 0:
-                #     axs[i, j].set_ylabel("loss")
         axs[i, j].legend()
-        plt.savefig(PATH_EXPERIMENT + "losses.png")
-        plt.savefig(PATH_EXPERIMENT + "sbibm_losses.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/losses_bs_{BATCH_SIZE}.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/sbibm_losses_bs_{BATCH_SIZE}.pdf")
         plt.clf()
 
     if args.w_dist or args.mmd_dist or args.c2st_dist:
@@ -277,9 +229,7 @@ if __name__ == "__main__":
                 mean_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                 std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                 for n_obs in N_OBS:
-                    print(n_obs)
                     for method in METHODS_STYLE.keys():
-                        print(method)
                         if ignore_method_n_train(metric, method, task_name, n_train):
                             print(f"ignoring {method} for {task_name}, {n_train}")
                             dist_mean = torch.nan
@@ -328,31 +278,22 @@ if __name__ == "__main__":
                     axs[i, j].set_ylabel(TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"])
                 else:
                     axs[i, j].set_yticklabels([])
-                # axs[i, j].set_title(TASKS[task_name] + "\n" + r"$N_\mathrm{train}$"+rf"$={n_train}$")
-                # axs[i, j].set_xlabel(r"$n$")
-                # axs[i, j].set_xticks(N_OBS)
-                # axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
-                if metric == "mmd":
-                    # if n_obs == 1:
-                    #     axs[i, j].set_ylim([0, 0.8])
-                    # else:
-                    axs[i, j].set_ylim([0, 1.5])
                 if metric == "swd":
-                    if task_name == "slcp":
-                        axs[i, j].set_ylim([0, 6])
-                    elif task_name == "lotka_volterra_f2":
-                        axs[i, j].set_ylim([0, 0.4])
-                    elif task_name == "sir":
-                        axs[i, j].set_ylim([0, 0.4])
-                    elif task_name == "gaussian_linear":
-                        axs[i, j].set_ylim([0, 0.8])
-                    else:
+                    axs[i, j].set_ylim([0, 0.1])
+                    if "sir" in task_name:
+                        axs[i, j].set_ylim([0, 0.02])
+                elif metric == "mmd":
+                    if "lotka" in task_name:
                         axs[i, j].set_ylim([0, 1])
+                    if "sir" in task_name:
+                        axs[i, j].set_ylim([0, 1])
+                else:
+                    axs[i, j].set_ylim([0, 1])
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.pdf")
         plt.clf()
 
         # same but as function of n_train
@@ -417,39 +358,27 @@ if __name__ == "__main__":
                     axs[i, j].set_ylabel(TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"])
                 else:
                     axs[i, j].set_yticklabels([])
-
-                # axs[i, j].set_title(TASKS[task_name] + "\n" + rf"$n={n_obs}$")
-                # axs[i, j].set_xlabel(r"$N_\mathrm{train}$")
-                # if not (metric in ["mmd", "swd"] and task_name in ["sir", "lotka_volterra_f2"]):
-                #     axs[i, j].set_xscale("log")
-                # axs[i, j].set_xticks(N_TRAIN)
-                # axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
                 if metric == "mmd":
-                    # if n_obs == 1:
-                    #     axs[i, j].set_ylim([0, 0.8])
-                    # else:
-                    axs[i, j].set_ylim([0, 1.5])
-                if metric == "swd":
-                    if task_name == "slcp":
-                        axs[i, j].set_ylim([0, 6])
-                    elif task_name == "lotka_volterra_f2":
-                        axs[i, j].set_ylim([0, 0.4])
-                    elif task_name == "sir":
-                        axs[i, j].set_ylim([0, 0.4])
-                    elif task_name == "gaussian_linear":
-                        axs[i, j].set_ylim([0, 0.8])
-                    else:
+                    if "lotka" in task_name:
                         axs[i, j].set_ylim([0, 1])
+                    if "sir" in task_name:
+                        axs[i, j].set_ylim([0, 1])
+                elif metric == "swd":
+                    if "lotka" in task_name:
+                        axs[i, j].set_ylim([0, 0.1])
+                    if "sir" in task_name:
+                        axs[i, j].set_ylim([0, 0.02])
+                else:
+                    axs[i, j].set_ylim([0, 1])
 
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.pdf")
         plt.clf()
 
     if args.dirac_dist:
-
 
         # splot as function of n_train
         metric = "mmd_to_dirac"
@@ -513,18 +442,18 @@ if __name__ == "__main__":
                     axs[i, j].set_ylabel(TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"])
                 else:
                     axs[i, j].set_yticklabels([])
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 8])
+                elif "sir" in task_name:
+                    axs[i, j].set_ylim([0, 0.3])
+                else:
+                    axs[i, j].set_ylim([0, 1])
 
-                # axs[i, j].set_title(TASKS[task_name] + "\n" + rf"$n={n_obs}$")
-                # axs[i, j].set_xlabel(r"$N_\mathrm{train}$")
-                # if not (metric in ["mmd", "swd"] and task_name in ["sir", "lotka_volterra_f2"]):
-                #     axs[i, j].set_xscale("log")
-                # axs[i, j].set_xticks(N_TRAIN)
-                # axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.pdf")
         plt.clf()
 
         # plot as function of n_obs
@@ -586,38 +515,58 @@ if __name__ == "__main__":
                     axs[i, j].set_ylabel(TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"])
                 else:
                     axs[i, j].set_yticklabels([])
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 8])
+                elif "sir" in task_name:
+                    axs[i, j].set_ylim([0, 0.3])
+                else:
+                    axs[i, j].set_ylim([0, 1])
+
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.pdf")
         plt.clf()
 
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "sir"
+        task_name = "lotka_volterra_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
-        for num_obs in NUM_OBSERVATION_LIST:
+        fig, axs = plt.subplots(10, 5, figsize=(25, 50))
+        fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+
+        for j, num_obs in enumerate(NUM_OBSERVATION_LIST):
             # true_theta = get_task(task_name).get_true_parameters(num_obs)[0]
-            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1][0]
-            for n_obs in N_OBS:
-                samples_ref = load_reference_samples(task_name, n_obs)
-                plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.1)
-            plt.scatter(theta_true[0], theta_true[1], color="black")
-            plt.savefig(save_path + f"num_obs_{num_obs}_ana.png")
-            plt.clf()
-            for n_obs in N_OBS:
+            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
+            if theta_true.ndim > 1:
+                theta_true = theta_true[0]
+            # for n_obs in N_OBS:
+            #     samples_ref = load_reference_samples(task_name, n_obs)
+            #     plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.1)
+            # plt.scatter(theta_true[0], theta_true[1], color="black")
+            # plt.savefig(save_path + f"num_obs_{num_obs}_ana.png")
+            # plt.clf()
+            # fig, axs = plt.subplots(1, 5, figsize=(25, 5))
+            for i, n_obs in enumerate(N_OBS):
                 samples_ref = load_reference_samples(task_name, n_obs)
                 samples_gauss = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-                samples_langevin = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=False)
-                plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.1, label=f"ANALYTIC")
-                plt.scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.1, label=f"GAUSS")
-                # plt.scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN")
-                plt.scatter(theta_true[0], theta_true[1], color="black")
-                plt.legend()
-                plt.title(f"n_obs = {n_obs}")
-                plt.savefig(save_path + f"num_obs_{num_obs}_n_obs_{n_obs}_all.png")
-                plt.clf()
+                # samples_langevin = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=False)
+                axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
+                axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
+                # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN")
+                axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
+                axs[j, i].set_xticks([])
+                axs[j, i].set_yticks([])
+                if j == 0:
+                    axs[j, i].set_title(fr"$n = {n_obs}$")
+                if i == 0:
+                    axs[j, i].set_ylabel(f"num_obs = {num_obs}")
+        plt.legend()
+        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}.png")
+        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}.pdf")
+        plt.clf()
+            
