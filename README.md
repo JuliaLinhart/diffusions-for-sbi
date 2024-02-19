@@ -1,5 +1,6 @@
 # diffusions-for-sbi
-Diffusion Generative Modeling and Posterior Sampling in Simulation-Based Inference
+
+Offical Code for the paper "Diffusion posterior sampling for simulation-based inference in tall data settings".
 
 ## Install requirements
 
