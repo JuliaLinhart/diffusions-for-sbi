@@ -2,10 +2,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import math
-import numpy as np
+import os
 from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style
 
 PATH_EXPERIMENT = "results/toy_models/gaussian"
+os.makedirs(f'{PATH_EXPERIMENT}/figures', exist_ok=True)
+os.makedirs(f'{PATH_EXPERIMENT}/data', exist_ok=True)
 
 if __name__ == "__main__":
     
@@ -16,12 +18,17 @@ if __name__ == "__main__":
 
 
     # Make Tite table
-    dim = 32
+    dim = 10
     n_obs = 32
     eps = 1e-2
     time_info = all_data.groupby(['dim', 'N_OBS', "sampling_steps", "alg", "eps"])[['dt', 'sw']].agg(lambda x: f'{x.mean():.2f} +/- {x.std()*1.96 / x.shape[0]**.5:.2f}').reset_index()
     table_to_save = (time_info.loc[(time_info.dim == dim) &(time_info.N_OBS == n_obs) & (time_info.eps == eps), ["alg", "sampling_steps", "dt", "sw"]])
     print(table_to_save)
+    time_data = all_data.pivot(index=['dim', 'N_OBS', 'eps', 'sampling_steps', 'seed'], columns='alg', values='dt')
+    time_data = time_data.assign(speed_up_gauss = time_data.GAUSS / time_data.Langevin, speed_up_jac = time_data.JAC / time_data.Langevin)
+    agg_time_data = time_data.groupby(['dim'])[['speed_up_gauss', 'speed_up_jac']].agg(lambda x: f'{x.mean():.2f} ± {x.std()*1.96 / x.shape[0]**.5:.2f}').reset_index()
+    agg_time_data = agg_time_data.loc[agg_time_data['dim'] < 64]
+    agg_time_data.reset_index().to_csv(f'{PATH_EXPERIMENT}/data/speed_up_comparison.csv', index=False)
 
     #Load data of "equivalent speed"
     equivalent_speed_data = all_data.loc[(((all_data.alg == 'GAUSS')&(all_data.sampling_steps==1000))|

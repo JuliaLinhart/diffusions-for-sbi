@@ -19,3 +19,5 @@ score_net*.pkl
 /results/sbibm
 
 /notebooks
+
+pf_npse.py

@@ -6,7 +6,7 @@ from experiment_utils import dist_to_dirac
 from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style, plot_pairgrid_with_groundtruth_jrnnm
 
 PATH_EXPERIMENT = "results/jrnnm/"
-DIMS = [4] #, 4]
+DIMS = [3,4]
 N_OBS = [1, 8, 14, 22, 30]
 METRICS = ["mmd_to_dirac"]
 N_EPOCHS = 5000
@@ -167,7 +167,7 @@ if __name__ == "__main__":
         colors = [cm.get_cmap("viridis")(i) for i in torch.linspace(0.2, 1, len(N_OBS))]
         gain = 0.0
         method = "GAUSS"
-        for dim in DIMS:
+        for dim in [3]:
             theta_true = [135.0, 220.0, 2000.0, gain]
             if dim == 3:
                 theta_true = theta_true[:3]
