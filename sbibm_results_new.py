@@ -18,19 +18,25 @@ PATH_EXPERIMENT = "results/sbibm/"
 TASKS = {
     # "gaussian_linear": "Gaussian Linear",
     # "gaussian_mixture": "Gaussian Mixture",
-    # "slcp_good": "SLCP",
+    "slcp_good": "SLCP",
     "lotka_volterra_good": "Lotka-Volterra",
     "sir_good": "SIR",
 }
-N_TRAIN = [1000, 3000, 10000, 30000]
-BATCH_SIZE = 256 # 64, 128
+N_TRAIN = [1000, 3000, 10000, 30000, 50000]
+BATCH_SIZE = 256 # 64 
 N_EPOCHS = 5000 
 LR = 1e-4
+
+TASKS_DICT = {
+    "slcp_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
+    "lotka_volterra_good": {"lr": [1e-3, 1e-3, 1e-3, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
+    "sir_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64, 64]},
+}
+
 N_OBS = [1, 8, 14, 22, 30]
 NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
-    # batch_size = 256 if n_train >= 30000 else BATCH_SIZE
     batch_size = BATCH_SIZE
     if task_name == "lotka_volterra_good":
         path = path + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new_log/"
@@ -43,8 +49,8 @@ def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
     return train_losses, val_losses, best_epoch
 
 def path_to_results(task_name, result_name, num_obs, n_train, lr, n_obs, cov_mode=None, langevin=False, clip=False):
-    # batch_size = 256 if n_train >= 30000 else 64
-    batch_size = BATCH_SIZE
+    batch_size = TASKS_DICT[task_name]["bs"][N_TRAIN.index(n_train)]
+    lr = TASKS_DICT[task_name]["lr"][N_TRAIN.index(n_train)]
     if task_name == "lotka_volterra_good":
         path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new_log/"
     else:
@@ -178,7 +184,7 @@ if __name__ == "__main__":
 
     if args.losses:
         # plot losses to select lr
-        lr_list = [1e-4] #, 1e-3]
+        lr_list = [1e-4, 1e-3]
         n_rows = len(TASKS)
         n_cols = len(N_TRAIN)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows), sharex=True, sharey=True) #, constrained_layout=True)
@@ -279,9 +285,10 @@ if __name__ == "__main__":
                 else:
                     axs[i, j].set_yticklabels([])
                 if metric == "swd":
-                    axs[i, j].set_ylim([0, 0.1])
+                    if "lotka" in task_name:
+                        axs[i, j].set_ylim([0, 0.05])
                     if "sir" in task_name:
-                        axs[i, j].set_ylim([0, 0.02])
+                        axs[i, j].set_ylim([0, 0.05])
                 elif metric == "mmd":
                     if "lotka" in task_name:
                         axs[i, j].set_ylim([0, 1])
@@ -292,8 +299,8 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.png")
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.pdf")
         plt.clf()
 
         # same but as function of n_train
@@ -365,17 +372,17 @@ if __name__ == "__main__":
                         axs[i, j].set_ylim([0, 1])
                 elif metric == "swd":
                     if "lotka" in task_name:
-                        axs[i, j].set_ylim([0, 0.1])
+                        axs[i, j].set_ylim([0, 0.05])
                     if "sir" in task_name:
-                        axs[i, j].set_ylim([0, 0.02])
+                        axs[i, j].set_ylim([0, 0.05])
                 else:
                     axs[i, j].set_ylim([0, 1])
 
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.png")
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.pdf")
         plt.clf()
 
     if args.dirac_dist:
@@ -452,8 +459,8 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.png")
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_bs_{BATCH_SIZE}.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.pdf")
         plt.clf()
 
         # plot as function of n_obs
@@ -525,14 +532,14 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.png")
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_bs_{BATCH_SIZE}.pdf")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.png")
+        plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.pdf")
         plt.clf()
 
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "lotka_volterra_good"
+        task_name = "slcp_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
@@ -554,10 +561,12 @@ if __name__ == "__main__":
             for i, n_obs in enumerate(N_OBS):
                 samples_ref = load_reference_samples(task_name, n_obs)
                 samples_gauss = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=False)
+                # samples_jac = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="JAC", clip=False)
                 # samples_langevin = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=False)
                 axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
                 axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
-                # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN")
+                # axs[j, i].scatter(samples_jac[num_obs][:, 0], samples_jac[num_obs][:, 1], alpha=0.5, label=f"JAC", color="orange")
+                # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN", color="red")
                 axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
                 axs[j, i].set_xticks([])
                 axs[j, i].set_yticks([])
@@ -566,7 +575,7 @@ if __name__ == "__main__":
                 if i == 0:
                     axs[j, i].set_ylabel(f"num_obs = {num_obs}")
         plt.legend()
-        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}.png")
-        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}.pdf")
+        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.png")
+        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.pdf")
         plt.clf()
             
