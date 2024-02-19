@@ -34,7 +34,7 @@ TASKS_DICT = {
 }
 
 N_OBS = [1, 8, 14, 22, 30]
-NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+NUM_OBSERVATION_LIST = list(np.arange(1,26)) #[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
     batch_size = BATCH_SIZE
@@ -61,6 +61,7 @@ def path_to_results(task_name, result_name, num_obs, n_train, lr, n_obs, cov_mod
         path = path[:-4] + f"_{cov_mode}.pkl"
     if clip:
         path = path[:-4] + "_clip.pkl"
+    path = path[:-4] + "_prior.pkl"
     return path
 
 def load_runtimes(task_name, n_train, lr,  n_obs, cov_mode=None, langevin=False, clip=False):
@@ -78,7 +79,7 @@ def load_samples(task_name, n_train, lr, n_obs, cov_mode=None, langevin=False, c
     return samples
 
 def load_reference_samples(task_name, n_obs):
-    path = PATH_EXPERIMENT + f"{task_name}/reference_posterior_samples/"
+    path = PATH_EXPERIMENT + f"{task_name}/reference_posterior_samples_prior/"
     samples_ref = {}
     for num_obs in NUM_OBSERVATION_LIST:
         filename = path + f"true_posterior_samples_num_{num_obs}_n_obs_{n_obs}.pkl"
@@ -143,7 +144,7 @@ def compute_mean_distance(
         for num_obs in NUM_OBSERVATION_LIST:
             if not ignore_num_obs(task_name, num_obs):
                 # mmd to dirac
-                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
+                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
                 dist = dist_to_dirac(
                     samples[num_obs], theta_true, percentage=percentage, scaled=True,
                 )["mmd"]
@@ -548,7 +549,7 @@ if __name__ == "__main__":
 
         for j, num_obs in enumerate(NUM_OBSERVATION_LIST):
             # true_theta = get_task(task_name).get_true_parameters(num_obs)[0]
-            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
+            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
             if theta_true.ndim > 1:
                 theta_true = theta_true[0]
             # for n_obs in N_OBS:

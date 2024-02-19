@@ -3,6 +3,7 @@ import sys
 sys.path.append("tasks/sbibm/")
 
 import argparse
+import numpy as np
 import os
 import torch
 import time
@@ -20,9 +21,9 @@ from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_samp
 from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
 
 PATH_EXPERIMENT = "results/sbibm/"
-NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+NUM_OBSERVATION_LIST = list(np.arange(1,26))
 
-N_TRAIN_LIST = [1000, 3000, 10000, 30000]
+N_TRAIN_LIST = [1000, 3000, 10000, 30000, 50000]
 N_OBS_LIST = [1, 8, 14, 22, 30]
 
 COV_MODES = ["GAUSS", "JAC"]
@@ -40,7 +41,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:2"
 
     # Prepare training data
     # normalize theta
@@ -147,7 +148,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:2"
 
     n_obs = context.shape[0]
 
@@ -219,7 +220,7 @@ def run_sample_sgm(
         results_dict = None
 
         save_path += f"langevin_steps_400_5/"
-        samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}.pkl"
+        samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
         time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}{ext}.pkl"
     else:
         print()
@@ -289,7 +290,7 @@ def run_sample_sgm(
 
         save_path += f"euler_steps_{steps}/"
         samples_filename = (
-            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
+            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
         )
         # results_dict_filename = (
         #     save_path + f"results_dict_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
@@ -510,16 +511,16 @@ if __name__ == "__main__":
         elif run_type == "sample":
             # # Reference parameter and observations
             if os.path.exists(task_path + f"theta_true_list.pkl"):
-                theta_true_list = torch.load(task_path + f"theta_true_list.pkl")
+                theta_true_list = torch.load(task_path + f"theta_true_list_prior.pkl")
             else:
                 theta_true_list = [prior(1) for _ in NUM_OBSERVATION_LIST]
-                torch.save(theta_true_list, task_path + f"theta_true_list.pkl")
+                torch.save(theta_true_list, task_path + f"theta_true_list_prior.pkl")
 
             theta_true = theta_true_list[num_obs - 1]
 
             filename = task_path + f"x_obs_100_num_{num_obs}_new.pkl"
             if args.task in ["lotka_volterra", "sir", "slcp"]:
-                filename = task_path + f"x_obs_100_num_{num_obs}_plcr.pkl"
+                filename = task_path + f"x_obs_100_num_{num_obs}_plcr_prior.pkl"
             if os.path.exists(filename):
                 x_obs_100 = torch.load(filename)
             else:
@@ -579,15 +580,15 @@ if __name__ == "__main__":
 
     if not args.submitit:
         if args.run == "sample_all":
-            # for n_train in N_TRAIN_LIST:
-            for num_obs in NUM_OBSERVATION_LIST:
-                for n_obs in N_OBS_LIST:
-                    run(
-                        # n_train=n_train,
-                        num_obs=num_obs,
-                        n_obs=n_obs,
-                        run_type="sample",
-                    )
+            for n_train in N_TRAIN_LIST:
+                for num_obs in NUM_OBSERVATION_LIST:
+                    for n_obs in N_OBS_LIST:
+                        run(
+                            n_train=n_train,
+                            num_obs=num_obs,
+                            n_obs=n_obs,
+                            run_type="sample",
+                        )
         elif args.run == "train_all":
             for n_train in N_TRAIN_LIST:
                 run(n_train=n_train, run_type="train")
@@ -619,18 +620,18 @@ if __name__ == "__main__":
             print("Submitting jobs...", end="", flush=True)
             tasks = []
             if args.run == "sample_all":
-                # for n_train in N_TRAIN_LIST:
-                for num_obs in NUM_OBSERVATION_LIST:
-                    for n_obs in N_OBS_LIST:
-                        tasks.append(
-                            executor.submit(
-                                run,
-                                # n_train=n_train,
-                                num_obs=num_obs,
-                                n_obs=n_obs,
-                                run_type="sample",
+                for n_train in N_TRAIN_LIST:
+                    for num_obs in NUM_OBSERVATION_LIST:
+                        for n_obs in N_OBS_LIST:
+                            tasks.append(
+                                executor.submit(
+                                    run,
+                                    n_train=n_train,
+                                    num_obs=num_obs,
+                                    n_obs=n_obs,
+                                    run_type="sample",
+                                )
                             )
-                        )
             elif args.run == "train_all":
                 for n_train in N_TRAIN_LIST:
                     tasks.append(
