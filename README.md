@@ -28,6 +28,7 @@ Diffusion Generative Modeling and Posterior Sampling in Simulation-Based Inferen
 This will create CSV files in `path_to_save`
 - To generate the plots, run `plot_gaussian.py path_to_save` and run `plot_mixt_gaussian.py path_to_save` to reproduce the plots.
 The plots will be saved in the figures folder in the root of the repository and the time table datas in the data repository.
+- To reproduce the exact figures from the paper (with correct stlye) run the scripts `toy_example_gaussian_results.py` and `toy_example_gaussian_mixture_results.py`.
 
 ### SBIBM examples (cf. Section 4.2):
 
