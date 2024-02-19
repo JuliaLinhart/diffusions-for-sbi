@@ -17,3 +17,5 @@ __init__.py
 score_net*.pkl
 *train_losses*.pkl
 /results/sbibm
+
+/notebooks
