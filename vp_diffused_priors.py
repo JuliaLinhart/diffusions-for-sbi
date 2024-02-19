@@ -38,7 +38,7 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
     # score of diffused prior: grad_t log prior_t (theta_t)
     # for Gaussian prior p(theta) = N(theta | mean, cov)
 
-    def vpdiff_gaussian_score(theta, t):
+    def vpdiff_gaussian_score(theta, t, **kwargs):
 
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t I)
         # with mu_t = theta * scaling_t
