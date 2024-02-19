@@ -26,10 +26,8 @@ Offical Code for the paper "Diffusion posterior sampling for simulation-based in
 - To generate the raw data (samples and metadata), run the scripts `gen_gaussian_gaussian.py path_to_save` and `gen_mixt_gauss_gaussian.py path_to_save` where
 `path_to_save` is the path one wants to save the raw files.
 - To generate a CSV with sliced wasserstein, run `treat_gaussian_data.py path_to_save` and `treat_mixt_gaussian_data.py path_to_save` where `path_to_save` is as above.
-This will create CSV files in `path_to_save`
-- To generate the plots, run `plot_gaussian.py path_to_save` and run `plot_mixt_gaussian.py path_to_save` to reproduce the plots.
-The plots will be saved in the figures folder in the root of the repository and the time table datas in the data repository.
-- To reproduce the exact figures from the paper (with correct stlye) run the scripts `toy_example_gaussian_results.py` and `toy_example_gaussian_mixture_results.py`.
+This will create CSV files in `path_to_save`.
+- To reproduce the results from the paper (with correct stlye) run the scripts `toy_example_gaussian_results.py` and `toy_example_gaussian_mixture_results.py`. The figures will be saved in the `figures/` folder and the time table datas in the `data/` folder in the `path_to_save` directory (here `results/toy_models/<gaussian/gaussian_mixture/>`).
 
 ### SBIBM examples (cf. Section 4.2):
 
