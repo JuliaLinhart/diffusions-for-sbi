@@ -21,3 +21,5 @@ score_net*.pkl
 /notebooks
 
 pf_npse.py
+gaussian_dim_scale_experiment.py
+gaussian_dim_scale_results.py

@@ -1,7 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
 
-# from ot import sliced_wasserstein_distance
 from experiment_utils import dist_to_dirac
 from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style, plot_pairgrid_with_groundtruth_jrnnm
 
@@ -172,23 +171,9 @@ if __name__ == "__main__":
             if dim == 3:
                 theta_true = theta_true[:3]
 
-            # for j, n_obs in enumerate(N_OBS):
-            #     if n_obs == 1:
-            #         continue
-            #     else:
-            #         samples = load_results(
-            #             dim,
-            #             result_name="posterior_samples",
-            #             n_obs=n_obs,
-            #             gain=gain,
-            #             cov_mode=method.split("_")[0],
-            #             langevin=True if "LANGEVIN" in method else False,
-            #             clip=True if "clip" in method else False,
-            #         )
-            n_obs = 30
             fig, axs = plt.subplots(1, dim, figsize=(5*dim, 5))
             fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
-            for i in range(n_obs):
+            for i in range(N_OBS[-1]):
                 samples_single = load_results(
                     dim,
                     result_name="posterior_samples",
@@ -229,34 +214,3 @@ if __name__ == "__main__":
             plt.savefig(PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.pdf")
             plt.clf()
             
-
-    # # runtime comparison
-    # fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
-    # for i, task_name in enumerate(TASKS):
-    #     times_jac = []
-    #     times_gauss = []
-    #     times_langevin = []
-    #     for n_obs in N_OBS:
-    #         _, time_j = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="JAC"
-    #         )
-    #         _, time_g = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="GAUSS"
-    #         )
-    #         _, time_l = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, langevin=True
-    #         )
-    #         times_jac.append(time_j)
-    #         times_gauss.append(time_g)
-    #         times_langevin.append(time_l)
-    #     axs[i].plot(N_OBS, times_jac, marker="o", label=f"JAC")
-    #     axs[i].plot(N_OBS, times_gauss, marker="o", label=f"GAUSS")
-    #     axs[i].plot(N_OBS, times_langevin, marker="o", label=f"langevin")
-    #     axs[i].set_xticks(N_OBS)
-    #     axs[i].set_xlabel("n_obs")
-    #     axs[i].legend()
-    #     axs[i].set_title(f"{task_name}")
-    # plt.suptitle(f"Runtime comparison")
-    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.png")
-    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.pdf")
-    # plt.clf()
