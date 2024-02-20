@@ -69,7 +69,6 @@ def tweedies_approximation(
         prec = torch.linalg.inv(cov)
     elif mode == "GAUSS":
         prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
-        # eye = torch.eye(dist_cov_est.shape[-1]).to(alpha_t.device)
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
         # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
         prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
