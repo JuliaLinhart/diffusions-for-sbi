@@ -39,6 +39,46 @@ def prec_matrix_backward(t, dist_cov, nse):
     # return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
     return torch.linalg.inv(dist_cov) + (alpha_t / sigma_t**2) * eye
 
+def tweedies_approximation_new(theta, x, t, score_fn, nse, dist_cov_est=None, mode='JAC', clip_mean_bounds = (None, None)):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+
+    def score_jac(theta, x):
+        n_theta = theta.shape[0]
+        n_x = x.shape[0]
+        score = score_fn(theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+                         t=t[None, None].repeat(n_theta * n_x, 1),
+                         x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1))
+        score = score.reshape(n_theta, n_x, -1)
+        return score, score
+
+    if mode == 'JAC':
+        def score_jac(theta, x):
+            score = score_fn(theta=theta[None, :],
+                             t=t[None, None],
+                             x=x[None, ...])[0]
+            return score, score
+        jac_score, score = vmap(lambda theta: vmap(jacrev(score_jac, has_aux=True))(theta[None].repeat(x.shape[0], 1), x))(
+            theta)
+        cov = (sigma_t**2 / alpha_t) * (torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2)*jac_score)
+        prec = torch.linalg.inv(cov)
+    elif mode == 'GAUSS':
+        prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
+        # eye = torch.eye(dist_cov_est.shape[-1]).to(alpha_t.device)
+        # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+        # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
+        prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
+        score = score_jac(theta, x)[0]
+        # score = vmap(lambda theta: vmap(partial(score_fn, t=t),
+        #                                 in_dims=(None, 0),
+        #                                 randomness='different')(theta, x),
+        #              randomness='different')(theta)
+    else:
+        raise NotImplemented("Available methods are GAUSS, PSEUDO, JAC")
+    mean = (1 / (alpha_t**0.5) * (theta[:, None] + sigma_t**2 * score))
+    if clip_mean_bounds[0]:
+        mean = mean.clip(*clip_mean_bounds)
+    return prec, mean, score
 
 def tweedies_approximation(
     x,
@@ -68,10 +108,20 @@ def tweedies_approximation(
         )
         prec = torch.linalg.inv(cov)
     elif mode == "GAUSS":
+        def score_jac(theta, x):
+            n_theta = theta.shape[0]
+            n_x = x.shape[0]
+            score = score_fn(theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+                            t=t[None, None].repeat(n_theta * n_x, 1),
+                            x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1))
+            score = score.reshape(n_theta, n_x, -1)
+            return score, score
+    
         prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
         # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
         prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
+        
         score = vmap(
             lambda theta: vmap(
                 partial(score_fn, t=t), in_dims=(None, 0), randomness="different"
@@ -159,7 +209,6 @@ def diffused_tall_posterior_score(
 
             total_score = torch.linalg.solve(A=lda, B=weighted_scores)
     return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
-
 
 def euler_sde_sampler(
     score_fn,

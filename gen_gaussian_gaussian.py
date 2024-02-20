@@ -1,63 +1,26 @@
 # Script for the Guassian toy example. Reproduces experiemnts from section 4.1 of the paper.
 
 import os
+import sys
 import time
 import torch
 
 from torch.func import vmap
 from tqdm import tqdm
 
+from embedding_nets import FakeFNet, EpsilonNet
+from nse import NSE
 from tall_posterior_sampler import mean_backward, prec_matrix_backward
 from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
 from vp_diffused_priors import get_vpdiff_gaussian_score
 
 
-# Noisy network for the score model
-
-class EpsilonNet(torch.nn.Module):
-    def __init__(self, DIM):
-        super().__init__()
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(2 * DIM + 1, 5 * DIM),
-            torch.nn.ReLU(),
-            torch.nn.Linear(5 * DIM, DIM),
-            torch.nn.Tanh(),
-        )
-
-    def forward(self, theta, x, t):
-        return self.net(torch.cat((theta, x, t), dim=-1))
-
-class FakeFNet(torch.nn.Module):
-    def __init__(self, real_eps_fun, eps_net, eps_net_max):
-        r''' Fake score network that returns the real score plus a perturbation
-
-        Args:
-            real_eps_fun (callable): function that returns the real score network (analytic or trained)
-            eps_net (torch.nn.Module): perturbation network (randomly initialized, not trained)
-            eps_net_max (float): scaling factor for the perturbation
-        '''
-        super().__init__()
-        self.real_eps_fun = real_eps_fun
-        self.eps_net = eps_net
-        self.eps_net_max = eps_net_max
-
-    def forward(self, theta, x, t):
-        if len(t.shape) == 0:
-            t = t[None, None].repeat(theta.shape[0], 1)
-        real_eps = self.real_eps_fun(theta, x, t)
-        perturb = self.eps_net(theta, x, t)
-        return real_eps + self.eps_net_max * perturb
-
-
 if __name__ == "__main__":
-    import sys
-    from nse import NSE
 
     path_to_save = sys.argv[1]
+    os.makedirs(path_to_save, exist_ok=True)
 
     torch.manual_seed(1)
-
-    N_SAMPLES = 4096
 
     all_exps = []
     for DIM in [2, 4, 8, 10, 16, 32, 64]:
@@ -72,16 +35,18 @@ if __name__ == "__main__":
                 simulator = task.simulator
                 theta_true = prior.sample(sample_shape=(1,))  # true parameters
 
-                x_obs = simulator(theta_true)  # x_obs ~ simulator(theta_true)
                 x_obs_100 = torch.cat(
                     [simulator(theta_true).reshape(1, -1) for _ in range(100)], dim=0
                 )
 
-                # True posterior: p(theta|x_obs)
-                true_posterior = task.true_posterior(x_obs)
-
                 # True posterior score / epsilon network
-                score_net = NSE(theta_dim=DIM, x_dim=DIM)
+                score_net = NSE(theta_dim=DIM, x_dim=DIM, net_type="fnet")
+                beta_min = 0.1
+                beta_max = 40
+                beta_d = (beta_max - beta_min) 
+                score_net.alpha = lambda t : torch.exp(-.5 * .5 * beta_d * (t**2) + beta_min*t)
+
+
                 idm = torch.eye(DIM).cuda()
                 inv_lik = torch.linalg.inv(task.simulator_cov).cuda()
                 inv_prior = torch.linalg.inv(prior.covariance_matrix).cuda()

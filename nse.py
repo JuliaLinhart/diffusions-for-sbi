@@ -14,7 +14,8 @@ from zuko.utils import broadcast
 from functools import partial
 from torch.func import jacrev, vmap
 
-from tall_posterior_sampler import prec_matrix_backward, tweedies_approximation, tweedies_approximation_prior
+from embedding_nets import FNet
+from tall_posterior_sampler import prec_matrix_backward, tweedies_approximation, tweedies_approximation_prior, tweedies_approximation_new
 
 
 class NSE(nn.Module):
@@ -26,6 +27,7 @@ class NSE(nn.Module):
         freqs (int): The number of time embedding frequencies.
         build_net (Callable): The network constructor. It takes the
             number of input and output features as positional arguments.
+        net_type (str): The type of final score network. Can be 'default' or 'fnet'.
         embedding_nn_theta (Callable): The embedding network for the parameters :math:`\theta`.
             Default is the identity function.
         embedding_nn_x (Callable): The embedding network for the observations :math:`x`.
@@ -39,6 +41,7 @@ class NSE(nn.Module):
         x_dim: int,
         freqs: int = 3,
         build_net: Callable[[int, int], nn.Module] = MLP,
+        net_type: str = "default",
         embedding_nn_theta: nn.Module = nn.Identity(),
         embedding_nn_x: nn.Module = nn.Identity(),
         **kwargs,
@@ -50,10 +53,19 @@ class NSE(nn.Module):
         self.theta_emb_dim, self.x_emb_dim = self.get_theta_x_embedding_dim(
             theta_dim, x_dim
         )
+        self.net_type = net_type
 
-        self.net = build_net(
-            self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
-        )
+        if net_type == "default":
+            self.net = build_net(
+                self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
+            )
+        elif net_type == "fnet":
+            self.net = FNet(dim_input=theta_dim,
+                        dim_cond=x_dim,
+                        dim_embedding=128,
+                        n_layers=1)
+        else:
+            raise NotImplementedError("Unknown net_type")
 
         self.register_buffer("freqs", torch.arange(1, freqs + 1) * math.pi)
         self.register_buffer("zeros", torch.zeros(theta_dim))
@@ -78,15 +90,19 @@ class NSE(nn.Module):
             (torch.Tensor): The estimated noise :math:`\epsilon_\phi(\theta, x, t)`, with shape :math:`(*, m)`.
         """
 
-        t = self.freqs * t[..., None]
-        t = torch.cat((t.cos(), t.sin()), dim=-1)
+        if self.net_type == "default":
+            t = self.freqs * t[..., None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1)
 
-        theta = self.embedding_nn_theta(theta)
-        x = self.embedding_nn_x(x)
+            theta = self.embedding_nn_theta(theta)
+            x = self.embedding_nn_x(x)
 
-        theta, x, t = broadcast(theta, x, t, ignore=1)
+            theta, x, t = broadcast(theta, x, t, ignore=1)
 
-        return self.net(torch.cat((theta, x, t), dim=-1))
+            return self.net(torch.cat((theta, x, t), dim=-1))
+        
+        if self.net_type == "fnet":
+            return self.net(theta, x, t)
 
     # The following function define the VP SDE with linear noise schedule beta(t):
     # dtheta = f(t) theta dt + g(t) dW = -0.5 * beta(t) theta dt + sqrt(beta(t)) dW
@@ -199,7 +215,7 @@ class NSE(nn.Module):
             (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
         """
 
-        if len(x.shape) == 1:
+        if x.shape[0] == shape[0]:
             score_fun = self.score
         else:
             score_fun = partial(self.factorized_score, **kwargs)
@@ -462,7 +478,11 @@ class NSE(nn.Module):
         # device
         n_obs = x_obs.shape[0]
 
-        prec_0_t, _, scores = tweedies_approximation(
+        tweedie_approx_fn = tweedies_approximation
+        if self.net_type == "fnet":
+            tweedie_approx_fn = tweedies_approximation_new
+        
+        prec_0_t, _, scores = tweedie_approx_fn(
             x=x_obs,
             theta=theta,
             nse=self,
@@ -471,6 +491,7 @@ class NSE(nn.Module):
             dist_cov_est=dist_cov_est,
             mode=cov_mode,
         )
+
         if prior_type == "gaussian":
             try:
                 prior_score, _, prec_prior_0_t = prior_score_fn(theta, t)
