@@ -542,6 +542,7 @@ if __name__ == "__main__":
                     save_path + f"score_network.pkl",
                     map_location=torch.device("cpu"),
                 )
+                score_network.net_type = "default"
 
                 # Mean and std of training data
                 means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")

@@ -15,7 +15,12 @@ from functools import partial
 from torch.func import jacrev, vmap
 
 from embedding_nets import FNet
-from tall_posterior_sampler import prec_matrix_backward, tweedies_approximation, tweedies_approximation_prior, tweedies_approximation_new
+from tall_posterior_sampler import (
+    prec_matrix_backward,
+    tweedies_approximation,
+    tweedies_approximation_prior,
+    tweedies_approximation_new,
+)
 
 
 class NSE(nn.Module):
@@ -60,10 +65,9 @@ class NSE(nn.Module):
                 self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
             )
         elif net_type == "fnet":
-            self.net = FNet(dim_input=theta_dim,
-                        dim_cond=x_dim,
-                        dim_embedding=128,
-                        n_layers=1)
+            self.net = FNet(
+                dim_input=theta_dim, dim_cond=x_dim, dim_embedding=128, n_layers=1
+            )
         else:
             raise NotImplementedError("Unknown net_type")
 
@@ -100,7 +104,7 @@ class NSE(nn.Module):
             theta, x, t = broadcast(theta, x, t, ignore=1)
 
             return self.net(torch.cat((theta, x, t), dim=-1))
-        
+
         if self.net_type == "fnet":
             return self.net(theta, x, t)
 
@@ -140,9 +144,9 @@ class NSE(nn.Module):
         where C is such that :math: `\sigma^2(1) = 1, \sigma^2(0)  = \epsilon \approx 1e-4`.
         """
         return torch.sqrt(1 - self.alpha(t) + math.exp(-16))
-    
+
     def ode(self, theta: Tensor, x: Tensor, t: Tensor, **kwargs) -> Tensor:
-        r""" The probability flow ODE corresponding to the VP SDE."""
+        r"""The probability flow ODE corresponding to the VP SDE."""
         return self.f(t) * theta + self.g(t) ** 2 / 2 * self(
             theta, x, t, **kwargs
         ) / self.sigma(t)
@@ -154,7 +158,7 @@ class NSE(nn.Module):
             kwargs (dict): additional args for the forward method.
 
         Returns:
-            (zuko.distributions.Distribution): The normalizing flow 
+            (zuko.distributions.Distribution): The normalizing flow
                 :math:`p_\phi(\theta | x)` induced by the probability flow ODE.
         """
 
@@ -167,11 +171,11 @@ class NSE(nn.Module):
             ),
             base=DiagNormal(self.zeros, self.ones).expand(x.shape[:-1]),
         )
-    
+
     def mean_pred(
         self, theta: Tensor, score: Tensor, alpha_t: Tensor, **kwargs
     ) -> Tensor:
-        """ Mean predictor of the backward kernel
+        """Mean predictor of the backward kernel
         (used in DDIM sampler and gaussian approximation).
         """
         upsilon = 1 - alpha_t
@@ -201,7 +205,7 @@ class NSE(nn.Module):
         verbose: bool = False,
         **kwargs,
     ) -> Tensor:
-        r""" Sampler from Denoising Diffusion Implicit Models (DDIM, Song et al., 2021),
+        r"""Sampler from Denoising Diffusion Implicit Models (DDIM, Song et al., 2021),
             but adapted to the tall data setting with `n` context observations `x`.
 
         Args:
@@ -215,7 +219,9 @@ class NSE(nn.Module):
             (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
         """
 
-        if x.shape[0] == shape[0]:
+        if (self.net_type == "fnet" and x.shape[0] == shape[0]) or (
+            self.net_type == "default" and len(x.shape) == 1
+        ):
             score_fun = self.score
         else:
             score_fun = partial(self.factorized_score, **kwargs)
@@ -230,14 +236,15 @@ class NSE(nn.Module):
         return theta
 
     def ddim_step(
-            self, 
-            theta: Tensor, 
-            x: Tensor, 
-            t: Tensor, 
-            score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
-            dt: float, 
-            eta: float, 
-            **kwargs):
+        self,
+        theta: Tensor,
+        x: Tensor,
+        t: Tensor,
+        score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
+        dt: float,
+        eta: float,
+        **kwargs,
+    ):
         r"""One step of the DDIM sampler."""
 
         score = score_fun(theta, x, t).detach()
@@ -261,17 +268,17 @@ class NSE(nn.Module):
         return theta
 
     def langevin_corrector(
-            self, 
-            theta: Tensor, 
-            x: Tensor, 
-            t: Tensor, 
-            score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
-            n_steps: int, 
-            r: float, 
-            **kwargs
-        ) -> Tensor:
+        self,
+        theta: Tensor,
+        x: Tensor,
+        t: Tensor,
+        score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
+        n_steps: int,
+        r: float,
+        **kwargs,
+    ) -> Tensor:
         r"""Langevin corrector for the Predictor-Corrector (PC) sampler.
-        
+
         Args:
             theta (torch.Tensor): The current state of the diffusion process, with shape :math:`(n, m)`.
             x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
@@ -283,7 +290,7 @@ class NSE(nn.Module):
         Returns:
             (torch.Tensor): The corrected sampple state of the diffusion process, with shape :math:`(n, m)`.
         """
-        
+
         for _ in range(n_steps):
             z = torch.randn_like(theta)
             g = score_fun(theta, x, t).detach()
@@ -350,7 +357,7 @@ class NSE(nn.Module):
             corrector_fun = lambda theta, x, t, score_fun: theta
         else:
             raise NotImplemented("")
-        
+
         # run the PC sampler
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
@@ -368,7 +375,7 @@ class NSE(nn.Module):
                 theta = theta.clip(*theta_clipping_range)
         return theta
 
-    # The following functions are samplers for the tall data setting 
+    # The following functions are samplers for the tall data setting
     # with n context observations x, based on the factorized posterior.
 
     def annealed_langevin_geffner(
@@ -416,7 +423,7 @@ class NSE(nn.Module):
         Gaussian approximation from https://arxiv.org/pdf/2310.06721.pdf.
 
         Computed for `n` context observations `x` and `n_samples` samples `theta` of dimension `m`.
-        
+
         Args:
         x (torch.Tensor): Conditioning variable for the score network (n_samples, n, d)
         t (torch.Tensor): diffusion "time": (1,)
@@ -441,7 +448,7 @@ class NSE(nn.Module):
     def factorized_score_geffner(
         self, theta, x, t, prior_score_fun, corrector_lda=0, **kwargs
     ):
-        r""" Factorized score function for the tall data setting with n context observations x.
+        r"""Factorized score function for the tall data setting with n context observations x.
         From Geffner et al. (2023).
         """
         # Defining variables
@@ -472,7 +479,7 @@ class NSE(nn.Module):
         cov_mode="JAC",
         prior_type="gaussian",
     ):
-        r""" Factorized score function for the tall data setting with n context observations x.
+        r"""Factorized score function for the tall data setting with n context observations x.
         Our proposition ("GAUSS" and "JAC").
         """
         # device
@@ -481,7 +488,7 @@ class NSE(nn.Module):
         tweedie_approx_fn = tweedies_approximation
         if self.net_type == "fnet":
             tweedie_approx_fn = tweedies_approximation_new
-        
+
         prec_0_t, _, scores = tweedie_approx_fn(
             x=x_obs,
             theta=theta,
@@ -525,7 +532,6 @@ class NSE(nn.Module):
 
         return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
 
-    
     # The following functions are the original samplers for the single observation setting.
 
     def annealed_langevin(
@@ -555,7 +561,7 @@ class NSE(nn.Module):
                 theta = theta + delta * score + torch.sqrt(2 * delta) * z
 
         return theta
-    
+
     def euler(
         self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, **kwargs
     ):
