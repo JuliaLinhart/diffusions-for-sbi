@@ -26,20 +26,9 @@ def get_vpdiff_uniform_score(a, b, nse):
         f = (norm.cdf((b * scaling_t - theta) / sigma_t) - norm.cdf((a * scaling_t - theta) / sigma_t)) / scaling_t
         f_prime = -1/sigma_t * (torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t)) - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t)))/ scaling_t
 
-        # theta = theta.unsqueeze(1)
-        # f_2 = torch.cumprod(norm.cdf((b * scaling_t - theta) / sigma_t) - norm.cdf((a * scaling_t - theta) / sigma_t), dim=1) / scaling_t
-        # f_prime_2 = -1/sigma_t * (torch.cumprod(torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t)) - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t)), dim=1) / scaling_t)
-
         # score of diffused prior: grad_t log prior_t (theta_t)
         prior_score_t = f_prime / (f + 1e-6)
-        # prior_score_t_2 = f_prime_2 / (f_2 + 1e-6)
 
-        # print(f)
-        # print(f_2.squeeze(1))
-        # print(f_prime)
-        # print(f_prime_2.squeeze(1))
-        # print(prior_score_t)
-        # print(prior_score_t_2.squeeze(1))
         return prior_score_t
 
     return vpdiff_uniform_score
@@ -49,7 +38,7 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
     # score of diffused prior: grad_t log prior_t (theta_t)
     # for Gaussian prior p(theta) = N(theta | mean, cov)
 
-    def vpdiff_gaussian_score(theta, t):
+    def vpdiff_gaussian_score(theta, t, **kwargs):
 
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t I)
         # with mu_t = theta * scaling_t

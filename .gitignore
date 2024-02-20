@@ -17,3 +17,10 @@ __init__.py
 score_net*.pkl
 *train_losses*.pkl
 /results/sbibm
+
+/notebooks
+
+nse_new.py
+pf_npse.py
+gaussian_dim_scale_experiment.py
+gaussian_dim_scale_results.py

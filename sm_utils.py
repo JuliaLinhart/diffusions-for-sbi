@@ -5,11 +5,20 @@ from tqdm import tqdm
 
 
 def train(
-    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, prior_score=False, track_loss=False, validation_split=0,
+    model,
+    dataset,
+    loss_fn,
+    n_epochs=5000,
+    lr=3e-4,
+    batch_size=32,
+    prior_score=False,
+    track_loss=False,
+    validation_split=0,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    ema_model = torch.optim.swa_utils.AveragedModel(model,
-                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+    ema_model = torch.optim.swa_utils.AveragedModel(
+        model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999)
+    )
     # get train and validation loaders
     train_loader, val_loader = get_dataloaders(
         dataset, batch_size=batch_size, validation_split=validation_split
@@ -54,7 +63,7 @@ def train(
                             kwargs_sn = {}
                         # validation step
                         loss = loss_fn(theta, **kwargs_sn)
-                        
+
                         # update loss
                         val_loss += (
                             loss.detach().item() * theta.shape[0]
@@ -70,6 +79,7 @@ def train(
         return ema_model, train_losses, val_losses
     else:
         return ema_model
+
 
 # Training with validation and early stopping as in
 # https://github.com/smsharma/mining-for-substructure-lens/blob/master/inference/trainer.py
@@ -97,9 +107,9 @@ def train_with_validation(
 
     # set up optimizer
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    ema_model = torch.optim.swa_utils.AveragedModel(model,
-                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
-    
+    ema_model = torch.optim.swa_utils.AveragedModel(
+        model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999)
+    )
 
     # start training
     train_losses, val_losses = [], []
