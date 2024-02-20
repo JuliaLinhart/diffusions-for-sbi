@@ -1,3 +1,9 @@
+# Script for the SBIBM posterior estimation tasks from section 4.2 of the paper.
+#
+# Commented parts involve the MCMC sampling of the true posterior using jax and numpyro.
+# Precomputed samples are available for the results computation and loaded in sbibm_results.py.
+# You will need to comment out these lines if you want to run the MCMC sampling.
+
 import sys
 
 sys.path.append("tasks/sbibm/")
@@ -15,7 +21,7 @@ from torch.func import vmap
 from tqdm import tqdm
 from zuko.nn import MLP
 
-from tasks.sbibm.data_generators import get_task #, get_multiobs_task
+from tasks.sbibm.data_generators import get_task  # , get_multiobs_task
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
 
@@ -81,10 +87,10 @@ def run_train_sgm(
     print()
 
     if theta_train.shape[0] > 10000:
-        min_nb_epochs = n_epochs * 0.8 # 4000
+        min_nb_epochs = n_epochs * 0.8  # 4000
     else:
         min_nb_epochs = 100
-    
+
     # Train Score Network
     avg_score_net, train_losses, val_losses, best_epoch = train(
         score_network,
@@ -110,7 +116,11 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
+        {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_epoch": best_epoch,
+        },
         save_path + f"train_losses.pkl",
     )
 
@@ -165,7 +175,9 @@ def run_sample_sgm(
             loc = prior.loc
             cov = prior.covariance_matrix
         loc_norm = (loc - theta_train_mean) / theta_train_std
-        cov_norm = torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
+        cov_norm = (
+            torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
+        )
         prior_norm = torch.distributions.MultivariateNormal(
             loc_norm.to(device), cov_norm.to(device)
         )
@@ -208,7 +220,9 @@ def run_sample_sgm(
         results_dict = None
 
         save_path += f"langevin_steps_400_5/"
-        samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}.pkl"
+        samples_filename = (
+            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}.pkl"
+        )
         time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}{ext}.pkl"
     else:
         print()
@@ -301,27 +315,28 @@ def run_sample_sgm(
     # if results_dict is not None:
     #     torch.save(results_dict, results_dict_filename)
 
-def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
-    print("=======================================================================")
-    print(
-        f"Sampling from the reference posterior for observation {num_obs}: n_obs = {len(x_obs)} ."
-    )
-    print(f"======================================================================")
-    if theta_true.ndim > 1:
-        theta_true = theta_true[0]
 
-    task_multiobs = get_multiobs_task(task_name)
-    kwargs = {}
-    if task_name in ["lotka_volterra", "sir"]:
-        kwargs = {"theta_true": theta_true}
-    samples_ref = task_multiobs._sample_reference_posterior_multiobs(1000, x_obs, **kwargs)
+# def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
+#     print("=======================================================================")
+#     print(
+#         f"Sampling from the reference posterior for observation {num_obs}: n_obs = {len(x_obs)} ."
+#     )
+#     print(f"======================================================================")
+#     if theta_true.ndim > 1:
+#         theta_true = theta_true[0]
 
-    # save  results
-    os.makedirs(
-        save_path,
-        exist_ok=True,
-    )
-    torch.save(samples_ref, save_path + f"true_posterior_samples_num_{num_obs}_n_obs_{len(x_obs)}.pkl")
+#     task_multiobs = get_multiobs_task(task_name)
+#     kwargs = {}
+#     if task_name in ["lotka_volterra", "sir"]:
+#         kwargs = {"theta_true": theta_true}
+#     samples_ref = task_multiobs._sample_reference_posterior_multiobs(1000, x_obs, **kwargs)
+
+#     # save  results
+#     os.makedirs(
+#         save_path,
+#         exist_ok=True,
+#     )
+#     torch.save(samples_ref, save_path + f"true_posterior_samples_num_{num_obs}_n_obs_{len(x_obs)}.pkl")
 
 
 if __name__ == "__main__":
@@ -336,7 +351,13 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="gaussian_linear",
-        choices=["gaussian_linear", "gaussian_mixture", "slcp", "lotka_volterra", "sir"],
+        choices=[
+            "gaussian_linear",
+            "gaussian_mixture",
+            "slcp",
+            "lotka_volterra",
+            "sir",
+        ],
         help="task name",
     )
     parser.add_argument(
@@ -506,14 +527,15 @@ if __name__ == "__main__":
             context = x_obs_100[:n_obs].reshape(n_obs, -1)
 
             if args.reference:
-                run_fn = run_sample_reference
-                kwargs_run = {
-                    "task_name": args.task,
-                    "x_obs": context,
-                    "num_obs": num_obs,
-                    "theta_true": theta_true,
-                    "save_path": task_path + f"reference_posterior_samples/",
-                }
+                # run_fn = run_sample_reference
+                # kwargs_run = {
+                #     "task_name": args.task,
+                #     "x_obs": context,
+                #     "num_obs": num_obs,
+                #     "theta_true": theta_true,
+                #     "save_path": task_path + f"reference_posterior_samples/",
+                # }
+                pass
             else:
                 # Trained Score network
                 score_network = torch.load(
@@ -539,8 +561,10 @@ if __name__ == "__main__":
                     "theta_train_std": theta_train_std,  # for (un)normalization
                     "x_train_mean": x_train_mean,  # for (un)normalization
                     "x_train_std": x_train_std,  # for (un)normalization
-                    "prior": task.prior_dist if args.task != "slcp" else task.prior_dist.base_dist, # for score function
-                    "prior_type": "uniform" if args.task == "slcp" else "gaussian", 
+                    "prior": task.prior_dist
+                    if args.task != "slcp"
+                    else task.prior_dist.base_dist,  # for score function
+                    "prior_type": "uniform" if args.task == "slcp" else "gaussian",
                     "cov_mode": args.cov_mode,
                     "clip": args.clip,  # for clipping
                     "langevin": args.langevin,
@@ -586,7 +610,9 @@ if __name__ == "__main__":
             return executor
 
         # subit job
-        executor = get_executor_marg(f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}")
+        executor = get_executor_marg(
+            f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}"
+        )
         # launch batches
         with executor.batch():
             print("Submitting jobs...", end="", flush=True)

@@ -1,3 +1,5 @@
+# Script for the Guassian toy example. Reproduces experiemnts from section 4.1 of the paper.
+
 import os
 import time
 import torch
@@ -10,7 +12,7 @@ from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
 from vp_diffused_priors import get_vpdiff_gaussian_score
 
 
-# Perturbed network for the score function
+# Noisy network for the score model
 
 class EpsilonNet(torch.nn.Module):
     def __init__(self, DIM):
@@ -61,7 +63,7 @@ if __name__ == "__main__":
     for DIM in [2, 4, 8, 10, 16, 32, 64]:
         for eps in [0, 1e-3, 1e-2, 1e-1]:
             for seed in tqdm(range(5), desc=f"Dim {DIM} eps {eps}"):
-                # Observations
+                # Simulator and observations
                 torch.manual_seed(seed)
                 means = torch.rand(DIM) * 20 - 10  # between -10 and 10
                 stds = torch.rand(DIM) * 25 + 0.1  # between 0.1 and 25.1
@@ -80,7 +82,6 @@ if __name__ == "__main__":
 
                 # True posterior score / epsilon network
                 score_net = NSE(theta_dim=DIM, x_dim=DIM)
-                t = torch.linspace(0, 1, 1000).cuda()
                 idm = torch.eye(DIM).cuda()
                 inv_lik = torch.linalg.inv(task.simulator_cov).cuda()
                 inv_prior = torch.linalg.inv(prior.covariance_matrix).cuda()
@@ -110,7 +111,6 @@ if __name__ == "__main__":
                 score_net.cuda()
 
                 # Prior score function
-                t = torch.linspace(0, 1, 1000)
                 prior_score_fn = get_vpdiff_gaussian_score(
                     prior.loc.cuda(), prior.covariance_matrix.cuda(), score_net
                 )
@@ -133,6 +133,17 @@ if __name__ == "__main__":
                     true_posterior_mean = true_posterior_cov @ (
                         inv_prior_prior + inv_lik @ x_obs_100[:N_OBS].sum(dim=0).cuda()
                     )
+
+                    # True posterior samples
+                    ref_samples = (
+                        torch.distributions.MultivariateNormal(
+                            loc=true_posterior_mean,
+                            covariance_matrix=true_posterior_cov,
+                        )
+                        .sample((1000,))
+                        .cpu()
+                    )
+
                     infos = {
                         "true_posterior_mean": true_posterior_mean,
                         "true_posterior_cov": true_posterior_cov,
@@ -143,10 +154,13 @@ if __name__ == "__main__":
                         "eps": eps,
                         "exps": {"Langevin": [], "GAUSS": [], "JAC": []},
                     }
+
+                    # Approximate posterior samples
                     for sampling_steps, eta in zip(
                         [50, 150, 400, 1000], [0.2, 0.5, 0.8, 1]
                     ):
                         tstart_gauss = time.time()
+                        # Estimate Gaussian covariance 
                         samples_ddim = (
                             score_net.ddim(
                                 shape=(1000 * N_OBS,),
@@ -161,11 +175,11 @@ if __name__ == "__main__":
                             .reshape(1000, N_OBS, -1)
                             .cpu()
                         )
-                        # normalize posterior
                         cov_est = vmap(lambda x: torch.cov(x.mT))(
                             samples_ddim.permute(1, 0, 2)
                         )
 
+                        # Sample with GAUSS
                         samples_gauss = score_net.ddim(
                             shape=(1000,),
                             x=x_obs_100[:N_OBS].cuda(),
@@ -175,7 +189,9 @@ if __name__ == "__main__":
                             dist_cov_est=cov_est.cuda(),
                             cov_mode="GAUSS",
                         ).cpu()
+
                         tstart_jac = time.time()
+                        # Sample with JAC
                         samples_jac = score_net.ddim(
                             shape=(1000,),
                             x=x_obs_100[:N_OBS].cuda(),
@@ -184,7 +200,9 @@ if __name__ == "__main__":
                             prior_score_fn=prior_score,
                             cov_mode="JAC",
                         ).cpu()
+                        
                         tstart_lang = time.time()
+                        # Sample with Langevin
                         with torch.no_grad():
                             lang_samples = score_net.annealed_langevin_geffner(
                                 shape=(1000,),
@@ -197,21 +215,7 @@ if __name__ == "__main__":
                         dt_gauss = tstart_jac - tstart_gauss
                         dt_jac = tstart_lang - tstart_jac
                         dt_lang = t_end_lang - tstart_lang
-                        true_posterior_cov = torch.linalg.inv(
-                            inv_lik * N_OBS + inv_prior
-                        )
-                        true_posterior_mean = true_posterior_cov @ (
-                            inv_prior_prior
-                            + inv_lik @ x_obs_100[:N_OBS].sum(dim=0).cuda()
-                        )
-                        ref_samples = (
-                            torch.distributions.MultivariateNormal(
-                                loc=true_posterior_mean,
-                                covariance_matrix=true_posterior_cov,
-                            )
-                            .sample((1000,))
-                            .cpu()
-                        )
+
                         infos["exps"]["Langevin"].append(
                             {
                                 "dt": dt_lang,

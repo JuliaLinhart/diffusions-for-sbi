@@ -1,9 +1,17 @@
+# Script for the JRNMM posterior estimation task from section 4.3 of the paper.
+#
+# Commented parts involve the R-implementation of the simulator.
+# For sampling, only the precomputed observations (x_obs) and scaling parameters
+# (x_train_mean, x_train_std, theta_train_mean, theta_train_std) are needed.
+# You will need to comment out these lines to train the score network.
+
 import sys
 
 sys.path.append("tasks/jrnnm/")
 
 import argparse
 import os
+import time
 import torch
 
 from functools import partial
@@ -14,16 +22,12 @@ from sm_utils import train_with_validation as train
 from tasks.jrnnm.prior import prior_JRNMM
 
 # from tasks.jrnnm.simulator import simulator_JRNMM
-from tqdm import tqdm
 from torch.func import vmap
 from zuko.nn import MLP
 
-# from debug_learned_uniform import diffused_tall_posterior_score, euler_sde_sampler
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_uniform_score
 
-# time
-import time
 
 PATH_EXPERIMENT = "results/jrnnm/"
 N_OBS_LIST = [1, 8, 14, 22, 30]
@@ -93,7 +97,7 @@ def run_train_sgm(
         # track_loss=True,
         validation_split=0.2,
         early_stopping=True,
-        min_nb_epochs=n_epochs * 0.8, # 4000
+        min_nb_epochs=n_epochs * 0.8,  # 4000
     )
     score_network = avg_score_net.module
 
@@ -107,7 +111,11 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
+        {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_epoch": best_epoch,
+        },
         save_path + f"train_losses.pkl",
     )
 
@@ -182,41 +190,43 @@ def run_sample_sgm(
         if single_obs is not None:
             save_path += f"single_obs/"
             samples_filename = (
-                save_path + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+                save_path
+                + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
             )
         else:
             samples_filename = (
-                save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+                save_path
+                + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
             )
-            time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+            time_filename = (
+                save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+            )
 
     else:
         print()
         print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
+
+        start_time = time.time()
+
         # estimate cov
-        # start_time = time.time()
         cov_est = vmap(
             lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=1),
             randomness="different",
         )(context_norm.to(device))
 
         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
-        # time_cov_est = time.time() - start_time
 
         # define score function for tall posterior
         score_fn = partial(
             diffused_tall_posterior_score,
             prior_type="uniform",
-            prior=None,  
+            prior=None,
             prior_score_fn=prior_score_fn_norm,  # analytical prior score function
             x_obs=context_norm.to(device),  # observations
             nse=score_network,  # trained score network
             dist_cov_est=cov_est,
             cov_mode=cov_mode,
-            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
-            # psd_clipping=True if cov_mode == 'JAC' else False,
-            # scale_gradlogL=True,
         )
 
         cov_mode_name = cov_mode
@@ -226,15 +236,9 @@ def run_sample_sgm(
             cov_mode_name += "_clip"
 
         # sample from tall posterior
-        start_time = time.time()
         (
             samples,
-            all_samples,
-            # gradlogL,
-            # lda,
-            # posterior_scores,
-            # means_posterior_backward,
-            # sigma_posterior_backward,
+            _,
         ) = euler_sde_sampler(
             score_fn,
             nsamples,
@@ -244,18 +248,9 @@ def run_sample_sgm(
             debug=False,
             theta_clipping_range=theta_clipping_range,
         )
-        time_elapsed = time.time() - start_time  # + time_cov_est
+        time_elapsed = time.time() - start_time
 
         assert torch.isnan(samples).sum() == 0
-
-        # results_dict = {
-        #     "all_theta_learned": all_samples,
-        #     # "gradlogL": gradlogL,
-        #     # "lda": lda,
-        #     # "posterior_scores": posterior_scores,
-        #     # "means_posterior_backward": means_posterior_backward,
-        #     # "sigma_posterior_backward": sigma_posterior_backward,
-        # }
 
         # save  path
         save_path += f"euler_steps_{steps}/"
@@ -270,10 +265,6 @@ def run_sample_sgm(
                 save_path
                 + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
             )
-        # results_dict_filename = (
-        #     save_path
-        #     + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        # )
         time_filename = (
             save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
         )
@@ -290,8 +281,6 @@ def run_sample_sgm(
     torch.save(samples, samples_filename)
     if single_obs is None:
         torch.save(time_elapsed, time_filename)
-    # if results_dict is not None:
-    #     torch.save(results_dict, results_dict_filename)
 
 
 if __name__ == "__main__":
@@ -472,7 +461,7 @@ if __name__ == "__main__":
             x_train_std = means_stds_dict["x_train_std"]
 
             if args.single_obs:
-                for i,x_obs in enumerate(x_obs_100[:n_obs]):
+                for i, x_obs in enumerate(x_obs_100[:n_obs]):
                     run_fn = run_sample_sgm
                     kwargs_run = {
                         "theta_true": theta_true,
