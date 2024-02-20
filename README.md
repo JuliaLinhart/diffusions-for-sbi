@@ -11,9 +11,9 @@ Offical Code for the paper "Diffusion posterior sampling for simulation-based in
 ## Code
 
 ### Score models and loss functions, diffused priors and samplers:
-- `nse.py`: implementation of the conditional neural score estimator (`NSE`) class and corresponding (DSM) loss function. The `NSE` class has integrated `LANGEVIN`, `EULER`, `DDIM` and `Predictor-Corrector` samplers for single observation and tall posterior inference tasks. The `ddim` method combined with the `factorized_score` corresponds to our algorithm, the `annealed_langevin_geffner` method corresponds to the `F-NPSE` method from (Geffner et al., 2023). 
+- `nse.py`: implementation of the conditional neural score estimator (`NSE`) class and corresponding (DSM) loss function. The `NSE` class has integrated `LANGEVIN`, `EULER`, `DDIM` and `Predictor-Corrector` samplers for single observation and tall posterior inference tasks. The `ddim` method combined with the `factorized_score` corresponds to our algorithm (`GAUSS` and `JAC`), the `annealed_langevin_geffner` method corresponds to the `F-NPSE` method from (Geffner et al., 2023). 
 - `vp_diffused_priors.py`: analytic diffused (uniform and gaussian) prior for a VP-SDE diffusion process.
-- `tall_posterior_sampler.py`: utility functions for the implementation of our tall posterior sampler (`GAUSS` and `JAC` algorithms).
+- `tall_posterior_sampler.py`: implementation of our tall posterior sampler (`GAUSS` and `JAC` algorithms).
 
 ### Utils:
 - `sm_utils.py`: train function for `NSE` 
