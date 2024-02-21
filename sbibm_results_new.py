@@ -23,7 +23,7 @@ TASKS = {
     "sir_good": "SIR",
 }
 N_TRAIN = [1000, 3000, 10000, 30000, 50000]
-BATCH_SIZE = 256 # 64 
+BATCH_SIZE = 256 # 64
 N_EPOCHS = 5000 
 LR = 1e-4
 
@@ -34,7 +34,7 @@ TASKS_DICT = {
 }
 
 N_OBS = [1, 8, 14, 22, 30]
-NUM_OBSERVATION_LIST = list(np.arange(1,26)) #[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] #list(np.arange(1,26)) 
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
     batch_size = BATCH_SIZE
@@ -61,7 +61,7 @@ def path_to_results(task_name, result_name, num_obs, n_train, lr, n_obs, cov_mod
         path = path[:-4] + f"_{cov_mode}.pkl"
     if clip:
         path = path[:-4] + "_clip.pkl"
-    path = path[:-4] + "_prior.pkl"
+    # path = path[:-4] + "_prior.pkl"
     return path
 
 def load_runtimes(task_name, n_train, lr,  n_obs, cov_mode=None, langevin=False, clip=False):
@@ -79,7 +79,7 @@ def load_samples(task_name, n_train, lr, n_obs, cov_mode=None, langevin=False, c
     return samples
 
 def load_reference_samples(task_name, n_obs):
-    path = PATH_EXPERIMENT + f"{task_name}/reference_posterior_samples_prior/"
+    path = PATH_EXPERIMENT + f"{task_name}/reference_posterior_samples/" #_prior/"
     samples_ref = {}
     for num_obs in NUM_OBSERVATION_LIST:
         filename = path + f"true_posterior_samples_num_{num_obs}_n_obs_{n_obs}.pkl"
@@ -144,7 +144,8 @@ def compute_mean_distance(
         for num_obs in NUM_OBSERVATION_LIST:
             if not ignore_num_obs(task_name, num_obs):
                 # mmd to dirac
-                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
+                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
+                # theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
                 dist = dist_to_dirac(
                     samples[num_obs], theta_true, percentage=percentage, scaled=True,
                 )["mmd"]
@@ -544,39 +545,42 @@ if __name__ == "__main__":
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
-        fig, axs = plt.subplots(10, 5, figsize=(25, 50))
-        fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
-
-        for j, num_obs in enumerate(NUM_OBSERVATION_LIST):
-            # true_theta = get_task(task_name).get_true_parameters(num_obs)[0]
-            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-            if theta_true.ndim > 1:
-                theta_true = theta_true[0]
-            # for n_obs in N_OBS:
-            #     samples_ref = load_reference_samples(task_name, n_obs)
-            #     plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.1)
-            # plt.scatter(theta_true[0], theta_true[1], color="black")
-            # plt.savefig(save_path + f"num_obs_{num_obs}_ana.png")
-            # plt.clf()
-            # fig, axs = plt.subplots(1, 5, figsize=(25, 5))
-            for i, n_obs in enumerate(N_OBS):
-                samples_ref = load_reference_samples(task_name, n_obs)
-                samples_gauss = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-                # samples_jac = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="JAC", clip=False)
-                # samples_langevin = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=False)
-                axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
-                axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
-                # axs[j, i].scatter(samples_jac[num_obs][:, 0], samples_jac[num_obs][:, 1], alpha=0.5, label=f"JAC", color="orange")
-                # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN", color="red")
-                axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
-                axs[j, i].set_xticks([])
-                axs[j, i].set_yticks([])
-                if j == 0:
-                    axs[j, i].set_title(fr"$n = {n_obs}$")
-                if i == 0:
-                    axs[j, i].set_ylabel(f"num_obs = {num_obs}")
-        plt.legend()
-        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.png")
-        plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.pdf")
-        plt.clf()
+        # num_obs_lists = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
+        num_obs_lists = [[1,2,3,4,5,6,7,8,9,10]]
+        for num_obs_list in num_obs_lists:
+            fig, axs = plt.subplots(len(num_obs_list), 5, figsize=(25, 5 * len(num_obs_list)))
+            fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+            for j, num_obs in enumerate(num_obs_list):
+                # true_theta = get_task(task_name).get_true_parameters(num_obs)[0]
+                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list.pkl")[num_obs-1]
+                # theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
+                if theta_true.ndim > 1:
+                    theta_true = theta_true[0]
+                # for n_obs in N_OBS:
+                #     samples_ref = load_reference_samples(task_name, n_obs)
+                #     plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5)
+                # plt.scatter(theta_true[0], theta_true[1], color="black")
+                # plt.savefig(save_path + f"num_obs_{num_obs}_ana_prior.png")
+                # plt.clf()
+                # fig, axs = plt.subplots(1, 5, figsize=(25, 5))
+                for i, n_obs in enumerate(N_OBS):
+                    samples_ref = load_reference_samples(task_name, n_obs)
+                    samples_gauss = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="GAUSS", clip=False)
+                    # samples_jac = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, cov_mode="JAC", clip=False)
+                    # samples_langevin = load_samples(task_name, n_train, lr=LR, n_obs=n_obs, langevin=True, clip=False)
+                    axs[j, i].scatter(samples_ref[num_obs][:, 1], samples_ref[num_obs][:, 2], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
+                    axs[j, i].scatter(samples_gauss[num_obs][:, 1], samples_gauss[num_obs][:, 2], alpha=0.5, label=f"GAUSS", color="blue")
+                    # axs[j, i].scatter(samples_jac[num_obs][:, 0], samples_jac[num_obs][:, 1], alpha=0.5, label=f"JAC", color="orange")
+                    # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN", color="red")
+                    axs[j, i].scatter(theta_true[1], theta_true[2], color="black", s=100, label="True parameter")
+                    axs[j, i].set_xticks([])
+                    axs[j, i].set_yticks([])
+                    if j == 0:
+                        axs[j, i].set_title(fr"$n = {n_obs}$")
+                    if i == 0:
+                        axs[j, i].set_ylabel(f"num_obs = {num_obs}")
+            plt.legend()
+            plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.png") #_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.png")
+            plt.savefig(save_path + f"all_n_train_{n_train}_bs_{BATCH_SIZE}_lr_{LR}.png") #_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
+            plt.clf()
             

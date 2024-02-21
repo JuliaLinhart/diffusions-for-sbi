@@ -17,3 +17,6 @@ __init__.py
 score_net*.pkl
 *train_losses*.pkl
 /results/sbibm
+
+/test_toy
+nse_new.py
