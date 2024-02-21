@@ -44,8 +44,10 @@ if __name__ == "__main__":
                 beta_min = 0.1
                 beta_max = 40
                 beta_d = (beta_max - beta_min) 
-                score_net.alpha = lambda t : torch.exp(-.5 * .5 * beta_d * (t**2) + beta_min*t)
-
+                def alpha(t):
+                    log_alpha = .5 * beta_d * (t**2) + beta_min*t
+                    return torch.exp(-.5 * log_alpha)
+                score_net.alpha = alpha
 
                 idm = torch.eye(DIM).cuda()
                 inv_lik = torch.linalg.inv(task.simulator_cov).cuda()
