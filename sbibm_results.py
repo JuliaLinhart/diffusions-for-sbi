@@ -75,9 +75,6 @@ def path_to_results(
         n_epochs = 5000
     if task_name == "lotka_volterra_f2" and n_train == 30000:
         lr = 1e-3
-        # old sir
-        # if lr == 1e-3 and n_train in [3000, 10000]:
-        #     n_epochs = 10000
 
     path = (
         PATH_EXPERIMENT
@@ -171,7 +168,6 @@ def compute_mean_distance(
 
         if metric in ["mmd", "swd", "c2st"]:
             samples_ref = load_reference_samples(task_name, n_obs)
-            print(samples_ref[1].shape)
             for num_obs in NUM_OBSERVATION_LIST:
                 # mmd
                 if metric == "mmd":
@@ -288,9 +284,10 @@ if __name__ == "__main__":
     parser.add_argument("--mmd_dist", action="store_true")
     parser.add_argument("--c2st_dist", action="store_true")
     parser.add_argument("--dirac_dist", action="store_true")
-    parser.add_argument("--corner_plots", action="store_true")
+    parser.add_argument("--save_path", type=str, default=PATH_EXPERIMENT+"_plots/")
 
     args = parser.parse_args()
+    os.makedirs(args.save_path, exist_ok=True)
 
     alpha, alpha_fill = set_plotting_style()
 
@@ -354,8 +351,8 @@ if __name__ == "__main__":
                 axs[i, j].set_xlim([0, 5000])
 
         axs[i, j].legend()
-        plt.savefig(PATH_EXPERIMENT + "losses.png")
-        plt.savefig(PATH_EXPERIMENT + "sbibm_losses.pdf")
+        plt.savefig(args.save_path + "losses.png")
+        plt.savefig(args.save_path + "sbibm_losses.pdf")
         plt.clf()
 
     if args.w_dist or args.mmd_dist or args.c2st_dist:
@@ -375,9 +372,7 @@ if __name__ == "__main__":
                 mean_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                 std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                 for n_obs in N_OBS:
-                    print(n_obs)
                     for method in METHODS_STYLE.keys():
-                        print(method)
                         if ignore_method_n_train(metric, method, task_name, n_train):
                             print(f"ignoring {method} for {task_name}, {n_train}")
                             dist_mean = torch.nan
@@ -449,8 +444,8 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.pdf")
+        plt.savefig(args.save_path + f"{metric}_n_obs.png")
+        plt.savefig(args.save_path + f"{metric}_n_obs.pdf")
         plt.clf()
 
         # same but as function of n_train
@@ -541,8 +536,8 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.pdf")
+        plt.savefig(args.save_path + f"{metric}_n_train.png")
+        plt.savefig(args.save_path + f"{metric}_n_train.pdf")
         plt.clf()
 
     if args.dirac_dist:
@@ -620,8 +615,8 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_train.pdf")
+        plt.savefig(args.save_path + f"{metric}_n_train.png")
+        plt.savefig(args.save_path + f"{metric}_n_train.pdf")
         plt.clf()
 
         # plot as function of n_obs
@@ -696,65 +691,10 @@ if __name__ == "__main__":
         handles, labels = axs[0, 0].get_legend_handles_labels()
         plt.legend(handles, labels, loc="lower right")
 
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.png")
-        plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs.pdf")
+        plt.savefig(args.save_path + f"{metric}_n_obs.png")
+        plt.savefig(args.save_path + f"{metric}_n_obs.pdf")
         plt.clf()
 
-    if args.corner_plots:
-        # corner plots for every n_obs
-        num_obs = 1
-        n_train = 30000
-        cov_mode = "GAUSS"
-        clip = True
-        langevin = False
-
-        label = cov_mode if not langevin else "LANGEVIN"
-        label = label if not clip else label + " (clip)"
-
-        for task_name in TASKS.keys():
-            theta_true = get_task(task_name).get_true_parameters(num_obs)
-            if task_name in ["gaussian_linear", "gaussian_mixture"]:
-                theta_true = torch.load(
-                    PATH_EXPERIMENT + f"{task_name}/heta_true_list.pkl"
-                )[num_obs - 1]
-            samples = []
-            for n_obs in N_OBS:
-                samples.append(
-                    load_samples(
-                        task_name,
-                        n_train,
-                        lr=LR,
-                        n_obs=n_obs,
-                        cov_mode=cov_mode,
-                        langevin=langevin,
-                        clip=clip,
-                    )[num_obs]
-                )
-                samples_ref = np.array(
-                    load_reference_samples(task_name, n_obs=1)[num_obs]
-                )
-
-            pairplot_with_groundtruth_md(
-                samples_list=[samples_ref] + samples,
-                labels=[r"$p(\theta | x^\star)$"]
-                + [label + f", n = {n_obs}" for n_obs in N_OBS],
-                colors=["gray"]
-                + [
-                    cm.get_cmap("rainbow")(i)
-                    for i in torch.linspace(1, 0, len(samples))
-                ],
-                theta_true=theta_true,
-                plot_bounds=None,  # should be the prior
-            )
-            plt.savefig(
-                PATH_EXPERIMENT
-                + f"corner_plots_{task_name}_n_train_{n_train}_num_obs_{num_obs}.png"
-            )
-            plt.savefig(
-                PATH_EXPERIMENT
-                + f"corner_plots_{task_name}_n_train_{n_train}_num_obs_{num_obs}.pdf"
-            )
-            plt.clf()
 
     # n_train = 1000
     # n_obs = 30

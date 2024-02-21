@@ -11,7 +11,7 @@ def set_plotting_style():
     plt.rcParams["legend.fontsize"] = 25.0
     plt.rcParams["xtick.labelsize"] = 25.0
     plt.rcParams["ytick.labelsize"] = 25.0
-    plt.rcParams["axes.labelsize"] = 50.0
+    plt.rcParams["axes.labelsize"] = 30.0
     plt.rcParams["font.size"] = 30.0
     plt.rcParams["axes.titlesize"] = 30.0
     alpha = 0.9

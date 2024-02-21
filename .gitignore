@@ -19,6 +19,7 @@ score_net*.pkl
 /results/sbibm
 
 /notebooks
+/test_toy
 
 nse_new.py
 pf_npse.py
