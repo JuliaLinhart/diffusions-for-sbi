@@ -22,7 +22,7 @@ markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
-    "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
+    # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
     "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
     "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
@@ -98,8 +98,8 @@ def pairplot_with_groundtruth_md(
     theta_true=None,
     param_names=None,
     plot_bounds=None,
-):
-    columns = [r"$\theta_1$", rf"$\theta_2$"]
+):  
+    columns = [rf"$\theta_{i}$" for i in range(len(samples_list[0][0]))]
     if param_names is not None:
         columns = param_names
 
@@ -121,14 +121,14 @@ def pairplot_with_groundtruth_md(
     if theta_true is not None:
         if theta_true.ndim > 1:
             theta_true = theta_true[0]
-            dim = len(theta_true)
+        dim = len(theta_true)
         for i in range(dim):
             # plot dirac on diagonal
             pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], ls="--", linewidth=2, c="black")
             # plot point on off-diagonal, lower triangle
             for j in range(i):
                 pg.axes.ravel()[i*dim+j].scatter(
-                    theta_true[j], theta_true[i], marker="o", c="black", s=50, edgecolor="white"
+                    theta_true[j], theta_true[i], marker="o", c="black", s=100, edgecolor="white"
                 )        
 
     if plot_bounds is not None:
