@@ -98,8 +98,11 @@ def pairplot_with_groundtruth_md(
     theta_true=None,
     param_names=None,
     plot_bounds=None,
+    ignore_ticks=False,
+    legend=True,
 ):  
-    columns = [rf"$\theta_{i}$" for i in range(len(samples_list[0][0]))]
+    
+    columns = [rf"$\theta_{i+1}$" for i in range(len(samples_list[0][0]))]
     if param_names is not None:
         columns = param_names
 
@@ -116,6 +119,8 @@ def pairplot_with_groundtruth_md(
         hue="Distribution",
         corner=True,
         palette=dict(zip(labels, colors)),
+        size=2.5,
+        height=2.5,
     )
 
     if theta_true is not None:
@@ -138,6 +143,23 @@ def pairplot_with_groundtruth_md(
             for j in range(i):
                 pg.axes.ravel()[i*dim+j].set_xlim(plot_bounds[j])
                 pg.axes.ravel()[i*dim+j].set_ylim(plot_bounds[i])
+
+    if ignore_ticks:
+        # remove x and y tick labels
+        for ax in pg.axes.ravel():
+            if ax is not None:
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+
+    # set x-ylabel sizes to 20
+    for ax in pg.axes.ravel():
+        if ax is not None:
+            ax.xaxis.label.set_size(10 * len(samples_list[0][0]))
+            ax.yaxis.label.set_size(10 * len(samples_list[0][0]))
+
+    if not legend:
+        # remove legend
+        pg._legend.remove()
 
     return pg
 

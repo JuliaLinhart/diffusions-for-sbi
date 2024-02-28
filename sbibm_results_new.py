@@ -30,9 +30,17 @@ BATCH_SIZE = 256 # 64
 N_EPOCHS = 5000 
 LR = 1e-4
 
+# # old
+# TASKS_DICT = {
+#     "slcp_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
+#     "lotka_volterra_good": {"lr": [1e-3, 1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256, 256]},
+#     "sir_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64, 64]},
+# }
+
+# new
 TASKS_DICT = {
     "slcp_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
-    "lotka_volterra_good": {"lr": [1e-3, 1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256, 256]},
+    "lotka_volterra_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-3], "bs": [256, 256, 256, 256, 256]},
     "sir_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64, 64]},
 }
 
@@ -41,8 +49,7 @@ NUM_OBSERVATION_LIST = list(np.arange(1,26)) # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 METRICS = ["mmd", "swd", "mmd_to_dirac"]
 
-def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS):
-    batch_size = BATCH_SIZE
+def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS, batch_size=BATCH_SIZE):
     if task_name == "lotka_volterra_good":
         path = path + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new_log/"
     else:
@@ -104,7 +111,7 @@ def compute_mean_distance(
     )
 
     # load results if already computed
-    save_path = PATH_EXPERIMENT + f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+    save_path = PATH_EXPERIMENT + f"{task_name}/metrics_new/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
     if load and os.path.exists(filename):
@@ -118,8 +125,16 @@ def compute_mean_distance(
             dist = dist_list_all[num_obs-1]
             if num_obs not in prec_ignore_nums:
                 dist_list.append(dist)
-            if torch.isnan(dist) or dist > 1e2:
+            if torch.isnan(dist):
                 ignore_nums.append(num_obs)
+            if metric == "swd":
+                if task_name == "slcp_good" and dist > 5:
+                    ignore_nums.append(num_obs)
+                if task_name == "lotka_volterra_good" and dist > 0.1:
+                    ignore_nums.append(num_obs)
+                if task_name == "sir_good" and dist > 0.01:
+                    ignore_nums.append(num_obs)
+                
 
     else:
 
@@ -139,6 +154,7 @@ def compute_mean_distance(
                         np.array(samples_ref[num_obs]), np.array(samples[num_obs]), n_projections=1000
                     )
                     dist = torch.tensor(dist)
+                    
                 if metric == "c2st":
                     dist = c2st(torch.tensor(np.array(samples_ref[num_obs])), samples[num_obs])
 
@@ -146,6 +162,14 @@ def compute_mean_distance(
 
                 if torch.isnan(dist):
                     ignore_nums.append(num_obs)
+                if metric == "swd":
+                    if task_name == "slcp_good" and dist > 5:
+                        ignore_nums.append(num_obs)
+                    if task_name == "lotka_volterra_good" and dist > 0.1:
+                        ignore_nums.append(num_obs)
+                    if task_name == "sir_good" and dist > 0.01:
+                        ignore_nums.append(num_obs)
+    
         if metric == "mmd_to_dirac":
             for num_obs in NUM_OBSERVATION_LIST:
                 # mmd to dirac
@@ -192,42 +216,57 @@ if __name__ == "__main__":
     alpha, alpha_fill = set_plotting_style()
 
     if args.losses:
-        # plot losses to select lr
+
         lr_list = [1e-4, 1e-3]
+        bs_list = [256, 64]
+        
+        # plot losses to select lr and bs
         n_rows = len(TASKS)
         n_cols = len(N_TRAIN)
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows), sharex=True, sharey=True) #, constrained_layout=True)
-        fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+        for bs in bs_list:
+            fig, axs = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows), sharex=True, sharey=True) #, constrained_layout=True)
+            fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+            for i, task_name in enumerate(TASKS.keys()):
+                for j, n_train in enumerate(N_TRAIN):
+                    best_val_loss = {bs: {} for bs in bs_list}
+                    for lr_, c in zip(lr_list, ["blue", "orange"]):
+                        train_losses, val_losses, best_epoch = load_losses(
+                            task_name, n_train, lr_, path=PATH_EXPERIMENT, batch_size=bs
+                        )
+                        axs[i, j].plot(train_losses, label=f"train, lr={lr_}", color=c, linewidth=3, alpha=0.3)
+                        axs[i, j].plot(val_losses, label=f"val, lr={lr_}", color=c, linewidth=3, alpha=0.9)
+                        axs[i, j].axvline(best_epoch, color=c, linestyle="--", linewidth=5, alpha=0.9, zorder=10000)
 
+                    # set ax title as N_train only at the top
+                    if i == 0:
+                        axs[i, j].set_title(r"$N_\mathrm{train}$"+rf"$={n_train}$")
+                    # label xaxis only at the bottom
+                    if i == len(TASKS) - 1:
+                        axs[i, j].set_xlabel("epochs")
+                    # label yaxis only at the left
+                    if j == 0:
+                        axs[i, j].set_ylabel(TASKS[task_name])
+                    axs[i, j].set_ylim([0, 0.5])
+            axs[i, j].legend()
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/losses_bs_{bs}.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/sbibm_losses_bs_{bs}.pdf")
+            plt.clf()
+
+        # print losses to select lr and bs
         for i, task_name in enumerate(TASKS.keys()):
             for j, n_train in enumerate(N_TRAIN):
-                best_val_loss = {}
+                best_val_loss = {bs: {} for bs in bs_list}
                 for lr_, c in zip(lr_list, ["blue", "orange"]):
-                    train_losses, val_losses, best_epoch = load_losses(
-                        task_name, n_train, lr_, path=PATH_EXPERIMENT
-                    )
-                    best_val_loss[lr_] = val_losses[best_epoch]
-                    axs[i, j].plot(train_losses, label=f"train, lr={lr_}", color=c, linewidth=3, alpha=0.3)
-                    axs[i, j].plot(val_losses, label=f"val, lr={lr_}", color=c, linewidth=3, alpha=0.9)
-                    axs[i, j].axvline(best_epoch, color=c, linestyle="--", linewidth=5, alpha=0.9, zorder=10000)
-                # print(best_val_loss)
+                    for bs in bs_list:
+                        train_losses, val_losses, best_epoch = load_losses(
+                            task_name, n_train, lr_, path=PATH_EXPERIMENT, batch_size=bs
+                        )
+                        best_val_loss[bs][lr_] = val_losses[best_epoch]
+                        
                 # get lr for min best val loss
-                best_lr = min(best_val_loss, key=best_val_loss.get)
-                print(f"best lr for {task_name}, {n_train}: {best_lr}")
-                # set ax title as N_train only at the top
-                if i == 0:
-                    axs[i, j].set_title(r"$N_\mathrm{train}$"+rf"$={n_train}$")
-                # label xaxis only at the bottom
-                if i == len(TASKS) - 1:
-                    axs[i, j].set_xlabel("epochs")
-                # label yaxis only at the left
-                if j == 0:
-                    axs[i, j].set_ylabel(TASKS[task_name])
-                axs[i, j].set_ylim([0, 0.5])
-        axs[i, j].legend()
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/losses_bs_{BATCH_SIZE}.png")
-        plt.savefig(PATH_EXPERIMENT + f"_plots_new/sbibm_losses_bs_{BATCH_SIZE}.pdf")
-        plt.clf()
+                for bs in bs_list:
+                    best_lr = min(best_val_loss[bs], key=best_val_loss[bs].get)
+                    print(f"best lr for {task_name}, {n_train}, {bs}: lr = {best_lr}, val losses = {best_val_loss[bs]}")
 
     
     if args.compute_dist:
@@ -239,7 +278,7 @@ if __name__ == "__main__":
         }
 
         final_ignore_nums = []
-        for metric in METRICS:
+        for metric in METRICS[:-1]:
             print(f"Computing {metric}...")
             for task_name in TASKS.keys():
                 for n_train in N_TRAIN:
@@ -253,7 +292,7 @@ if __name__ == "__main__":
                                 langevin=True if "LANGEVIN" in method else False,
                                 clip=True if "clip" in method else False,
                                 metric=metric,
-                                load=False,
+                                load=True,
                             )
                             dist_mean = dist["mean"]
                             dist_std = dist["std"]
@@ -265,20 +304,20 @@ if __name__ == "__main__":
                                     if metric in ["swd", "mmd"] and method in ["GAUSS","LANGEVIN"] and num not in final_ignore_nums:
                                         final_ignore_nums.append(num)
             
-            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_{metric}.pkl")
+            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_{metric}_new.pkl")
             print()
             print(f"Ignored observations: {IGNORE_NUMS}")
             print()
         
-        final_ignore_nums.append(14) # for sir
-        torch.save(final_ignore_nums, PATH_EXPERIMENT + f"_plots_new/ignore_nums_final.pkl")
+        # final_ignore_nums.append(14) # for sir
+        torch.save(final_ignore_nums, PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_new.pkl")
         print()
         print(f"Final ignored observations: {final_ignore_nums}")
         print()
 
     if args.plot_dist:
 
-        prec_ignore_nums = torch.load(PATH_EXPERIMENT + f"_plots_new/ignore_nums_final.pkl")
+        prec_ignore_nums = torch.load(PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_new.pkl")
         print()
         print(f"Ignored observations: {prec_ignore_nums}")
         print()
@@ -349,19 +388,19 @@ if __name__ == "__main__":
                         axs[i, j].set_yticklabels([])
                     if metric == "mmd":
                         if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 1.2])
+                            axs[i, j].set_ylim([0, 1.5])
                         if "sir" in task_name:
                             axs[i, j].set_ylim([0, 1.])
                         if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 0.5])
+                            axs[i, j].set_ylim([0, 0.8])
                         
                     elif metric == "swd":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 0.05])
                         if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.01])
+                            axs[i, j].set_ylim([0, 0.005])
                         if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 1.8])
+                            axs[i, j].set_ylim([0, 2])
                     elif metric == "mmd_to_dirac":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 0.2])
@@ -375,8 +414,8 @@ if __name__ == "__main__":
             handles, labels = axs[0, 0].get_legend_handles_labels()
             plt.legend(handles, labels, loc="lower right")
 
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_prior.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_prior.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.pdf")
             plt.clf()
             
             # plot mean distance as function of n_obs
@@ -440,16 +479,16 @@ if __name__ == "__main__":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 0.05])
                         if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.01])
+                            axs[i, j].set_ylim([0, 0.005])
                         if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 1.8])
+                            axs[i, j].set_ylim([0, 2])
                     elif metric == "mmd":
                         if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 1.2])
+                            axs[i, j].set_ylim([0, 1.5])
                         if "sir" in task_name:
                             axs[i, j].set_ylim([0, 1.])
                         if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 0.5])
+                            axs[i, j].set_ylim([0, 0.8])
                     elif metric == "mmd_to_dirac":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 0.2])
@@ -462,77 +501,112 @@ if __name__ == "__main__":
             handles, labels = axs[0, 0].get_legend_handles_labels()
             plt.legend(handles, labels, loc="lower right")
 
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_prior.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_prior.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.pdf")
             plt.clf()
 
 
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "sir_good"
+        task_name = "lotka_volterra_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
-        # Analytical 
-        for j, num_obs in enumerate(NUM_OBSERVATION_LIST):
+        # # Analytical 
+        # for j, num_obs in enumerate(NUM_OBSERVATION_LIST):
+        #     theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
+        #     if theta_true.ndim > 1:
+        #         theta_true = theta_true[0]
+        #     for n_obs in N_OBS:
+        #         samples_ref = load_reference_samples(task_name, n_obs)
+        #         plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5)
+        #     plt.scatter(theta_true[0], theta_true[1], color="black")
+        #     plt.savefig(save_path + f"analytical_num_obs_{num_obs}_prior.png")
+        #     plt.clf()
+
+        # # Analytical vs. GAUSS first dims
+        # num_obs_lists = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
+        # for num_obs_list in num_obs_lists:
+        #     fig, axs = plt.subplots(len(num_obs_list), 5, figsize=(25, 5 * len(num_obs_list)))
+        #     fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+        #     for j, num_obs in enumerate(num_obs_list):
+        #         theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
+        #         if theta_true.ndim > 1:
+        #             theta_true = theta_true[0]
+
+        #         for i, n_obs in enumerate(N_OBS):
+        #             samples_ref = load_reference_samples(task_name, n_obs)
+        #             samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False)
+        #             # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False)
+        #             samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
+        #             axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
+        #             axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
+        #             # axs[j, i].scatter(samples_jac[num_obs][:, 0], samples_jac[num_obs][:, 1], alpha=0.5, label=f"JAC", color="orange")
+        #             axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN", color="#92374D")
+        #             axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
+        #             axs[j, i].set_xticks([])
+        #             axs[j, i].set_yticks([])
+        #             if j == 0:
+        #                 axs[j, i].set_title(fr"$n = {n_obs}$")
+        #             if i == 0:
+        #                 axs[j, i].set_ylabel(f"num_obs = {num_obs}")
+        #     plt.legend()
+        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.png")
+        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
+        #     plt.clf()
+
+        # Pairplot for all methods with increasing n_obs
+        from plot_utils import pairplot_with_groundtruth_md
+        for num_obs in np.arange(1, 26):
             theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-            if theta_true.ndim > 1:
-                theta_true = theta_true[0]
-            for n_obs in N_OBS:
-                samples_ref = load_reference_samples(task_name, n_obs)
-                plt.scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5)
-            plt.scatter(theta_true[0], theta_true[1], color="black")
-            plt.savefig(save_path + f"analytical_num_obs_{num_obs}_prior.png")
-            plt.clf()
+            for method, color in zip(["TRUE", "GAUSS", "JAC_clip", "LANGEVIN"], ["Greens", "Blues", "Oranges", "Reds"]):
+                samples = []
+                for n_obs in N_OBS:
+                    if method == "TRUE":
+                        samples.append(load_reference_samples(task_name, n_obs)[num_obs])
+                    else:
+                        samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
 
-        # Analytical vs. GAUSS first dims
-        num_obs_lists = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
-        for num_obs_list in num_obs_lists:
-            fig, axs = plt.subplots(len(num_obs_list), 5, figsize=(25, 5 * len(num_obs_list)))
-            fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
-            for j, num_obs in enumerate(num_obs_list):
-                theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-                if theta_true.ndim > 1:
-                    theta_true = theta_true[0]
+                colors = cm.get_cmap(color)(np.linspace(1, 0.2, len(samples))).tolist()
+                if method == "TRUE":
+                    labels = [f"True (n = {n_obs})" for n_obs in N_OBS]
+                else:
+                    labels = [f"{METHODS_STYLE[method]['label']} (n = {n_obs})" for n_obs in N_OBS]
+                pairplot_with_groundtruth_md(
+                    samples_list=samples,
+                    # labels=["ANALYTIC", "GAUSS", "LANGEVIN"],
+                    # colors=["lightgreen", "blue", "#92374D"],
+                    labels=labels,
+                    colors=colors,
+                    theta_true=theta_true,
+                    ignore_ticks=True,
+                    legend=False,
+                )
+                plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png")
+                plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf")
+                plt.clf()
 
-                for i, n_obs in enumerate(N_OBS):
-                    samples_ref = load_reference_samples(task_name, n_obs)
-                    samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-                    # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False)
-                    # samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
-                    axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
-                    axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
-                    # axs[j, i].scatter(samples_jac[num_obs][:, 0], samples_jac[num_obs][:, 1], alpha=0.5, label=f"JAC", color="orange")
-                    # axs[j, i].scatter(samples_langevin[num_obs][:, 0], samples_langevin[num_obs][:, 1], alpha=0.1, label=f"LANGEVIN", color="red")
-                    axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
-                    axs[j, i].set_xticks([])
-                    axs[j, i].set_yticks([])
-                    if j == 0:
-                        axs[j, i].set_title(fr"$n = {n_obs}$")
-                    if i == 0:
-                        axs[j, i].set_ylabel(f"num_obs = {num_obs}")
-            plt.legend()
-            plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}_lr_{1e-3}.png")
-            plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}_lr_{1e-3}.pdf")
-            plt.clf()
-
-        # Analytical vs. GAUSS pairplot
+        # Analytical vs. algorithms pairplot for all n_obs
         from plot_utils import pairplot_with_groundtruth_md
         for n_obs in N_OBS:
             samples_ref = load_reference_samples(task_name, n_obs)
             samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False)
+            samples_jac_clip = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=True)
+            samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
             for num_obs in np.arange(1, 26):
                 theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-                samples_list = [samples_ref[num_obs], samples_gauss[num_obs]]
+                samples_list = [samples_ref[num_obs], samples_gauss[num_obs], samples_jac_clip[num_obs], samples_langevin[num_obs]]
                 pairplot_with_groundtruth_md(
                     samples_list=samples_list,
-                    labels=["ANALYTIC", "GAUSS"],
-                    colors=["lightgreen", "blue"],
+                    labels=["ANALYTIC", "GAUSS", "JAC (clip)", "LANGEVIN"],
+                    colors=["lightgreen", "blue", "orange", "#92374D"],
                     theta_true=theta_true,
+                    ignore_ticks=True,
+                    legend=True,
                 )
-                plt.savefig(PATH_EXPERIMENT + f"_samples/{task_name}/pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.png")
-                plt.savefig(PATH_EXPERIMENT + f"_samples/{task_name}/pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.pdf")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.png")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.pdf")
                 
     
 
