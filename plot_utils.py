@@ -1,19 +1,23 @@
 import pandas as pd
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
 from lampe.plots import corner
 
 from tueplots import fonts, axes
 
-def set_plotting_style():
-    plt.rcParams.update(fonts.neurips2022())
+def set_plotting_style(size=5):
+    style = fonts.neurips2022()
+    # delete the font.serif key to use the default font
+    del style["font.serif"]
+    plt.rcParams.update(style)
     plt.rcParams.update(axes.color(base="black"))
-    plt.rcParams["legend.fontsize"] = 25.0
-    plt.rcParams["xtick.labelsize"] = 25.0
-    plt.rcParams["ytick.labelsize"] = 25.0
-    plt.rcParams["axes.labelsize"] = 30.0
-    plt.rcParams["font.size"] = 30.0
-    plt.rcParams["axes.titlesize"] = 30.0
+    plt.rcParams["legend.fontsize"] = size * 5
+    plt.rcParams["xtick.labelsize"] = size * 5
+    plt.rcParams["ytick.labelsize"] = size * 5
+    plt.rcParams["axes.labelsize"] = size * 6
+    plt.rcParams["font.size"] = size * 6
+    plt.rcParams["axes.titlesize"] = size * 6
     alpha = 0.9
     alpha_fill = 0.1
     return alpha, alpha_fill
@@ -97,11 +101,16 @@ def pairplot_with_groundtruth_md(
     colors,
     theta_true=None,
     param_names=None,
+    title="",
     plot_bounds=None,
     ignore_ticks=False,
-    legend=True,
+    size=5,
 ):  
     
+    # # adjust marker size
+    # markersize = plt.rcParams['lines.markersize']
+    # plt.rcParams['lines.markersize'] = markersize - (samples_list[0].shape[-1] * 0.2)
+
     columns = [rf"$\theta_{i+1}$" for i in range(len(samples_list[0][0]))]
     if param_names is not None:
         columns = param_names
@@ -114,27 +123,35 @@ def pairplot_with_groundtruth_md(
 
     dfs = pd.concat(dfs, ignore_index=True)
 
-    pg = sns.pairplot(
+    pg = sns.PairGrid(
         dfs,
         hue="Distribution",
-        corner=True,
         palette=dict(zip(labels, colors)),
-        size=2.5,
-        height=2.5,
+        corner=True,
+        diag_sharey=False,
     )
+
+    pg.fig.set_size_inches(size, size)
+
+    pg.map_lower(sns.kdeplot, linewidths=2, constrained_layout=False, zorder=1)
+    pg.map_diag(sns.kdeplot, fill=True, linewidths=2, alpha=0.1)
 
     if theta_true is not None:
         if theta_true.ndim > 1:
             theta_true = theta_true[0]
         dim = len(theta_true)
         for i in range(dim):
-            # plot dirac on diagonal
-            pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], ls="--", linewidth=2, c="black")
+            # plot dirac on diagonal 
+            pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], linewidth=2, ls="--", c="black")
+            # place above the kdeplots
+            pg.axes.ravel()[i*(dim+1)].set_zorder(1000)
             # plot point on off-diagonal, lower triangle
             for j in range(i):
                 pg.axes.ravel()[i*dim+j].scatter(
-                    theta_true[j], theta_true[i], marker="o", c="black", s=100, edgecolor="white"
-                )        
+                    theta_true[j], theta_true[i], marker="o", c="black", edgecolor='white', #s=plt.rcParams['lines.markersize'] - (dim * 0.1),
+                )  
+                # place above the kdeplots
+                pg.axes.ravel()[i*dim+j].set_zorder(10000)      
 
     if plot_bounds is not None:
         # set plot bounds
@@ -151,15 +168,8 @@ def pairplot_with_groundtruth_md(
                 ax.set_xticklabels([])
                 ax.set_yticklabels([])
 
-    # set x-ylabel sizes to 20
-    for ax in pg.axes.ravel():
-        if ax is not None:
-            ax.xaxis.label.set_size(10 * len(samples_list[0][0]))
-            ax.yaxis.label.set_size(10 * len(samples_list[0][0]))
-
-    if not legend:
-        # remove legend
-        pg._legend.remove()
+    # add legend
+    pg.add_legend(title=title)
 
     return pg
 

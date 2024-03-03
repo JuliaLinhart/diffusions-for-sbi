@@ -509,7 +509,7 @@ if __name__ == "__main__":
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "lotka_volterra_good"
+        task_name = "slcp_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
@@ -569,19 +569,15 @@ if __name__ == "__main__":
                         samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
 
                 colors = cm.get_cmap(color)(np.linspace(1, 0.2, len(samples))).tolist()
-                if method == "TRUE":
-                    labels = [f"True (n = {n_obs})" for n_obs in N_OBS]
-                else:
-                    labels = [f"{METHODS_STYLE[method]['label']} (n = {n_obs})" for n_obs in N_OBS]
+                labels = [rf"$n = {n_obs}$" for n_obs in N_OBS]
                 pairplot_with_groundtruth_md(
                     samples_list=samples,
-                    # labels=["ANALYTIC", "GAUSS", "LANGEVIN"],
-                    # colors=["lightgreen", "blue", "#92374D"],
                     labels=labels,
                     colors=colors,
                     theta_true=theta_true,
                     ignore_ticks=True,
-                    legend=False,
+                    size=5.5,
+                    title = METHODS_STYLE[method]["label"] if method != "TRUE" else "TRUE",
                 )
                 plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png")
                 plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf")
@@ -603,10 +599,11 @@ if __name__ == "__main__":
                     colors=["lightgreen", "blue", "orange", "#92374D"],
                     theta_true=theta_true,
                     ignore_ticks=True,
-                    legend=True,
+                    size=5,
                 )
                 plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.png")
                 plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.pdf")
+                plt.clf()
                 
     
 
