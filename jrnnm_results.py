@@ -1,15 +1,12 @@
 # Script to load and plot results of the JRNNM experiment (Section 4.3 of the paper).
 
-import torch
 import matplotlib.pyplot as plt
+import torch
 
 from experiment_utils import dist_to_dirac
-from plot_utils import (
-    METHODS_STYLE,
-    METRICS_STYLE,
-    set_plotting_style,
-    plot_pairgrid_with_groundtruth_jrnnm,
-)
+from plot_utils import (METHODS_STYLE, METRICS_STYLE,
+                        plot_pairgrid_with_groundtruth_jrnnm,
+                        set_plotting_style)
 
 PATH_EXPERIMENT = "results/jrnnm/"
 DIMS = [3, 4]
@@ -106,7 +103,7 @@ if __name__ == "__main__":
         fig.subplots_adjust(
             right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.2
         )
-        for i, dim in enumerate([3, 4]):
+        for i, dim in enumerate(DIMS):
             best_val_loss = {}
             for lr_, c in zip(lr_list, ["blue", "orange"]):
                 train_losses, val_losses, best_epoch = load_losses(
@@ -216,8 +213,8 @@ if __name__ == "__main__":
     if args.single_multi_obs:
         # plot independent posterior samples for single and multi-observation
 
-        from matplotlib import colormaps as cm
         import seaborn as sns
+        from matplotlib import colormaps as cm
 
         colors = [cm.get_cmap("viridis")(i) for i in torch.linspace(0.2, 1, len(N_OBS))]
         gain = 0.0

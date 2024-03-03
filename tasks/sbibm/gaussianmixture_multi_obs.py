@@ -1,14 +1,13 @@
-from jax import random
 import jax.numpy as jnp
-import numpyro
-import pyro
-import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS, Predictive
-from numpyro.handlers import condition
-import seaborn as sns
 import matplotlib.pyplot as plt
+import numpyro
+import numpyro.distributions as dist
+import pyro
+import seaborn as sns
 import torch
-
+from jax import random
+from numpyro.handlers import condition
+from numpyro.infer import MCMC, NUTS, Predictive
 from sbibm.tasks.gaussian_mixture.task import GaussianMixture
 
 rng_key = random.PRNGKey(1)
@@ -18,29 +17,23 @@ def model(x_obs=None, n_obs=1):
     # theta = numpyro.sample("theta", dist.Uniform(
     #     low=-10,
     #     high=+10))
-    theta = numpyro.sample("theta", dist.MultivariateNormal(
-        loc=jnp.zeros(10),
-        covariance_matrix=jnp.eye(10)
-    ))
-    mixing_dist = dist.Categorical(probs=jnp.ones(2) / 2.)
-    component_dists = [dist.MultivariateNormal
-                       (loc=theta, covariance_matrix=jnp.eye(10)*2.25),
-                       dist.MultivariateNormal
-                       (loc=theta, covariance_matrix=jnp.eye(10)/9.)]
+    theta = numpyro.sample(
+        "theta",
+        dist.MultivariateNormal(loc=jnp.zeros(10), covariance_matrix=jnp.eye(10)),
+    )
+    mixing_dist = dist.Categorical(probs=jnp.ones(2) / 2.0)
+    component_dists = [
+        dist.MultivariateNormal(loc=theta, covariance_matrix=jnp.eye(10) * 2.25),
+        dist.MultivariateNormal(loc=theta, covariance_matrix=jnp.eye(10) / 9.0),
+    ]
     mixture = dist.MixtureGeneral(mixing_dist, component_dists)
     if x_obs is None:
         for i in range(n_obs):
-            numpyro.sample(
-                f"obs_{i}",
-                mixture
-            )
+            numpyro.sample(f"obs_{i}", mixture)
     else:
         for i in range(n_obs):
-            numpyro.sample(
-                f"obs_{i}",
-                mixture,
-                obs=x_obs[i] #, 0] 
-            )
+            numpyro.sample(f"obs_{i}", mixture, obs=x_obs[i])  # , 0]
+
 
 class GaussianMixture_multiobs(GaussianMixture):
     def __init__(self, **kwargs):
@@ -52,31 +45,28 @@ class GaussianMixture_multiobs(GaussianMixture):
         )
         self.simulator_params = {
             "mixture_locs_factor": torch.tensor([1.0, 1.0]),
-            "mixture_scales": torch.tensor([2.25, 1/9]),
+            "mixture_scales": torch.tensor([2.25, 1 / 9]),
             "mixture_weights": torch.tensor([0.5, 0.5]),
         }
-    
+
     def _sample_reference_posterior_multiobs(self, num_samples, x_obs):
         n_obs = x_obs.shape[0]
         x_obs = jnp.array(x_obs)
         kernel = NUTS(self.model)
         mcmc = MCMC(kernel, num_warmup=1000, num_samples=num_samples)
-        mcmc.run(
-            rng_key=random.PRNGKey(1),
-            x_obs=x_obs,
-            n_obs=n_obs
-        )
+        mcmc.run(rng_key=random.PRNGKey(1), x_obs=x_obs, n_obs=n_obs)
         samples = mcmc.get_samples()["theta"]
         return samples
 
+
 if __name__ == "__main__":
-    
     # theta = jnp.array([0.0])
     # predictive = Predictive(
     #     condition(model, {"theta": theta}),
     #     num_samples=1)
-    
+
     from tasks.sbibm.data_generators import get_task
+
     task = get_task("gaussian_mixture")
     theta = task.get_true_parameters(1)
     simulator = task.get_simulator()
@@ -85,7 +75,6 @@ if __name__ == "__main__":
 
     samples_mcmc = {}
     for n_obs in [1, 10, 50]:
-
         # data = predictive(rng_key, n_obs=n_obs)
 
         # x_obs = jnp.array(
@@ -95,20 +84,15 @@ if __name__ == "__main__":
 
         kernel = NUTS(model)
         mcmc = MCMC(kernel, num_warmup=1000, num_samples=10_000)
-        mcmc.run(
-            rng_key,
-            x_obs=x_obs,
-            n_obs=n_obs
-        )
-        samples_mcmc[n_obs] = mcmc.get_samples()['theta']
+        mcmc.run(rng_key, x_obs=x_obs, n_obs=n_obs)
+        samples_mcmc[n_obs] = mcmc.get_samples()["theta"]
         print(samples_mcmc[n_obs].shape)
 
-    colors = {1: 'C0', 10: 'C1', 50: 'C2'}
+    colors = {1: "C0", 10: "C1", 50: "C2"}
     fig, ax = plt.subplots(figsize=(8, 6))
     for n_obs in [1, 10, 50]:
-        sns.kdeplot(
-            samples_mcmc[n_obs], lw=3.0, c=colors[n_obs], ax=ax, label=n_obs)
+        sns.kdeplot(samples_mcmc[n_obs], lw=3.0, c=colors[n_obs], ax=ax, label=n_obs)
     ax.legend()
-    ax.axvline(x=theta, ls='--', c='k')
+    ax.axvline(x=theta, ls="--", c="k")
     # fig.show()
-    fig.savefig('gaussianmixture-multi-obs.png')
+    fig.savefig("gaussianmixture-multi-obs.png")

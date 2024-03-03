@@ -4,9 +4,7 @@ import numpy as np
 import pandas as pd
 import torch
 import tqdm
-
 from ot.sliced import max_sliced_wasserstein_distance
-
 
 if __name__ == "__main__":
     import sys

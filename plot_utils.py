@@ -1,9 +1,9 @@
+import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
 from lampe.plots import corner
+from tueplots import axes, fonts
 
-from tueplots import fonts, axes
 
 def set_plotting_style():
     plt.rcParams.update(fonts.neurips2022())
@@ -18,14 +18,57 @@ def set_plotting_style():
     alpha_fill = 0.1
     return alpha, alpha_fill
 
-markersize = plt.rcParams['lines.markersize'] * 1.5
+
+markersize = plt.rcParams["lines.markersize"] * 1.5
 METHODS_STYLE = {
-    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize + 0.5},
-    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
-    "JAC": {"label":"JAC", "color": "orange", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
-    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
-    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
-    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "GAUSS": {
+        "label": "GAUSS",
+        "color": "blue",
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize + 0.5,
+    },
+    "GAUSS_clip": {
+        "label": "GAUSS (clip)",
+        "color": "blue",
+        "marker": "o",
+        "linestyle": "--",
+        "linewidth": 4,
+        "markersize": markersize,
+    },
+    "JAC": {
+        "label": "JAC",
+        "color": "orange",
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
+    "JAC_clip": {
+        "label": "JAC (clip)",
+        "color": "orange",
+        "marker": "o",
+        "linestyle": "--",
+        "linewidth": 4,
+        "markersize": markersize,
+    },
+    "LANGEVIN": {
+        "label": "LANGEVIN",
+        "color": "#92374D",
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
+    "LANGEVIN_clip": {
+        "label": "LANGEVIN (clip)",
+        "color": "#92374D",
+        "marker": "o",
+        "linestyle": "--",
+        "linewidth": 4,
+        "markersize": markersize,
+    },
 }
 
 METRICS_STYLE = {
@@ -35,11 +78,13 @@ METRICS_STYLE = {
     "mmd_to_dirac": {"label": "MMD to Dirac"},
 }
 
+
 def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
     fig = None
     for s, l, c in zip(samples_list, legends, colors):
         fig = corner(s, legend=l, color=c, figure=fig, smooth=2, **kwargs)
         plt.suptitle(title)
+
 
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_2d(
@@ -90,6 +135,7 @@ def pairplot_with_groundtruth_2d(
 
     return pg
 
+
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_md(
     samples_list,
@@ -124,20 +170,27 @@ def pairplot_with_groundtruth_md(
             dim = len(theta_true)
         for i in range(dim):
             # plot dirac on diagonal
-            pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], ls="--", linewidth=2, c="black")
+            pg.axes.ravel()[i * (dim + 1)].axvline(
+                x=theta_true[i], ls="--", linewidth=2, c="black"
+            )
             # plot point on off-diagonal, lower triangle
             for j in range(i):
-                pg.axes.ravel()[i*dim+j].scatter(
-                    theta_true[j], theta_true[i], marker="o", c="black", s=50, edgecolor="white"
-                )        
+                pg.axes.ravel()[i * dim + j].scatter(
+                    theta_true[j],
+                    theta_true[i],
+                    marker="o",
+                    c="black",
+                    s=50,
+                    edgecolor="white",
+                )
 
     if plot_bounds is not None:
         # set plot bounds
         for i in range(dim):
-            pg.axes.ravel()[i*(dim+1)].set_xlim(plot_bounds[i])
+            pg.axes.ravel()[i * (dim + 1)].set_xlim(plot_bounds[i])
             for j in range(i):
-                pg.axes.ravel()[i*dim+j].set_xlim(plot_bounds[j])
-                pg.axes.ravel()[i*dim+j].set_ylim(plot_bounds[i])
+                pg.axes.ravel()[i * dim + j].set_xlim(plot_bounds[j])
+                pg.axes.ravel()[i * dim + j].set_ylim(plot_bounds[i])
 
     return pg
 
@@ -151,7 +204,8 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     dfs = []
     for n in range(len(samples)):
         df = pd.DataFrame(
-            samples[n].detach().numpy(), columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"][:dim]
+            samples[n].detach().numpy(),
+            columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"][:dim],
         )
         df["Distribution"] = labels[n]
         dfs.append(df)
@@ -163,9 +217,9 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
         hue="Distribution",
         palette=dict(zip(labels, colors)),
         diag_sharey=False,
-        corner=True
+        corner=True,
     )
-    
+
     g.fig.set_size_inches(8, 8)
 
     g.map_lower(sns.kdeplot, linewidths=3, constrained_layout=False)
@@ -219,7 +273,9 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
             g.axes[1][1].axvline(x=mu, ls="--", c="black", linewidth=1, zorder=100)
             g.axes[2][2].axvline(x=sigma, ls="--", c="black", linewidth=1, zorder=100)
             if dim == 4:
-                g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1, zorder=100)
+                g.axes[3][3].axvline(
+                    x=gain, ls="--", c="black", linewidth=1, zorder=100
+                )
 
     handles, labels = g.axes[0][0].get_legend_handles_labels()
     # make handle lines larger
@@ -228,6 +284,3 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     g.add_legend(handles=handles, labels=labels, title="")
 
     return g
-
-
-

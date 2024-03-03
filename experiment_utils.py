@@ -1,5 +1,6 @@
-import torch
 from typing import List
+
+import torch
 
 
 def dist_to_dirac(

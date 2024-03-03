@@ -1,10 +1,11 @@
 # change tasks to match [Geffner et al. 2023]
 
-import torch
 import pyro
 import sbibm
+import torch
 
 from tasks.sbibm.gaussianlinear_multi_obs import GaussianLinear_multiobs
+
 # from tasks.sbibm.gaussianmixture_multi_obs import GaussianMixture_multiobs
 # from tasks.sbibm.slcp_multi_obs import SLCP_multiobs
 # from tasks.sbibm.lotkavolterra_multi_obs import LotkaVolterra_multiobs
@@ -27,7 +28,7 @@ def get_task(task_name):
         )
         task.simulator_params = {
             "mixture_locs_factor": torch.tensor([1.0, 1.0]),
-            "mixture_scales": torch.tensor([2.25, 1/9]),
+            "mixture_scales": torch.tensor([2.25, 1 / 9]),
             "mixture_weights": torch.tensor([0.5, 0.5]),
         }
         return task
@@ -36,6 +37,7 @@ def get_task(task_name):
         return sbibm.get_task(task_name)
     else:
         raise ValueError(f"Unknown task {task_name}")
+
 
 # def get_multiobs_task(task_name):
 #     if task_name == "gaussian_linear":
@@ -50,10 +52,11 @@ def get_task(task_name):
 #         return SIR_multiobs()
 #     else:
 #         raise ValueError(f"Unknown task {task_name}")
- 
-        
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+
     task = get_task("slcp")
     prior = task.get_prior()
     simulator = task.get_simulator()
@@ -69,18 +72,20 @@ if __name__ == "__main__":
     print(x_obs.shape)
 
     theta_train = prior(10000)
-    low_norm = (task.prior_dist.base_dist.low - theta_train.mean(0)) / theta_train.std(0) * 2
-    high_norm = (task.prior_dist.base_dist.high - theta_train.mean(0)) / theta_train.std(0) * 2
+    low_norm = (
+        (task.prior_dist.base_dist.low - theta_train.mean(0)) / theta_train.std(0) * 2
+    )
+    high_norm = (
+        (task.prior_dist.base_dist.high - theta_train.mean(0)) / theta_train.std(0) * 2
+    )
     print(low_norm)
     print(high_norm)
 
     print()
-    print(((theta_train - theta_train.mean(0))/theta_train.std(0)).mean(0))
-    print(((theta_train - theta_train.mean(0))/theta_train.std(0)).std(0))
+    print(((theta_train - theta_train.mean(0)) / theta_train.std(0)).mean(0))
+    print(((theta_train - theta_train.mean(0)) / theta_train.std(0)).std(0))
 
     # ref_samples = task._sample_reference_posterior(1000, observation=x_obs)
     # plt.scatter(ref_samples[:, 0], ref_samples[:, 1], alpha=0.1)
     # plt.savefig("ref_samples.png")
     # plt.clf()
-
-

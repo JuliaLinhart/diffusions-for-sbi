@@ -3,20 +3,18 @@
 import os
 import sys
 import time
-import torch
 
+import torch
 from torch.func import vmap
 from tqdm import tqdm
 
-from embedding_nets import FakeFNet, EpsilonNet
+from embedding_nets import EpsilonNet, FakeFNet
 from nse import NSE
 from tall_posterior_sampler import mean_backward, prec_matrix_backward
 from tasks.toy_examples.data_generators import Gaussian_Gaussian_mD
 from vp_diffused_priors import get_vpdiff_gaussian_score
 
-
 if __name__ == "__main__":
-
     path_to_save = sys.argv[1]
     os.makedirs(path_to_save, exist_ok=True)
 
@@ -43,10 +41,12 @@ if __name__ == "__main__":
                 score_net = NSE(theta_dim=DIM, x_dim=DIM, net_type="fnet")
                 beta_min = 0.1
                 beta_max = 40
-                beta_d = (beta_max - beta_min) 
+                beta_d = beta_max - beta_min
+
                 def alpha(t):
-                    log_alpha = .5 * beta_d * (t**2) + beta_min*t
-                    return torch.exp(-.5 * log_alpha)
+                    log_alpha = 0.5 * beta_d * (t**2) + beta_min * t
+                    return torch.exp(-0.5 * log_alpha)
+
                 score_net.alpha = alpha
 
                 idm = torch.eye(DIM).cuda()
@@ -127,7 +127,7 @@ if __name__ == "__main__":
                         [50, 150, 400, 1000], [0.2, 0.5, 0.8, 1]
                     ):
                         tstart_gauss = time.time()
-                        # Estimate Gaussian covariance 
+                        # Estimate Gaussian covariance
                         samples_ddim = (
                             score_net.ddim(
                                 shape=(1000 * N_OBS,),
@@ -167,7 +167,7 @@ if __name__ == "__main__":
                             prior_score_fn=prior_score,
                             cov_mode="JAC",
                         ).cpu()
-                        
+
                         tstart_lang = time.time()
                         # Sample with Langevin
                         with torch.no_grad():

@@ -2,33 +2,38 @@
 
 Offical Code for the paper "Diffusion posterior sampling for simulation-based inference in tall data settings".
 
-## Install requirements
+## Requirements
 
-- Create a conda environment with python version 3.10.
-- Install packages via `pip install -e .` inside the repository folder.
+- Create a conda environment with python version 3.10. 
+- Install the repository as a python package with all its dependencies via `pip install -e .` inside the repository folder. (This executes the `setup.py` file.)
+- Make sure you have a CUDA compatible PyTorch version. You can check CUDA availability via `torch.cuda.is_available()`. If needed, [install the right Python version](https://pytorch.org/get-started/previous-versions/).
 - Additional requirements for the simulator-models from the `sbibm` and `jrnmm` tasks (see `requirements.md` in corresponding `tasks/<name>` folder)
 
-## Code
 
-### Score models and loss functions, diffused priors and samplers:
+## Code content
+
+### Diffusion generative modeling and posterior sampling:
 - `nse.py`: implementation of the conditional neural score estimator (`NSE`) class and corresponding (DSM) loss function. The `NSE` class has integrated `LANGEVIN`, `EULER`, `DDIM` and `Predictor-Corrector` samplers for single observation and tall posterior inference tasks. The `ddim` method combined with the `factorized_score` corresponds to our algorithm (`GAUSS` and `JAC`), the `annealed_langevin_geffner` method corresponds to the `F-NPSE` method from (Geffner et al., 2023).
+- `sm_utils.py`: train function for `NSE` 
 - `tall_posterior_sampler.py`: implementation of our tall posterior sampler (`GAUSS` and `JAC` algorithms).
 - `vp_diffused_priors.py`: analytic diffused (uniform and gaussian) prior for a VP-SDE diffusion process.
+
+### Experiment utils:
 - `embedding_nets.py`: implementation of some networks for the score model (used in the toy models experiments from section 4.1)
-
-### Utils:
-- `sm_utils.py`: train function for `NSE` 
 - `experiment_utils.py`: implementation of the metrics and other utilities for the result computation of all experiments.
-- `plot_utils.py`: plotting styles for to reproduce figures from paper and functions to plot multivariate posterior (1D and 2D) histograms from samples
+- `plot_utils.py`: plotting styles for to reproduce figures from paper and functions to plot multivariate posterior pairplots from samples
+- `tasks`: folder containing the implementations of the simulator, prior and true posterior (if known) for each task (toy example from section 4.1, SBI benchmark examples from section 4.2 and the Jansen and Rit Neural Mass Model from section 4.3).
 
-## Experiments
+Other files include the scripts to run experiments and reproduce the figures from the paper as described below.
+
+## Reproduce experiments and figures from the paper
 
 ### Toy Models (cf. Section 4.1):
 - To generate the raw data (samples and metadata), run the scripts `gen_gaussian_gaussian.py path_to_save` and `gen_mixt_gauss_gaussian.py path_to_save` where
 `path_to_save` is the path one wants to save the raw files.
 - To generate a CSV with sliced wasserstein, run `treat_gaussian_data.py path_to_save` and `treat_mixt_gaussian_data.py path_to_save` where `path_to_save` is as above.
 This will create CSV files in `path_to_save`.
-- To reproduce the results from the paper (with correct stlye) run the scripts `toy_example_gaussian_results.py` and `toy_example_gaussian_mixture_results.py`. The figures will be saved in the `figures/` folder and the time table datas in the `data/` folder in the `path_to_save` directory (here `results/toy_models/<gaussian/gaussian_mixture/>`).
+- To reproduce the results from the paper (with correct stlye) run the scripts `toy_example_gaussian_results.py path_to_save` and `toy_example_gaussian_mixture_results.py path_to_save`. The figures will be saved in the `figures/` folder and the time table datas in the `data/` folder in the `path_to_save` directory (here `results/toy_models/<gaussian/gaussian_mixture>/`).
 
 ### SBIBM examples (cf. Section 4.2):
 
@@ -66,4 +71,4 @@ The script to reproduce experiments and generate figures are `jrnmm_posterior_es
   ```
   and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used.
   
-- To reproduce the figures run `python jrnmm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `signle_vs_multi_obs` for the 1D histograms of the 3D case.
+- To reproduce the figures run `python jrnmm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.

@@ -3,12 +3,12 @@
 import os
 import sys
 import time
-import torch
 
-from torch.func import vmap, grad
+import torch
+from torch.func import grad, vmap
 from tqdm import tqdm
 
-from embedding_nets import FakeFNet, EpsilonNet
+from embedding_nets import EpsilonNet, FakeFNet
 from nse import NSE
 from tall_posterior_sampler import mean_backward, prec_matrix_backward
 from tasks.toy_examples.data_generators import Gaussian_MixtGaussian_mD
@@ -54,12 +54,10 @@ def MALA(x, lr, logpdf_fun, n_iter):
 
 
 if __name__ == "__main__":
-
     path_to_save = sys.argv[1]
     os.makedirs(path_to_save, exist_ok=True)
 
     torch.manual_seed(1)
-
 
     all_exps = []
     for DIM in [10, 50, 100]:
@@ -80,8 +78,10 @@ if __name__ == "__main__":
                 score_net = NSE(theta_dim=DIM, x_dim=DIM, net_type="fnet")
                 beta_min = 0.1
                 beta_max = 40
-                beta_d = (beta_max - beta_min) 
-                score_net.alpha = lambda t : torch.exp(-.5 * .5 * beta_d * (t**2) + beta_min*t)
+                beta_d = beta_max - beta_min
+                score_net.alpha = lambda t: torch.exp(
+                    -0.5 * 0.5 * beta_d * (t**2) + beta_min * t
+                )
 
                 def real_eps(theta, x, t):
                     score = vmap(
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                     # True posterior samples
                     ref_samples = MALA(
                         x=torch.randn((10_000, DIM)).cuda() * (1 / N_OBS)
-                        + x_obs_100[:N_OBS].mean(), ## does x_obs change something??
+                        + x_obs_100[:N_OBS].mean(),  ## does x_obs change something??
                         lr=1e-3 / N_OBS,
                         logpdf_fun=vmap(
                             lambda theta: (1 - N_OBS) * prior.log_prob(theta)

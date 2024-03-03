@@ -1,22 +1,27 @@
 # Script to load and plot results of the Gaussian Mixture toy example experiment (Section 4.1 of the paper).
 
-import matplotlib.pyplot as plt
 import math
 import os
-import pandas as pd
 
+import matplotlib.pyplot as plt
+import pandas as pd
 from matplotlib import cm
+
 from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style
 
-PATH_EXPERIMENT = "results/toy_models/gaussian"
-os.makedirs(f"{PATH_EXPERIMENT}/figures", exist_ok=True)
-os.makedirs(f"{PATH_EXPERIMENT}/data", exist_ok=True)
-
 if __name__ == "__main__":
+    import sys
+
+    destination_folder = sys.argv[1]
+    os.makedirs(f"{destination_folder}/figures", exist_ok=True)
+    os.makedirs(f"{destination_folder}/data", exist_ok=True)
+
     alpha, alpha_fill = set_plotting_style()
 
     # Read all the data!
-    all_data = pd.read_csv(f"{PATH_EXPERIMENT}/gaussian_exp_treated.csv").reset_index()
+    all_data = pd.read_csv(
+        f"{destination_folder}/gaussian_exp_treated.csv"
+    ).reset_index()
 
     # Make Tite table
     dim = 10
@@ -48,7 +53,7 @@ if __name__ == "__main__":
     )
     agg_time_data = agg_time_data.loc[agg_time_data["dim"] < 64]
     agg_time_data.reset_index().to_csv(
-        f"{PATH_EXPERIMENT}/data/speed_up_comparison.csv", index=False
+        f"{destination_folder}/data/speed_up_comparison.csv", index=False
     )
 
     # Load data of "equivalent speed"
@@ -147,8 +152,8 @@ if __name__ == "__main__":
             ax.set_xlim(1.5, 110)
     axes_all[-1, -1].legend()
     # axes[0].set_xlim(1.5, 100.5)
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_eps_dim.pdf")
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_eps_dim.png")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
     fig.show()
     plt.close(fig)
 
@@ -217,8 +222,8 @@ if __name__ == "__main__":
         ax.set_xscale("log")
         ax.set_xlim(1.5, 110)
     axes[-1, -1].legend()
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_alg_dim.pdf")
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_alg_dim.png")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.png")
     fig.show()
     plt.close(fig)
 
@@ -288,7 +293,7 @@ if __name__ == "__main__":
         if alg == "GAUSS":
             ax.set_title(rf"$m = {dim}$")
     axes[-1, -1].legend()
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_alg_dim_inverted.pdf")
-    fig.savefig(f"{PATH_EXPERIMENT}/figures/n_obs_vs_sw_per_alg_dim_inverted.png")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.pdf")
+    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.png")
     # fig.show()
     plt.close(fig)

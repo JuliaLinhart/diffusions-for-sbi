@@ -1,25 +1,19 @@
 # Script to load and plot results of the SBIBM experiment (Section 4.2 of the paper).
 
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
 import os
 
-from tasks.sbibm.data_generators import get_task
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from matplotlib import colormaps as cm
+from ot import sliced_wasserstein_distance
+from sbibm.metrics import c2st, mmd
 from tqdm import tqdm
 
 from experiment_utils import dist_to_dirac
-from ot import sliced_wasserstein_distance
-from sbibm.metrics import mmd, c2st
-
-from matplotlib import colormaps as cm
-from plot_utils import (
-    set_plotting_style,
-    METHODS_STYLE,
-    METRICS_STYLE,
-    pairplot_with_groundtruth_md,
-)
-
+from plot_utils import (METHODS_STYLE, METRICS_STYLE,
+                        pairplot_with_groundtruth_md, set_plotting_style)
+from tasks.sbibm.data_generators import get_task
 
 PATH_EXPERIMENT = "results/sbibm/"
 TASKS = {
@@ -284,7 +278,7 @@ if __name__ == "__main__":
     parser.add_argument("--mmd_dist", action="store_true")
     parser.add_argument("--c2st_dist", action="store_true")
     parser.add_argument("--dirac_dist", action="store_true")
-    parser.add_argument("--save_path", type=str, default=PATH_EXPERIMENT+"_plots/")
+    parser.add_argument("--save_path", type=str, default=PATH_EXPERIMENT + "_plots/")
 
     args = parser.parse_args()
     os.makedirs(args.save_path, exist_ok=True)
@@ -694,7 +688,6 @@ if __name__ == "__main__":
         plt.savefig(args.save_path + f"{metric}_n_obs.png")
         plt.savefig(args.save_path + f"{metric}_n_obs.pdf")
         plt.clf()
-
 
     # n_train = 1000
     # n_obs = 30

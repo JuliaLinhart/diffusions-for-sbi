@@ -5,29 +5,23 @@
 # (x_train_mean, x_train_std, theta_train_mean, theta_train_std) are needed.
 # You will need to comment out these lines to train the score network.
 
-import sys
-
-sys.path.append("tasks/jrnnm/")
-
 import argparse
 import os
 import time
-import torch
-
 from functools import partial
-from nse import NSE, NSELoss
-from sm_utils import train_with_validation as train
 
-# from tasks.jrnnm.summary import summary_JRNMM
-from tasks.jrnnm.prior import prior_JRNMM
-
+import torch
 # from tasks.jrnnm.simulator import simulator_JRNMM
 from torch.func import vmap
 from zuko.nn import MLP
 
-from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
+from nse import NSE, NSELoss
+from sm_utils import train_with_validation as train
+from tall_posterior_sampler import (diffused_tall_posterior_score,
+                                    euler_sde_sampler)
+# from tasks.jrnnm.summary import summary_JRNMM
+from tasks.jrnnm.prior import prior_JRNMM
 from vp_diffused_priors import get_vpdiff_uniform_score
-
 
 PATH_EXPERIMENT = "results/jrnnm/"
 N_OBS_LIST = [1, 8, 14, 22, 30]
@@ -44,7 +38,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
@@ -140,7 +134,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -453,7 +447,7 @@ if __name__ == "__main__":
                 map_location=torch.device("cpu"),
             )
             score_network.net_type = "default"
-            
+
             # Mean and std of training data
             means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
             theta_train_mean = means_stds_dict["theta_train_mean"]

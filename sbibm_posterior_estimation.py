@@ -4,26 +4,23 @@
 # Precomputed samples are available for the results computation and loaded in sbibm_results.py.
 # You will need to comment out these lines if you want to run the MCMC sampling.
 
-import sys
-
-sys.path.append("tasks/sbibm/")
-
 import argparse
 import os
-import torch
 import time
-
 from functools import partial
-from nse import NSE, NSELoss
-from sm_utils import train_with_validation as train
-from torch.func import vmap
 
+import torch
+from torch.func import vmap
 from tqdm import tqdm
 from zuko.nn import MLP
 
+from nse import NSE, NSELoss
+from sm_utils import train_with_validation as train
+from tall_posterior_sampler import (diffused_tall_posterior_score,
+                                    euler_sde_sampler)
 from tasks.sbibm.data_generators import get_task  # , get_multiobs_task
-from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
-from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
+from vp_diffused_priors import (get_vpdiff_gaussian_score,
+                                get_vpdiff_uniform_score)
 
 PATH_EXPERIMENT = "results/sbibm/"
 NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]

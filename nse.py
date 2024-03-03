@@ -1,26 +1,23 @@
 import math
+from functools import partial
+from typing import Callable, Tuple
+
 import torch
 import torch.nn as nn
-
-from torch import Tensor, Size
+from torch import Size, Tensor
 from torch.distributions import Distribution
+from torch.func import jacrev, vmap
 from tqdm import tqdm
-from typing import *
-
 from zuko.distributions import DiagNormal, NormalizingFlow
 from zuko.nn import MLP
 from zuko.transforms import FreeFormJacobianTransform
 from zuko.utils import broadcast
-from functools import partial
-from torch.func import jacrev, vmap
 
 from embedding_nets import FNet
-from tall_posterior_sampler import (
-    prec_matrix_backward,
-    tweedies_approximation,
-    tweedies_approximation_prior,
-    tweedies_approximation_new,
-)
+from tall_posterior_sampler import (prec_matrix_backward,
+                                    tweedies_approximation,
+                                    tweedies_approximation_new,
+                                    tweedies_approximation_prior)
 
 
 class NSE(nn.Module):
