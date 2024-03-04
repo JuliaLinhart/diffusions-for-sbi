@@ -92,7 +92,9 @@ class Gaussian_MixtGaussian_mD:
             torch.linspace(rho_min, rho_max, dim).to(device) ** 0.5
         )
         self.prior = torch.distributions.MultivariateNormal(
-            loc=torch.zeros(dim).to(device), covariance_matrix=torch.eye(dim).to(device)
+            loc=torch.zeros(dim).to(device),
+            covariance_matrix=torch.eye(dim).to(device),
+            validate_args=False,
         )
         self.device = device
 
@@ -106,11 +108,13 @@ class Gaussian_MixtGaussian_mD:
                 ),
                 dim=0,
             ),
+            validate_args=False,
         )
         samples_x = torch.distributions.MixtureSameFamily(
             component_distribution=cp_dist,
             mixture_distribution=torch.distributions.Categorical(
-                probs=torch.ones(2).to(self.device) / 2
+                probs=torch.ones(2).to(self.device) / 2,
+                validate_args=False,
             ),
         ).sample((1,))[0]
         return samples_x
@@ -122,11 +126,13 @@ class Gaussian_MixtGaussian_mD:
             torch.distributions.Normal(
                 loc=torch.zeros_like(x_obs),
                 scale=(2.25**0.5) * self.simulator_base_std + 1,
+                validate_args=False,
             )
             .log_prob(x_obs)
             .sum(dim=-1),
             torch.distributions.Normal(
-                loc=torch.zeros_like(x_obs), scale=(1 / 3) * self.simulator_base_std + 1
+                loc=torch.zeros_like(x_obs), scale=(1 / 3) * self.simulator_base_std + 1,
+                validate_args=False,
             )
             .log_prob(x_obs)
             .sum(dim=-1),
@@ -151,12 +157,15 @@ class Gaussian_MixtGaussian_mD:
                 ),
                 dim=0,
             ),
+            validate_args=False,
         )
         return torch.distributions.MixtureSameFamily(
             component_distribution=base_comp,
             mixture_distribution=torch.distributions.Categorical(
-                logits=torch.stack(log_weights)
+                logits=torch.stack(log_weights),
+                validate_args=False,
             ),
+            validate_args=False,
         )
 
     def diffused_posterior(self, x_obs, alpha_t):
