@@ -104,6 +104,8 @@ def pairplot_with_groundtruth_md(
     title="",
     plot_bounds=None,
     ignore_ticks=False,
+    ignore_xylabels=False,
+    legend = True,
     size=5,
 ):  
     
@@ -167,9 +169,17 @@ def pairplot_with_groundtruth_md(
             if ax is not None:
                 ax.set_xticklabels([])
                 ax.set_yticklabels([])
+    
+    if ignore_xylabels:
+        # remove xlabels and ylabels
+        for ax in pg.axes.ravel():
+            if ax is not None:
+                ax.set_xlabel('')
+                ax.set_ylabel('')
 
-    # add legend
-    pg.add_legend(title=title)
+    if legend:
+        # add legend
+        pg.add_legend(title=title)
 
     return pg
 

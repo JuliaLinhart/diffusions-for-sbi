@@ -509,7 +509,7 @@ if __name__ == "__main__":
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "slcp_good"
+        task_name = "lotka_volterra_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
@@ -576,6 +576,8 @@ if __name__ == "__main__":
                     colors=colors,
                     theta_true=theta_true,
                     ignore_ticks=True,
+                    ignore_xylabels=True,
+                    legend=False,
                     size=5.5,
                     title = METHODS_STYLE[method]["label"] if method != "TRUE" else "TRUE",
                 )
@@ -599,7 +601,8 @@ if __name__ == "__main__":
                     colors=["lightgreen", "blue", "orange", "#92374D"],
                     theta_true=theta_true,
                     ignore_ticks=True,
-                    size=5,
+                    ignore_xylabels=True,
+                    size=5.5,
                 )
                 plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.png")
                 plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.pdf")
