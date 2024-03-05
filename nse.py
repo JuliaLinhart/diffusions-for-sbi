@@ -1,51 +1,52 @@
 import math
+from functools import partial
+from typing import Callable, Tuple
+
 import torch
 import torch.nn as nn
-
-from torch import Tensor, Size
+from torch import Size, Tensor
 from torch.distributions import Distribution
+from torch.func import jacrev, vmap
 from tqdm import tqdm
-from typing import *
-
 from zuko.distributions import DiagNormal, NormalizingFlow
 from zuko.nn import MLP
 from zuko.transforms import FreeFormJacobianTransform
 from zuko.utils import broadcast
-from torch.autograd.functional import jacobian
-from functools import partialmethod, partial
-from torch.func import jacrev, vmap
 
-def assure_positive_definitness(m, lim_inf=0, lim_sup=1e20):
-    L, V = torch.linalg.eig(.5 * (m + m.mT))
-    L = L.real
-    V = V.real
-
-    return V @ torch.diag_embed(L.abs().clip(lim_inf, lim_sup)) @ torch.linalg.inv(V)
+from embedding_nets import FNet
+from tall_posterior_sampler import (prec_matrix_backward,
+                                    tweedies_approximation,
+                                    tweedies_approximation_new,
+                                    tweedies_approximation_prior)
 
 
 class NSE(nn.Module):
     r"""Creates a neural score estimation (NSE) network.
 
-    Arguments:
-        theta_dim: The dimensionality :math:`D` of the parameter space.
-        x_dim: The dimensionality :math:`L` of the observation space.
-        freqs: The number of time embedding frequencies.
-        build_net: The network constructor. It takes the
+    Args:
+        theta_dim (int): The dimensionality :math:`m` of the parameter space.
+        x_dim (int): The dimensionality :math:`d` of the observation space.
+        freqs (int): The number of time embedding frequencies.
+        build_net (Callable): The network constructor. It takes the
             number of input and output features as positional arguments.
-        embedding_nn_theta: The embedding network for the parameters :math:`\theta`.
-        embedding_nn_x: The embedding network for the observations :math:`x`.
-        kwargs: Keyword arguments passed to the network constructor `build_net`.
+        net_type (str): The type of final score network. Can be 'default' or 'fnet'.
+        embedding_nn_theta (Callable): The embedding network for the parameters :math:`\theta`.
+            Default is the identity function.
+        embedding_nn_x (Callable): The embedding network for the observations :math:`x`.
+            Default is the identity function.
+        kwargs (dict): Keyword arguments passed to the network constructor `build_net`.
     """
 
     def __init__(
-            self,
-            theta_dim: int,
-            x_dim: int,
-            freqs: int = 3,
-            build_net: Callable[[int, int], nn.Module] = MLP,
-            embedding_nn_theta: nn.Module = nn.Identity(),
-            embedding_nn_x: nn.Module = nn.Identity(),
-            **kwargs,
+        self,
+        theta_dim: int,
+        x_dim: int,
+        freqs: int = 3,
+        build_net: Callable[[int, int], nn.Module] = MLP,
+        net_type: str = "default",
+        embedding_nn_theta: nn.Module = nn.Identity(),
+        embedding_nn_x: nn.Module = nn.Identity(),
+        **kwargs,
     ):
         super().__init__()
 
@@ -54,16 +55,24 @@ class NSE(nn.Module):
         self.theta_emb_dim, self.x_emb_dim = self.get_theta_x_embedding_dim(
             theta_dim, x_dim
         )
+        self.net_type = net_type
 
-        self.net = build_net(
-            self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
-        )
+        if net_type == "default":
+            self.net = build_net(
+                self.theta_emb_dim + self.x_emb_dim + 2 * freqs, theta_dim, **kwargs
+            )
+        elif net_type == "fnet":
+            self.net = FNet(
+                dim_input=theta_dim, dim_cond=x_dim, dim_embedding=128, n_layers=1
+            )
+        else:
+            raise NotImplementedError("Unknown net_type")
 
         self.register_buffer("freqs", torch.arange(1, freqs + 1) * math.pi)
         self.register_buffer("zeros", torch.zeros(theta_dim))
         self.register_buffer("ones", torch.ones(theta_dim))
 
-    def get_theta_x_embedding_dim(self, theta_dim, x_dim) -> int:
+    def get_theta_x_embedding_dim(self, theta_dim: int, x_dim: int) -> int:
         r"""Returns the dimensionality of the embeddings for :math:`\theta` and :math:`x`."""
         theta, x = torch.ones((1, theta_dim)), torch.ones((1, x_dim))
         return (
@@ -73,29 +82,33 @@ class NSE(nn.Module):
 
     def forward(self, theta: Tensor, x: Tensor, t: Tensor) -> Tensor:
         r"""
-        Arguments:
-            theta: The parameters :math:`\theta`, with shape :math:`(*, D)`.
-            x: The observation :math:`x`, with shape :math:`(*, L)`.
-            t: The time :math:`t`, with shape :math:`(*,).`
+        Args:
+            theta (torch.Tensor): The parameters :math:`\theta`, with shape :math:`(*, m)`.
+            x (torch.Tensor): The observation :math:`x`, with shape :math:`(*, d)`.
+            t (torch.Tensor): The time :math:`t`, with shape :math:`(*,).`
 
         Returns:
-            The estimated noise :math:`\epsilon_\phi(\theta, x, t)`, with shape :math:`(*, D)`.
+            (torch.Tensor): The estimated noise :math:`\epsilon_\phi(\theta, x, t)`, with shape :math:`(*, m)`.
         """
 
-        t = self.freqs * t[..., None]
-        t = torch.cat((t.cos(), t.sin()), dim=-1)
+        if self.net_type == "default":
+            t = self.freqs * t[..., None]
+            t = torch.cat((t.cos(), t.sin()), dim=-1)
 
-        theta = self.embedding_nn_theta(theta)
-        x = self.embedding_nn_x(x)
+            theta = self.embedding_nn_theta(theta)
+            x = self.embedding_nn_x(x)
 
-        theta, x, t = broadcast(theta, x, t, ignore=1)
+            theta, x, t = broadcast(theta, x, t, ignore=1)
 
-        return self.net(torch.cat((theta, x, t), dim=-1))
+            return self.net(torch.cat((theta, x, t), dim=-1))
+
+        if self.net_type == "fnet":
+            return self.net(theta, x, t)
 
     # The following function define the VP SDE with linear noise schedule beta(t):
     # dtheta = f(t) theta dt + g(t) dW = -0.5 * beta(t) theta dt + sqrt(beta(t)) dW
 
-    def score(self, theta, x, t):
+    def score(self, theta: Tensor, x: Tensor, t: Tensor) -> Tensor:
         return -self(theta, x, t) / self.sigma(t)
 
     def beta(self, t: Tensor) -> Tensor:
@@ -129,24 +142,21 @@ class NSE(nn.Module):
         """
         return torch.sqrt(1 - self.alpha(t) + math.exp(-16))
 
-    def bridge_mean(self, alpha_t: Tensor, alpha_t_1: Tensor, theta_t: Tensor, theta_0: Tensor, bridge_std: float) -> Tensor:
-        est_noise = (theta_t - (alpha_t**.5) * theta_0) / ((1 - alpha_t)**.5)
-        return (alpha_t_1**.5)*theta_0 + ((1 - alpha_t_1 - bridge_std**2)**.5) * est_noise
-
     def ode(self, theta: Tensor, x: Tensor, t: Tensor, **kwargs) -> Tensor:
+        r"""The probability flow ODE corresponding to the VP SDE."""
         return self.f(t) * theta + self.g(t) ** 2 / 2 * self(
             theta, x, t, **kwargs
         ) / self.sigma(t)
 
     def flow(self, x: Tensor, **kwargs) -> Distribution:
         r"""
-        Arguments:
-            x: The observation :math:`x`, with shape :math:`(*, L)`.
-            kwargs: additional args for the forward method.
+        Args:
+            x (torch.Tensor): observation :math:`x`, with shape :math:`(*, d)`.
+            kwargs (dict): additional args for the forward method.
 
         Returns:
-            The normalizing flow :math:`p_\phi(\theta | x)` induced by the
-            probability flow ODE.
+            (zuko.distributions.Distribution): The normalizing flow
+                :math:`p_\phi(\theta | x)` induced by the probability flow ODE.
         """
 
         return NormalizingFlow(
@@ -159,13 +169,60 @@ class NSE(nn.Module):
             base=DiagNormal(self.zeros, self.ones).expand(x.shape[:-1]),
         )
 
+    def mean_pred(
+        self, theta: Tensor, score: Tensor, alpha_t: Tensor, **kwargs
+    ) -> Tensor:
+        """Mean predictor of the backward kernel
+        (used in DDIM sampler and gaussian approximation).
+        """
+        upsilon = 1 - alpha_t
+        mean = (alpha_t ** (-0.5)) * (theta + upsilon * score)
+        return mean
+
+    def bridge_mean(
+        self,
+        alpha_t: Tensor,
+        alpha_t_1: Tensor,
+        theta_t: Tensor,
+        theta_0: Tensor,
+        bridge_std: float,
+    ) -> Tensor:
+        """Bridge mean for the DDIM sampler."""
+        est_noise = (theta_t - (alpha_t**0.5) * theta_0) / ((1 - alpha_t) ** 0.5)
+        return (alpha_t_1**0.5) * theta_0 + (
+            (1 - alpha_t_1 - bridge_std**2) ** 0.5
+        ) * est_noise
+
     def ddim(
-            self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, eta: float = 1., **kwargs
-    ):
-        if len(x.shape) == 1:
+        self,
+        shape: Size,
+        x: Tensor,
+        steps: int = 64,
+        eta: float = 1.0,
+        verbose: bool = False,
+        theta_clipping_range=(None, None),
+        **kwargs,
+    ) -> Tensor:
+        r"""Sampler from Denoising Diffusion Implicit Models (DDIM, Song et al., 2021),
+            but adapted to the tall data setting with `n` context observations `x`.
+
+        Args:
+            shape (torch.Size): The shape of the samples.
+            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
+            steps (int): The number of steps in the diffusion process.
+            eta (float): The noise level for the bridge process.
+            verbose (bool): If True, displays a progress bar.
+
+        Returns:
+            (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
+        """
+        if (self.net_type == "fnet" and x.shape[0] == shape[0]) or (
+            self.net_type == "default" and (len(x.shape) == 1 or x.shape[0] == 1)
+        ):
             score_fun = self.score
         else:
             score_fun = partial(self.factorized_score, **kwargs)
+
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
 
@@ -173,78 +230,352 @@ class NSE(nn.Module):
 
         for t in tqdm(time[:-1], disable=not verbose):
             theta = self.ddim_step(theta, x, t, score_fun, dt, eta)
+            if theta_clipping_range[0] is not None:
+                theta = theta.clip(*theta_clipping_range)
         return theta
 
-    def ddim_step(self, theta, x, t, score_fun, dt, eta, **kwargs):
+    def ddim_step(
+        self,
+        theta: Tensor,
+        x: Tensor,
+        t: Tensor,
+        score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
+        dt: float,
+        eta: float,
+        **kwargs,
+    ):
+        r"""One step of the DDIM sampler."""
+
+        score = score_fun(theta, x, t).detach()
+
         alpha_t = self.alpha(t)
         alpha_t_1 = self.alpha(t - dt)
-        bridge_std = eta * ((((1 - alpha_t_1) / (1 - alpha_t)) * (1 - alpha_t / alpha_t_1)) ** .5)
-        score = score_fun(theta, x, t).detach()
+        bridge_std = eta * (
+            (((1 - alpha_t_1) / (1 - alpha_t)) * (1 - alpha_t / alpha_t_1)) ** 0.5
+        )
+
         pred_theta_0 = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t)
-        theta_mean = self.bridge_mean(alpha_t=alpha_t,
-                                      alpha_t_1=alpha_t_1,
-                                      theta_0=pred_theta_0,
-                                      theta_t=theta,
-                                      bridge_std=bridge_std)
-        # print(theta_mean.mean(axis=0))
+        theta_mean = self.bridge_mean(
+            alpha_t=alpha_t,
+            alpha_t_1=alpha_t_1,
+            theta_0=pred_theta_0,
+            theta_t=theta,
+            bridge_std=bridge_std,
+        )
+
         theta = theta_mean + torch.randn_like(theta_mean) * bridge_std
         return theta
 
-    def langevin_corrector(self, theta, x, t, score_fun, n_steps, r, **kwargs):
-        alpha_t = self.alpha(t)
-        for i in range(n_steps):
+    def langevin_corrector(
+        self,
+        theta: Tensor,
+        x: Tensor,
+        t: Tensor,
+        score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
+        n_steps: int,
+        r: float,
+        **kwargs,
+    ) -> Tensor:
+        r"""Langevin corrector for the Predictor-Corrector (PC) sampler.
+
+        Args:
+            theta (torch.Tensor): The current state of the diffusion process, with shape :math:`(n, m)`.
+            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
+            t (torch.Tensor): The time :math:`t`, with shape :math:`(n,)`.
+            score_fun (Callable): The score function.
+            n_steps (int): The number of Langevin steps.
+            r (float): The step size (or signal-to-noise ratio) for the Langevin dynamics.
+
+        Returns:
+            (torch.Tensor): The corrected sampple state of the diffusion process, with shape :math:`(n, m)`.
+        """
+
+        for _ in range(n_steps):
             z = torch.randn_like(theta)
             g = score_fun(theta, x, t).detach()
             # eps = 2*alpha_t*(r*torch.linalg.norm(z, axis=-1).mean(axis=0)/torch.linalg.norm(g, axis=-1).mean(axis=0))**2
             eps = (
-                    r
-                    * (self.alpha(t)**.5)
-                    * min(self.sigma(t) ** 2, 1 / g.square().mean())
+                r
+                * (self.alpha(t) ** 0.5)
+                * min(self.sigma(t) ** 2, 1 / g.square().mean())
             )
-            theta = theta + eps*g + ((2*eps)**.5)*z
+            theta = theta + eps * g + ((2 * eps) ** 0.5) * z
         return theta
 
-    def predictor_corrector(self,
-                            shape: Size,
-                            x: Tensor,
-                            steps: int = 64,
-                            verbose: bool = False,
-                            predictor_type='ddim',
-                            corrector_type='langevin',
-                            theta_clipping_range=(None, None),
-                            **kwargs
-    ):
-        if len(x.shape) == 1:
+    def predictor_corrector(
+        self,
+        shape: Size,
+        x: Tensor,
+        steps: int = 64,
+        verbose: bool = False,
+        predictor_type="ddim",
+        corrector_type="langevin",
+        theta_clipping_range=(None, None),
+        **kwargs,
+    ) -> Tensor:
+        r"""Predictor-Corrector (PC) sampling algorithm (Song et al., 2021),
+        but adapted to the tall data setting with `n` context observations `x`.
+
+        The PC sampler is a generalization of the
+        - Langevin Dynamics: predictor_type = 'id', corrector_type = 'langevin'
+        - DDIM sampler: predictor_type = 'ddim', corrector_type = 'id'
+
+        Args:
+            shape (torch.Size): The shape of the samples.
+            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
+            steps (int): The number of steps in the diffusion process.
+            verbose (bool): If True, displays a progress bar.
+            predictor_type (str): The type of predictor. Can be 'ddim' or 'id'.
+            corrector_type (str): The type of corrector. Can be 'langevin' or 'id'.
+            theta_clipping_range (Tuple[float, float]): The range for clipping the samples.
+            kwargs (dict): Additional args for the score function, the predictor and corrector.
+
+        Returns:
+            (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
+        """
+
+        # get simple or tall data score function
+        if (self.net_type == "fnet" and x.shape[0] == shape[0]) or (
+            self.net_type == "default" and (len(x.shape) == 1 or x.shape[0] == 1)
+        ):
             score_fun = self.score
         else:
-            score_fun = partial(self.factorized_score, **kwargs)
+            if corrector_type == "langevin":
+                score_fun = partial(self.factorized_score_geffner, **kwargs)
+            else:
+                score_fun = partial(self.factorized_score, **kwargs)
 
-        if predictor_type == 'ddim':
+        # get predictor and corrector functions
+        if predictor_type == "ddim":
             predictor_fun = partial(self.ddim_step, **kwargs)
-        elif predictor_type == 'id':
+        elif predictor_type == "id":
             predictor_fun = lambda theta, x, t, score_fun, dt: theta
         else:
             raise NotImplemented("")
-        if corrector_type == 'langevin':
+        if corrector_type == "langevin":
             corrector_fun = partial(self.langevin_corrector, **kwargs)
-        elif corrector_type == 'id':
+        elif corrector_type == "id":
             corrector_fun = lambda theta, x, t, score_fun: theta
         else:
             raise NotImplemented("")
+
+        # run the PC sampler
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
 
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
 
         for t in tqdm(time[:-1], disable=not verbose):
-            theta_pred = predictor_fun(theta=theta, x=x, t=t, score_fun=score_fun, dt=dt)
-            theta = corrector_fun(theta=theta_pred, x=x, t=t-dt, score_fun=score_fun)
+            # predictor step
+            theta_pred = predictor_fun(
+                theta=theta, x=x, t=t, score_fun=score_fun, dt=dt
+            )
+            # corrector step
+            theta = corrector_fun(theta=theta_pred, x=x, t=t - dt, score_fun=score_fun)
             if theta_clipping_range[0] is not None:
                 theta = theta.clip(*theta_clipping_range)
         return theta
 
+    # The following functions are samplers for the tall data setting
+    # with n context observations x, based on the factorized posterior.
+
+    def annealed_langevin_geffner(
+        self,
+        shape: Size,
+        x: Tensor,
+        prior_score_fn: Callable[[torch.tensor, torch.tensor], torch.tensor],
+        steps: int = 400,
+        lsteps: int = 5,
+        tau: float = 0.5,
+        theta_clipping_range=(None, None),
+        verbose: bool = False,
+        **kwargs,
+    ):
+        time = torch.linspace(1, 0, steps + 1).to(x)
+
+        theta = DiagNormal(self.zeros, self.ones).sample(shape)
+
+        for i, t in enumerate(tqdm(time[:-1], disable=not verbose)):
+            if i < steps - 1:
+                gamma_t = self.alpha(t) / self.alpha(t - time[-2])
+            else:
+                gamma_t = self.alpha(t)
+            delta = tau * (1 - gamma_t) / (gamma_t**0.5)
+            for _ in range(lsteps):
+                z = torch.randn_like(theta)
+                if self.net_type == "fnet":
+                    n_x, n_theta = x.shape[0], theta.shape[0]
+                    post_score = self(
+                        theta[:, None, :].repeat(1, n_x, 1).reshape(n_x * n_theta, -1),
+                        x[None, :, :].repeat(n_theta, 1, 1).reshape(n_x * n_theta, -1),
+                        t[None, None].repeat(n_theta * n_x, 1),
+                        **kwargs,
+                    ) / -self.sigma(t)
+                    post_score = post_score.reshape(n_theta, n_x, -1)
+                    prior_score, mean_prior_0_t, prec_prior_0_t = prior_score_fn(theta, t)
+                    score = post_score.sum(dim=1) + (1 - n_x) * prior_score
+                else:
+                    if len(x.shape) == 1 or x.shape[0] == 1:
+                        score = self.score(theta, x, t).detach()
+                    else:
+                        score = self.factorized_score_geffner(
+                            theta, x, t, prior_score_fn, **kwargs
+                        ).detach()
+                # delta = step_size
+                theta = theta + delta * score + ((2 * delta) ** 0.5) * z
+            if theta_clipping_range[0] is not None:
+                theta = theta.clip(*theta_clipping_range)
+
+        return theta
+
+    def gaussian_approximation(
+        self, x: Tensor, t: Tensor, theta: Tensor, **kwargs
+    ) -> Tuple[Tensor]:
+        """
+        Gaussian approximation from https://arxiv.org/pdf/2310.06721.pdf.
+
+        Computed for `n` context observations `x` and `n_samples` samples `theta` of dimension `m`.
+
+        Args:
+        x (torch.Tensor): Conditioning variable for the score network (n_samples, n, d)
+        t (torch.Tensor): diffusion "time": (1,)
+        theta (torch.Tensor): Current state of the diffusion process (n_samples, n, m)
+
+        Returns:
+        (Tuple): mean (n_samples_theta, n, m), covariance (n_samples, n, m, m)
+            and scores (n_samples_theta, n, m)
+        """
+        alpha_t = self.alpha(t)
+        upsilon = 1 - alpha_t
+
+        def mean_to_jac(theta, x):
+            score = self.score(theta, x, t)
+            mu = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t, **kwargs)
+            return mu, (mu, score)
+
+        grad_mean, out = vmap(vmap(jacrev(mean_to_jac, has_aux=True)))(theta, x)
+        mean, score = out
+        return mean, (upsilon / (alpha_t**0.5)) * grad_mean, score
+
+    def factorized_score_geffner(
+        self, theta, x, t, prior_score_fun, **kwargs
+    ):
+        r"""Factorized score function for the tall data setting with n context observations x.
+        From Geffner et al. (2023).
+        """
+        # Defining variables
+        n_observations = x.shape[0] if len(x.shape) > 1 else 1
+        n_samples = theta.shape[0]
+        theta_ = theta.clone().requires_grad_(True)
+
+        # Calculating m, Sigma and scores for the posteriors
+        _, _, scores = self.gaussian_approximation(
+            theta=theta_[:, None].repeat(1, n_observations, 1),
+            x=x[None, :].repeat(n_samples, 1, 1),
+            t=t,
+        )
+
+        prior_score = prior_score_fun(theta[None], t)[0]
+        aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
+        theta_.detach()
+        return aggregated_score
+
+    def factorized_score(
+        self,
+        theta,
+        x_obs,
+        t,
+        prior_score_fn,
+        dist_cov_est=None,
+        prior=None,
+        cov_mode="JAC",
+        prior_type="gaussian",
+    ):
+        r"""Factorized score function for the tall data setting with n context observations x.
+        Our proposition ("GAUSS" and "JAC").
+        """
+        # device
+        n_obs = x_obs.shape[0]
+
+        tweedie_approx_fn = tweedies_approximation
+        if self.net_type == "fnet":
+            tweedie_approx_fn = tweedies_approximation_new
+
+        prec_0_t, _, scores = tweedie_approx_fn(
+            x=x_obs,
+            theta=theta,
+            nse=self,
+            t=t,
+            score_fn=self.score,
+            dist_cov_est=dist_cov_est,
+            mode=cov_mode,
+        )
+
+        if prior_type == "gaussian":
+            try:
+                prior_score, _, prec_prior_0_t = prior_score_fn(theta, t)
+            except ValueError:
+                assert prior is not None
+                prior_score = prior_score_fn(theta, t)
+                prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, self)
+            prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
+            prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+            lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
+            weighted_scores = prec_score_prior + (
+                prec_score_post - prec_score_prior[:, None]
+            ).sum(dim=1)
+
+            total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+        else:
+            prior_score = prior_score_fn(theta, t)
+            total_score = (1 - n_obs) * prior_score + scores.sum(dim=1)
+            if (self.alpha(t) ** 0.5 > 0.5) and (n_obs > 1):
+                prec_prior_0_t, _, _ = tweedies_approximation_prior(
+                    theta, t, prior_score_fn, nse=self
+                )
+                prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
+                prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+                lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
+                weighted_scores = prec_score_prior + (
+                    prec_score_post - prec_score_prior[:, None]
+                ).sum(dim=1)
+
+                total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+
+        return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
+
+    # The following functions are the original samplers for the single observation setting.
+
+    def annealed_langevin(
+        self,
+        shape: Size,
+        x: Tensor,
+        steps: int = 64,
+        lsteps: int = 1000,
+        tau: float = 1,
+        verbose: bool = False,
+        **kwargs,
+    ):
+        time = torch.linspace(1, 0, steps + 1).to(x)
+
+        theta = DiagNormal(self.zeros, self.ones).sample(shape)
+
+        for t in tqdm(time[:-1], disable=not verbose):
+            for _ in range(lsteps):
+                z = torch.randn_like(theta)
+                score = self(theta, x, t, **kwargs) / -self.sigma(t)
+                # delta = tau * self.alpha(t) / score.square().mean()
+                delta = (
+                    tau
+                    * (self.alpha(t) ** 0.5)
+                    * min(self.sigma(t) ** 2, 1 / score.square().mean())
+                )
+                theta = theta + delta * score + torch.sqrt(2 * delta) * z
+
+        return theta
+
     def euler(
-            self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, **kwargs
+        self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, **kwargs
     ):
         time = torch.linspace(1, 0, steps + 1).to(x)
         dt = 1 / steps
@@ -263,153 +594,6 @@ class NSE(nn.Module):
 
         return theta
 
-    def annealed_langevin(
-            self,
-            shape: Size,
-            x: Tensor,
-            steps: int = 64,
-            lsteps: int = 1000,
-            tau: float = 1,
-            verbose: bool = False,
-            **kwargs,
-    ):
-        time = torch.linspace(1, 0, steps + 1).to(x)
-
-        theta = DiagNormal(self.zeros, self.ones).sample(shape)
-
-        for t in tqdm(time[:-1], disable=not verbose):
-            for _ in range(lsteps):
-                z = torch.randn_like(theta)
-                score = self(theta, x, t, **kwargs) / -self.sigma(t)
-                # delta = tau * self.alpha(t) / score.square().mean()
-                delta = (
-                        tau
-                        * (self.alpha(t)**.5)
-                        * min(self.sigma(t) ** 2, 1 / score.square().mean())
-                )
-                theta = theta + delta * score + torch.sqrt(2 * delta) * z
-
-        return theta
-
-    def mean_pred(self, theta: Tensor, score: Tensor, alpha_t: Tensor, **kwargs) -> Tensor:
-        '''
-        Parameters
-        ----------
-        theta
-        x
-        t
-        kwargs
-
-        Returns
-        -------
-
-        '''
-        upsilon = 1 - alpha_t
-        mean = (alpha_t ** (-.5)) * (theta + upsilon*score)
-        return mean
-
-    def gaussian_approximation(self, x: Tensor, t: Tensor, theta: Tensor, **kwargs) -> Tuple[Tensor]:
-        '''
-        Gaussian approximation from https://arxiv.org/pdf/2310.06721.pdf
-        Parameters
-        ----------
-        x: Conditioning variable for the score network (n_samples_theta, n_samples_x, dim)
-        t: diffusion "time": (1,)
-        theta: Current state of the diffusion process (n_samples_theta, n_samples_x, dim)
-
-        Returns mean (n_samples_theta, n_samples_x, dim) and covariance
-        -------
-        '''
-        alpha_t = self.alpha(t)
-        upsilon = 1 - alpha_t
-        def mean_to_jac(theta, x):
-            score = self.score(theta, x, t)
-            mu = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t, **kwargs)
-            return mu, (mu, score)
-
-        grad_mean, out = vmap(vmap(jacrev(mean_to_jac, has_aux=True)))(theta, x)
-        mean, score = out
-        return mean, (upsilon / (alpha_t ** .5))*grad_mean, score
-
-    def log_L(self,
-              means_posterior: Tensor,
-              covar_posteriors: Tensor,
-              mean_prior: Tensor,
-              covar_prior: Tensor):
-        '''
-        Calculates all the factors dependent of theta of log L_theta as defined in (slack document for now...) Following http://www.lucamartino.altervista.org/2003-003.pdf
-        Parameters
-        ----------
-        pred_means
-        pred_covs
-
-        Returns
-        -------
-
-        '''
-        def from_canonical_to_sufficient(mean, covar):
-            lda = torch.linalg.inv(covar)
-            eta = (lda @ mean[..., None])[..., 0]
-            return lda, eta, -.5 * (-torch.linalg.slogdet(lda).logabsdet + (mean[..., None].mT @ lda @ mean[..., None])[...,0, 0])
-
-        n_observations = means_posterior.shape[-2]
-        lambdas_posterior, etas_posterior, zetas_posterior = from_canonical_to_sufficient(means_posterior, covar_posteriors)
-        lda_prior, eta_prior, zeta_prior = from_canonical_to_sufficient(mean_prior, covar_prior)
-
-        sum_zetas = zetas_posterior.sum(axis=1) + (1 - n_observations)*zeta_prior
-
-        final_gaussian_etas = (1 - n_observations)*eta_prior + etas_posterior.sum(axis=1) 
-        final_gaussian_ldas = (1 - n_observations)*lda_prior + lambdas_posterior.sum(axis=1)
-        final_gaussian_zeta = -.5 * (-torch.linalg.slogdet(final_gaussian_ldas).logabsdet
-                                     + (final_gaussian_etas[..., None].mT @ torch.linalg.inv(final_gaussian_ldas) @final_gaussian_etas[..., None])[..., 0, 0])
-        return sum_zetas - final_gaussian_zeta
-
-    def factorized_score(self, theta, x, t, prior_score_fun, corrector_lda=0, **kwargs):
-        # Defining stuff
-        n_observations = x.shape[0]
-        n_samples = theta.shape[0]
-        alpha_t = self.alpha(t)
-        upsilon = 1 - alpha_t
-        theta_ = theta.clone().requires_grad_(True)
-
-        # Calculating m, Sigma and scores for the posteriors
-        predicted_mean, predicted_covar, scores = self.gaussian_approximation(theta=theta_[:, None].repeat(1, n_observations, 1),
-                                                                                x=x[None, :].repeat(n_samples, 1, 1),
-                                                                                t=t)
-        if corrector_lda > 0:
-
-            # Calculating m, Sigma and score of the prior
-            def pred_mean_prior(theta):
-                prior_score = prior_score_fun(theta[None], t)[0]
-                prior_predicted_mean = self.mean_pred(theta, prior_score, alpha_t)
-                return prior_predicted_mean, (prior_predicted_mean, prior_score)
-
-            grad_prior_predicted_mean, out = vmap(jacrev(pred_mean_prior, has_aux=True))(theta_)
-            prior_predicted_mean, prior_score = out
-            prior_predicted_covar = (upsilon / (alpha_t ** .5)) * grad_prior_predicted_mean
-            prior_predicted_covar = prior_predicted_covar
-            predicted_covar = assure_positive_definitness(predicted_covar.detach())
-            prior_predicted_covar = assure_positive_definitness(prior_predicted_covar.detach())
-            # Calculating correction term
-            log_L = self.log_L(predicted_mean,
-                            predicted_covar,
-                            prior_predicted_mean,
-                            prior_predicted_covar)
-
-            log_L.sum().backward()
-            langevin_grad = (1 - n_observations) * prior_score + scores.sum(axis=1)
-            correction = theta_.grad * (n_observations > 1)
-            #print(torch.linalg.norm(langevin_grad + correction, axis=-1).mean() / torch.linalg.norm(correction, axis=-1).mean() )
-            aggregated_score = langevin_grad + corrector_lda*correction
-        else:
-            prior_score = prior_score_fun(theta[None], t)[0]
-            aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
-        theta_.detach()
-        # real_score = self.score(theta, x, t)
-        # res = torch.linalg.norm(aggregated_score - real_score, axis=-1)
-        # print((res/torch.linalg.norm(real_score, axis=-1)).max().item())
-        return aggregated_score
-
 
 class NSELoss(nn.Module):
     r"""Calculates the *noise parametrized* denoising score matching (DSM) loss for NSE.
@@ -427,8 +611,8 @@ class NSELoss(nn.Module):
 
     where :math:`t_i \sim \mathcal{U}(0, 1)` and :math:`\epsilon_i \sim \mathcal{N}(0, I)`.
 
-    Arguments:
-        estimator: A regression network :math:`\epsilon_\phi(\theta, x, t)`.
+    Args:
+        estimator (NSE): A regression network :math:`\epsilon_\phi(\theta, x, t)`.
     """
 
     def __init__(self, estimator: NSE):
@@ -438,18 +622,18 @@ class NSELoss(nn.Module):
 
     def forward(self, theta: Tensor, x: Tensor, **kwargs) -> Tensor:
         r"""
-        Arguments:
-            theta: The parameters :math:`\theta`, with shape :math:`(N, D)`.
-            x: The observation :math:`x`, with shape :math:`(N, L)`.
-            kwargs: Additional args for the forward method of the estimator.
+        Args:
+            theta (torch.Tensor): The parameters :math:`\theta`, with shape :math:`(N, D)`.
+            x (torch.Tensor): The observation :math:`x`, with shape :math:`(N, L)`.
+            kwargs (dict): Additional args for the forward method of the estimator.
 
         Returns:
-            The scalar loss :math:`l`.
+            (torch.Tensor): The noise parametrized scalar DSM loss :math:`l`.
         """
 
         t = torch.rand(theta.shape[0], dtype=theta.dtype, device=theta.device)
 
-        scaling = self.estimator.alpha(t)**.5
+        scaling = self.estimator.alpha(t) ** 0.5
         sigma = self.estimator.sigma(t)
 
         eps = torch.randn_like(theta)
@@ -460,17 +644,19 @@ class NSELoss(nn.Module):
 
 if __name__ == "__main__":
     theta = torch.randn(128, 2)
-    x = torch.randn(10,2)
+    x = torch.randn(10, 2)
     t = torch.rand(1)
-    nse = NSE(2,2)
+    nse = NSE(2, 2)
 
-    nse.predictor_corrector((128,),
-                            x=x,
-                            steps=2,
-                            prior_score_fun=lambda theta, t: torch.ones_like(theta),
-                            eta=0.01,
-                            corrector_lda=0.1,
-                            n_steps=2,
-                            r=.5,
-                            predictor_type='ddim',
-                            verbose=True).cpu()
+    nse.predictor_corrector(
+        (128,),
+        x=x,
+        steps=2,
+        prior_score_fun=lambda theta, t: torch.ones_like(theta),
+        eta=0.01,
+        corrector_lda=0.1,
+        n_steps=2,
+        r=0.5,
+        predictor_type="ddim",
+        verbose=True,
+    ).cpu()

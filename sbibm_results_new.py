@@ -60,14 +60,14 @@ def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS, batch_size=BATC
     best_epoch = losses["best_epoch"]
     return train_losses, val_losses, best_epoch
 
-def path_to_results(task_name, result_name, num_obs, n_train, n_obs, cov_mode=None, langevin=False, clip=False):
+def path_to_results(task_name, result_name, num_obs, n_train, n_obs, cov_mode=None, sampler="euler", langevin=False, clip=False):
     batch_size = TASKS_DICT[task_name]["bs"][N_TRAIN.index(n_train)]
     lr = TASKS_DICT[task_name]["lr"][N_TRAIN.index(n_train)]
     if task_name == "lotka_volterra_good":
         path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new_log/"
     else:
         path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new/"
-    path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
+    path = path + "langevin_steps_400_5_new/" if langevin else path + f"{sampler}_steps_1000/"
     path  = path + result_name + f"_{num_obs}_n_obs_{n_obs}.pkl"
     if not langevin:
         path = path[:-4] + f"_{cov_mode}.pkl"
@@ -76,10 +76,10 @@ def path_to_results(task_name, result_name, num_obs, n_train, n_obs, cov_mode=No
     path = path[:-4] + "_prior.pkl"
     return path
 
-def load_samples(task_name, n_train, n_obs, cov_mode=None, langevin=False, clip=False):
+def load_samples(task_name, n_train, n_obs, cov_mode=None, sampler="euler", langevin=False, clip=False):
     samples = {}
-    for num_obs in NUM_OBSERVATION_LIST:
-        filename = path_to_results(task_name, "posterior_samples", num_obs, n_train, n_obs, cov_mode, langevin, clip)
+    for num_obs in [1]: #NUM_OBSERVATION_LIST:
+        filename = path_to_results(task_name, "posterior_samples", num_obs, n_train, n_obs, cov_mode, sampler, langevin, clip)
         samples[num_obs] = torch.load(filename)
     return samples
 
@@ -509,7 +509,7 @@ if __name__ == "__main__":
     if args.plot_samples:
 
         n_train = 30000
-        task_name = "lotka_volterra_good"
+        task_name = "slcp_good"
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
@@ -556,56 +556,56 @@ if __name__ == "__main__":
         #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
         #     plt.clf()
 
-        # Pairplot for all methods with increasing n_obs
-        from plot_utils import pairplot_with_groundtruth_md
-        for num_obs in np.arange(1, 26):
-            theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-            for method, color in zip(["TRUE", "GAUSS", "JAC_clip", "LANGEVIN"], ["Greens", "Blues", "Oranges", "Reds"]):
-                samples = []
-                for n_obs in N_OBS:
-                    if method == "TRUE":
-                        samples.append(load_reference_samples(task_name, n_obs)[num_obs])
-                    else:
-                        samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
+        # # Pairplot for all methods with increasing n_obs
+        # from plot_utils import pairplot_with_groundtruth_md
+        # for num_obs in np.arange(1, 26):
+        #     theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
+        #     for method, color in zip(["TRUE", "GAUSS", "JAC_clip", "LANGEVIN"], ["Greens", "Blues", "Oranges", "Reds"]):
+        #         samples = []
+        #         for n_obs in N_OBS:
+        #             if method == "TRUE":
+        #                 samples.append(load_reference_samples(task_name, n_obs)[num_obs])
+        #             else:
+        #                 samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
 
-                colors = cm.get_cmap(color)(np.linspace(1, 0.2, len(samples))).tolist()
-                labels = [rf"$n = {n_obs}$" for n_obs in N_OBS]
-                pairplot_with_groundtruth_md(
-                    samples_list=samples,
-                    labels=labels,
-                    colors=colors,
-                    theta_true=theta_true,
-                    ignore_ticks=True,
-                    ignore_xylabels=True,
-                    legend=False,
-                    size=5.5,
-                    title = METHODS_STYLE[method]["label"] if method != "TRUE" else "TRUE",
-                )
-                plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png")
-                plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf")
-                plt.clf()
+        #         colors = cm.get_cmap(color)(np.linspace(1, 0.2, len(samples))).tolist()
+        #         labels = [rf"$n = {n_obs}$" for n_obs in N_OBS]
+        #         pairplot_with_groundtruth_md(
+        #             samples_list=samples,
+        #             labels=labels,
+        #             colors=colors,
+        #             theta_true=theta_true,
+        #             ignore_ticks=True,
+        #             ignore_xylabels=True,
+        #             legend=False,
+        #             size=5.5,
+        #             title = METHODS_STYLE[method]["label"] if method != "TRUE" else "TRUE",
+        #         )
+        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png")
+        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf")
+        #         plt.clf()
 
         # Analytical vs. algorithms pairplot for all n_obs
         from plot_utils import pairplot_with_groundtruth_md
         for n_obs in N_OBS:
             samples_ref = load_reference_samples(task_name, n_obs)
-            samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-            samples_jac_clip = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=True)
+            samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False, sampler="ddim")
+            # samples_jac_clip = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=True)
             samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
-            for num_obs in np.arange(1, 26):
+            for num_obs in [1]: #np.arange(1, 26):
                 theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
-                samples_list = [samples_ref[num_obs], samples_gauss[num_obs], samples_jac_clip[num_obs], samples_langevin[num_obs]]
+                samples_list = [samples_ref[num_obs], samples_gauss[num_obs], samples_langevin[num_obs]] #, samples_jac_clip[num_obs], samples_langevin[num_obs]]
                 pairplot_with_groundtruth_md(
                     samples_list=samples_list,
-                    labels=["ANALYTIC", "GAUSS", "JAC (clip)", "LANGEVIN"],
-                    colors=["lightgreen", "blue", "orange", "#92374D"],
+                    labels=["ANALYTIC", "GAUSS", "LANGEVIN"], #, "JAC (clip)", "LANGEVIN"],
+                    colors=["lightgreen", "blue", "#92374D"], #, "orange", "#92374D"],
                     theta_true=theta_true,
                     ignore_ticks=True,
                     ignore_xylabels=True,
                     size=5.5,
                 )
-                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.png")
-                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}.pdf")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_ddim.png")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_ddim.pdf")
                 plt.clf()
                 
     

@@ -1,10 +1,10 @@
-import torch
-
-from torch.func import vmap, jacrev
-from tqdm import tqdm
 from functools import partial
+
+import torch
+from torch.func import jacrev, vmap
+from tqdm import tqdm
+
 from vp_diffused_priors import get_vpdiff_gaussian_score
-from nse import assure_positive_definitness
 
 
 def mean_backward(theta, t, score_fn, nse, **kwargs):
@@ -41,6 +41,64 @@ def prec_matrix_backward(t, dist_cov, nse):
     return torch.linalg.inv(dist_cov) + (alpha_t / sigma_t**2) * eye
 
 
+def tweedies_approximation_new(
+    theta,
+    x,
+    t,
+    score_fn,
+    nse,
+    dist_cov_est=None,
+    mode="JAC",
+    clip_mean_bounds=(None, None),
+):
+    alpha_t = nse.alpha(t)
+    sigma_t = nse.sigma(t)
+
+    def score_jac(theta, x):
+        n_theta = theta.shape[0]
+        n_x = x.shape[0]
+        score = score_fn(
+            theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+            t=t[None, None].repeat(n_theta * n_x, 1),
+            x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1),
+        )
+        score = score.reshape(n_theta, n_x, -1)
+        return score, score
+
+    if mode == "JAC":
+
+        def score_jac(theta, x):
+            score = score_fn(theta=theta[None, :], t=t[None, None], x=x[None, ...])[0]
+            return score, score
+
+        jac_score, score = vmap(
+            lambda theta: vmap(jacrev(score_jac, has_aux=True))(
+                theta[None].repeat(x.shape[0], 1), x
+            )
+        )(theta)
+        cov = (sigma_t**2 / alpha_t) * (
+            torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
+        )
+        prec = torch.linalg.inv(cov)
+    elif mode == "GAUSS":
+        prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
+        # eye = torch.eye(dist_cov_est.shape[-1]).to(alpha_t.device)
+        # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
+        # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
+        prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
+        score = score_jac(theta, x)[0]
+        # score = vmap(lambda theta: vmap(partial(score_fn, t=t),
+        #                                 in_dims=(None, 0),
+        #                                 randomness='different')(theta, x),
+        #              randomness='different')(theta)
+    else:
+        raise NotImplemented("Available methods are GAUSS, PSEUDO, JAC")
+    mean = 1 / (alpha_t**0.5) * (theta[:, None] + sigma_t**2 * score)
+    if clip_mean_bounds[0]:
+        mean = mean.clip(*clip_mean_bounds)
+    return prec, mean, score
+
+
 def tweedies_approximation(
     x,
     theta,
@@ -69,11 +127,23 @@ def tweedies_approximation(
         )
         prec = torch.linalg.inv(cov)
     elif mode == "GAUSS":
+
+        def score_jac(theta, x):
+            n_theta = theta.shape[0]
+            n_x = x.shape[0]
+            score = score_fn(
+                theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+                t=t[None, None].repeat(n_theta * n_x, 1),
+                x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1),
+            )
+            score = score.reshape(n_theta, n_x, -1)
+            return score, score
+
         prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
-        # eye = torch.eye(dist_cov_est.shape[-1]).to(alpha_t.device)
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
         # cov = torch.linalg.inv(torch.linalg.inv(dist_cov_est) + (alpha_t / sigma_t ** 2) * eye)
         prec = prec[None].repeat(theta.shape[0], 1, 1, 1)
+
         score = vmap(
             lambda theta: vmap(
                 partial(score_fn, t=t), in_dims=(None, 0), randomness="different"
@@ -87,19 +157,22 @@ def tweedies_approximation(
         mean = mean.clip(*clip_mean_bounds)
     return prec, mean, score
 
-def tweedies_approximation_prior(theta, t, score_fn, nse, mode='vmap'):
+
+def tweedies_approximation_prior(theta, t, score_fn, nse, mode="vmap"):
     alpha_t = nse.alpha(t)
     sigma_t = nse.sigma(t)
-    if mode == 'vmap':
+    if mode == "vmap":
+
         def score_jac(theta):
             score = score_fn(theta=theta, t=t)
             return score, score
+
         jac_score, score = vmap(jacrev(score_jac, has_aux=True))(theta)
     else:
         raise NotImplemented
     mean = 1 / (alpha_t**0.5) * (theta + sigma_t**2 * score)
     cov = (sigma_t**2 / alpha_t) * (
-            torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
+        torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
     )
     prec = torch.linalg.inv(cov)
     return prec, mean, score
@@ -119,7 +192,6 @@ def diffused_tall_posterior_score(
 ):
     n_obs = x_obs.shape[0]
 
-
     # Tweedies approx for p_{0|t}
     prec_0_t, _, scores = tweedies_approximation(
         x=x_obs,
@@ -131,7 +203,7 @@ def diffused_tall_posterior_score(
         mode=cov_mode,
     )
     prior_score = prior_score_fn(theta, t)
-    
+
     if prior_type == "gaussian":
         prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, nse).repeat(
             theta.shape[0], 1, 1
@@ -146,8 +218,10 @@ def diffused_tall_posterior_score(
         total_score = torch.linalg.solve(A=lda, B=weighted_scores)
     else:
         total_score = (1 - n_obs) * prior_score + scores.sum(dim=1)
-        if (nse.alpha(t)**.5 > .5) and (n_obs > 1):
-            prec_prior_0_t, _, _ = tweedies_approximation_prior(theta, t, prior_score_fn, nse)
+        if (nse.alpha(t) ** 0.5 > 0.5) and (n_obs > 1):
+            prec_prior_0_t, _, _ = tweedies_approximation_prior(
+                theta, t, prior_score_fn, nse
+            )
             prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
             prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
             lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)
@@ -231,10 +305,11 @@ def euler_sde_sampler(
 
 
 if __name__ == "__main__":
-    from tasks.toy_examples.data_generators import SBIGaussian2d
+    import matplotlib.pyplot as plt
+
     from nse import NSE, NSELoss
     from sm_utils import train
-    import matplotlib.pyplot as plt
+    from tasks.toy_examples.data_generators import SBIGaussian2d
 
     torch.manual_seed(1)
     N_TRAIN = 10_000

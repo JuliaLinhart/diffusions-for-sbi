@@ -41,7 +41,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:2"
+        device = "cuda:0"
 
     # Prepare training data
     # normalize theta
@@ -139,6 +139,7 @@ def run_sample_sgm(
     prior,
     prior_type,
     cov_mode,
+    sampler_type="euler",
     langevin=False,
     clip=False,
     log_space=False,
@@ -148,7 +149,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:2"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -203,98 +204,106 @@ def run_sample_sgm(
             theta_clipping_range = (-3, 3)
             ext = "_clip"
         start_time = time.time()
-        samples = score_network.predictor_corrector(
-            (nsamples,),
+        # samples = score_network.predictor_corrector(
+        #     (nsamples,),
+        #     x=context_norm.to(device),
+        #     steps=400,
+        #     prior_score_fun=prior_score_fn_norm,
+        #     eta=1,
+        #     corrector_lda=0,
+        #     n_steps=5,
+        #     r=0.5,
+        #     predictor_type="id",
+        #     verbose=True,
+        #     theta_clipping_range=theta_clipping_range,
+        # ).cpu()
+        samples = score_network.annealed_langevin_geffner(
+            shape=(nsamples,),
             x=context_norm.to(device),
+            prior_score_fn=prior_score_fn_norm,
             steps=400,
-            prior_score_fun=prior_score_fn_norm,
-            eta=1,
-            corrector_lda=0,
-            n_steps=5,
-            r=0.5,
-            predictor_type="id",
-            verbose=True,
+            lsteps=5,
+            tau=0.5,
             theta_clipping_range=theta_clipping_range,
+            verbose=True,
         ).cpu()
         time_elapsed = time.time() - start_time
-        results_dict = None
 
-        save_path += f"langevin_steps_400_5/"
+        save_path += f"langevin_steps_400_5_new/"
         samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
         time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}{ext}.pkl"
     else:
         print()
-        print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
+        print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
 
         # estimate cov
-        # start_time = time.time()
+        start_time = time.time()
         cov_est = vmap(
             lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
             randomness="different",
         )(context_norm.to(device))
         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
-        # time_cov_est = time.time() - start_time
 
-        # define score function for tall posterior
-        score_fn = partial(
-            diffused_tall_posterior_score,
-            prior=prior_norm,  # normalized prior
-            prior_type=prior_type,
-            prior_score_fn=prior_score_fn_norm,  # analytical prior score function
-            x_obs=context_norm.to(device),  # observations
-            nse=score_network,  # trained score network
-            dist_cov_est=cov_est,
-            cov_mode=cov_mode,
-            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
-            # psd_clipping=True if cov_mode == 'JAC' else False,
-            # scale_gradlogL=True,
-        )
         cov_mode_name = cov_mode
         theta_clipping_range = (None, None)
         if clip:
             theta_clipping_range = (-3, 3)
             cov_mode_name += "_clip"
 
-        # sample from tall posterior
-        start_time = time.time()
-        (
-            samples,
-            all_samples,
-            # gradlogL,
-            # lda,
-            # posterior_scores,
-            # means_posterior_backward,
-            # sigma_posterior_backward,
-        ) = euler_sde_sampler(
-            score_fn,
-            nsamples,
-            dim_theta=theta_train_mean.shape[-1],
-            beta=score_network.beta,
-            device=device,
-            debug=False,
-            theta_clipping_range=theta_clipping_range,
-        )
-        time_elapsed = time.time() - start_time  # + time_cov_est
+        if sampler_type == "ddim":
+            save_path += f"ddim_steps_{steps}/"
+
+            samples = score_network.ddim(
+                shape=(1000,),
+                x=context_norm.to(device),
+                eta=1,
+                steps=1000,
+                theta_clipping_range=theta_clipping_range,
+                prior=prior_norm,
+                prior_type=prior_type,
+                prior_score_fn=prior_score_fn_norm,
+                dist_cov_est=cov_est,
+                cov_mode=cov_mode,
+                verbose=True,
+            ).cpu()
+        else:
+            save_path += f"euler_steps_{steps}/"
+
+            # define score function for tall posterior
+            score_fn = partial(
+                diffused_tall_posterior_score,
+                prior=prior_norm,  # normalized prior
+                prior_type=prior_type,
+                prior_score_fn=prior_score_fn_norm,  # analytical prior score function
+                x_obs=context_norm.to(device),  # observations
+                nse=score_network,  # trained score network
+                dist_cov_est=cov_est,
+                cov_mode=cov_mode,
+            )
+        
+            # sample from tall posterior
+            (
+                samples,
+                _,
+            ) = euler_sde_sampler(
+                score_fn,
+                nsamples,
+                dim_theta=theta_train_mean.shape[-1],
+                beta=score_network.beta,
+                device=device,
+                debug=False,
+                theta_clipping_range=theta_clipping_range,
+            )
+
+        time_elapsed = time.time() - start_time 
+
 
         assert torch.isnan(samples).sum() == 0, f"NaN in samples: {torch.isnan(samples).sum()}"
 
-        # results_dict = {
-        #     "all_theta_learned": all_samples,
-        #     # "gradlogL": gradlogL,
-        #     # "lda": lda,
-        #     # "posterior_scores": posterior_scores,
-        #     # "means_posterior_backward": means_posterior_backward,
-        #     # "sigma_posterior_backward": sigma_posterior_backward,
-        # }
-
-        save_path += f"euler_steps_{steps}/"
         samples_filename = (
             save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
         )
-        # results_dict_filename = (
-        #     save_path + f"results_dict_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        # )
         time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
 
     # unnormalize
@@ -310,8 +319,7 @@ def run_sample_sgm(
     )
     torch.save(samples, samples_filename)
     torch.save(time_elapsed, time_filename)
-    # if results_dict is not None:
-    #     torch.save(results_dict, results_dict_filename)
+
 
 def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
     print("=======================================================================")
@@ -400,6 +408,13 @@ if __name__ == "__main__":
         default="GAUSS",
         choices=COV_MODES,
         help="covariance mode",
+    )
+    parser.add_argument(
+        "--sampler",
+        type=str,
+        default="euler",
+        choices=["euler", "ddim"],
+        help="SDE sampler type",
     )
     parser.add_argument(
         "--langevin",
@@ -547,6 +562,7 @@ if __name__ == "__main__":
                     save_path + f"score_network.pkl",
                     map_location=torch.device("cpu"),
                 )
+                score_network.net_type = "default"
 
                 # Mean and std of training data
                 means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
@@ -570,6 +586,7 @@ if __name__ == "__main__":
                     "prior_type": "uniform" if args.task == "slcp" else "gaussian", 
                     "cov_mode": args.cov_mode,
                     "clip": args.clip,  # for clipping
+                    "sampler_type": args.sampler,
                     "langevin": args.langevin,
                     "log_space": args.task in ["lotka_volterra", "sir"],
                     "x_log_space": args.task == "lotka_volterra",

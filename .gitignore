@@ -19,4 +19,4 @@ score_net*.pkl
 /results/sbibm
 
 /test_toy
-nse_new.py
+*old*
