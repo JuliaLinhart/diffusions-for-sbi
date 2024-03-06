@@ -6,7 +6,6 @@ import argparse
 import numpy as np
 import os
 import torch
-import time
 
 from functools import partial
 from nse import NSE, NSELoss
@@ -23,7 +22,7 @@ from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_sco
 PATH_EXPERIMENT = "results/sbibm/"
 NUM_OBSERVATION_LIST = list(np.arange(1,26))
 
-N_TRAIN_LIST = [1000, 3000, 10000, 30000, 50000]
+N_TRAIN_LIST = [1000, 3000, 10000, 30000] #, 50000]
 N_OBS_LIST = [1, 8, 14, 22, 30]
 
 COV_MODES = ["GAUSS", "JAC"]
@@ -203,20 +202,7 @@ def run_sample_sgm(
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
-        start_time = time.time()
-        # samples = score_network.predictor_corrector(
-        #     (nsamples,),
-        #     x=context_norm.to(device),
-        #     steps=400,
-        #     prior_score_fun=prior_score_fn_norm,
-        #     eta=1,
-        #     corrector_lda=0,
-        #     n_steps=5,
-        #     r=0.5,
-        #     predictor_type="id",
-        #     verbose=True,
-        #     theta_clipping_range=theta_clipping_range,
-        # ).cpu()
+
         samples = score_network.annealed_langevin_geffner(
             shape=(nsamples,),
             x=context_norm.to(device),
@@ -227,23 +213,13 @@ def run_sample_sgm(
             theta_clipping_range=theta_clipping_range,
             verbose=True,
         ).cpu()
-        time_elapsed = time.time() - start_time
 
         save_path += f"langevin_steps_400_5_new/"
         samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
-        time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}{ext}.pkl"
     else:
         print()
         print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
-
-        # estimate cov
-        start_time = time.time()
-        cov_est = vmap(
-            lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
-            randomness="different",
-        )(context_norm.to(device))
-        cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
 
         cov_mode_name = cov_mode
         theta_clipping_range = (None, None)
@@ -251,14 +227,23 @@ def run_sample_sgm(
             theta_clipping_range = (-3, 3)
             cov_mode_name += "_clip"
 
+        cov_est = None
+        if cov_mode == "GAUSS":
+            # estimate cov for GAUSS
+            cov_est = vmap(
+                lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
+                randomness="different",
+            )(context_norm.to(device))
+            cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
+
         if sampler_type == "ddim":
             save_path += f"ddim_steps_{steps}/"
 
             samples = score_network.ddim(
                 shape=(1000,),
                 x=context_norm.to(device),
-                eta=1,
-                steps=1000,
+                eta=1 if steps == 1000 else 0.8 if steps == 400 else 0.5, # corresponds to the equivalent time setting from section 4.1
+                steps=steps,
                 theta_clipping_range=theta_clipping_range,
                 prior=prior_norm,
                 prior_type=prior_type,
@@ -296,15 +281,12 @@ def run_sample_sgm(
                 theta_clipping_range=theta_clipping_range,
             )
 
-        time_elapsed = time.time() - start_time 
-
 
         assert torch.isnan(samples).sum() == 0, f"NaN in samples: {torch.isnan(samples).sum()}"
 
         samples_filename = (
             save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
         )
-        time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -318,7 +300,6 @@ def run_sample_sgm(
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
-    torch.save(time_elapsed, time_filename)
 
 
 def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
@@ -577,7 +558,7 @@ if __name__ == "__main__":
                     "context": context,
                     "nsamples": args.nsamples,
                     "score_network": score_network,
-                    "steps": args.steps,
+                    "steps": 1000 if args.cov_mode == "GAUSS" else 400, # corresponds to the equivalent time setting from section 4.1
                     "theta_train_mean": theta_train_mean,  # for (un)normalization
                     "theta_train_std": theta_train_std,  # for (un)normalization
                     "x_train_mean": x_train_mean,  # for (un)normalization

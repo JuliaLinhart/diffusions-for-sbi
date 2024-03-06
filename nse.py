@@ -1,12 +1,11 @@
 import math
 from functools import partial
-from typing import Callable, Tuple
+from typing import Callable
 
 import torch
 import torch.nn as nn
 from torch import Size, Tensor
 from torch.distributions import Distribution
-from torch.func import jacrev, vmap
 from tqdm import tqdm
 from zuko.distributions import DiagNormal, NormalizingFlow
 from zuko.nn import MLP
@@ -16,7 +15,6 @@ from zuko.utils import broadcast
 from embedding_nets import FNet
 from tall_posterior_sampler import (prec_matrix_backward,
                                     tweedies_approximation,
-                                    tweedies_approximation_new,
                                     tweedies_approximation_prior)
 
 
@@ -216,9 +214,8 @@ class NSE(nn.Module):
         Returns:
             (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
         """
-        if (self.net_type == "fnet" and x.shape[0] == shape[0]) or (
-            self.net_type == "default" and (len(x.shape) == 1 or x.shape[0] == 1)
-        ):
+
+        if x.shape[0] == shape[0] or len(x.shape) == 1 or x.shape[0] == 1:
             score_fun = self.score
         else:
             score_fun = partial(self.factorized_score, **kwargs)
@@ -335,9 +332,8 @@ class NSE(nn.Module):
         """
 
         # get simple or tall data score function
-        if (self.net_type == "fnet" and x.shape[0] == shape[0]) or (
-            self.net_type == "default" and (len(x.shape) == 1 or x.shape[0] == 1)
-        ):
+
+        if x.shape[0] == shape[0] or len(x.shape) == 1 or x.shape[0] == 1:
             score_fun = self.score
         else:
             if corrector_type == "langevin":
@@ -400,62 +396,24 @@ class NSE(nn.Module):
                 gamma_t = self.alpha(t) / self.alpha(t - time[-2])
             else:
                 gamma_t = self.alpha(t)
+            
             delta = tau * (1 - gamma_t) / (gamma_t**0.5)
             for _ in range(lsteps):
                 z = torch.randn_like(theta)
-                if self.net_type == "fnet":
-                    n_x, n_theta = x.shape[0], theta.shape[0]
-                    post_score = self(
-                        theta[:, None, :].repeat(1, n_x, 1).reshape(n_x * n_theta, -1),
-                        x[None, :, :].repeat(n_theta, 1, 1).reshape(n_x * n_theta, -1),
-                        t[None, None].repeat(n_theta * n_x, 1),
-                        **kwargs,
-                    ) / -self.sigma(t)
-                    post_score = post_score.reshape(n_theta, n_x, -1)
-                    prior_score, mean_prior_0_t, prec_prior_0_t = prior_score_fn(theta, t)
-                    score = post_score.sum(dim=1) + (1 - n_x) * prior_score
+
+                if len(x.shape) == 1 or x.shape[0] == 1:
+                    score = self.score(theta, x, t).detach()
                 else:
-                    if len(x.shape) == 1 or x.shape[0] == 1:
-                        score = self.score(theta, x, t).detach()
-                    else:
-                        score = self.factorized_score_geffner(
-                            theta, x, t, prior_score_fn, **kwargs
-                        ).detach()
-                # delta = step_size
+                    score = self.factorized_score_geffner(
+                        theta, x, t, prior_score_fn, **kwargs
+                    ).detach()
+
                 theta = theta + delta * score + ((2 * delta) ** 0.5) * z
+            
             if theta_clipping_range[0] is not None:
                 theta = theta.clip(*theta_clipping_range)
 
         return theta
-
-    def gaussian_approximation(
-        self, x: Tensor, t: Tensor, theta: Tensor, **kwargs
-    ) -> Tuple[Tensor]:
-        """
-        Gaussian approximation from https://arxiv.org/pdf/2310.06721.pdf.
-
-        Computed for `n` context observations `x` and `n_samples` samples `theta` of dimension `m`.
-
-        Args:
-        x (torch.Tensor): Conditioning variable for the score network (n_samples, n, d)
-        t (torch.Tensor): diffusion "time": (1,)
-        theta (torch.Tensor): Current state of the diffusion process (n_samples, n, m)
-
-        Returns:
-        (Tuple): mean (n_samples_theta, n, m), covariance (n_samples, n, m, m)
-            and scores (n_samples_theta, n, m)
-        """
-        alpha_t = self.alpha(t)
-        upsilon = 1 - alpha_t
-
-        def mean_to_jac(theta, x):
-            score = self.score(theta, x, t)
-            mu = self.mean_pred(theta=theta, score=score, alpha_t=alpha_t, **kwargs)
-            return mu, (mu, score)
-
-        grad_mean, out = vmap(vmap(jacrev(mean_to_jac, has_aux=True)))(theta, x)
-        mean, score = out
-        return mean, (upsilon / (alpha_t**0.5)) * grad_mean, score
 
     def factorized_score_geffner(
         self, theta, x, t, prior_score_fun, **kwargs
@@ -469,11 +427,16 @@ class NSE(nn.Module):
         theta_ = theta.clone().requires_grad_(True)
 
         # Calculating m, Sigma and scores for the posteriors
-        _, _, scores = self.gaussian_approximation(
-            theta=theta_[:, None].repeat(1, n_observations, 1),
-            x=x[None, :].repeat(n_samples, 1, 1),
-            t=t,
-        )
+        if self.net_type == "fnet":
+            scores = self(
+                theta[:, None, :].repeat(1, n_observations, 1).reshape(n_observations * n_samples, -1),
+                x[None, :, :].repeat(n_samples, 1, 1).reshape(n_observations * n_samples, -1),
+                t[None, None].repeat(n_samples * n_observations, 1),
+                **kwargs,
+            ) / -self.sigma(t)
+            scores = scores.reshape(n_samples, n_observations, -1)
+        else:
+            scores = self.score(theta[:,None], x[None, :], t).detach()
 
         prior_score = prior_score_fun(theta[None], t)[0]
         aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
@@ -486,8 +449,8 @@ class NSE(nn.Module):
         x_obs,
         t,
         prior_score_fn,
+        prior,
         dist_cov_est=None,
-        prior=None,
         cov_mode="JAC",
         prior_type="gaussian",
     ):
@@ -496,12 +459,7 @@ class NSE(nn.Module):
         """
         # device
         n_obs = x_obs.shape[0]
-
-        tweedie_approx_fn = tweedies_approximation
-        if self.net_type == "fnet":
-            tweedie_approx_fn = tweedies_approximation_new
-
-        prec_0_t, _, scores = tweedie_approx_fn(
+        prec_0_t, _, scores = tweedies_approximation(
             x=x_obs,
             theta=theta,
             nse=self,
@@ -512,12 +470,8 @@ class NSE(nn.Module):
         )
 
         if prior_type == "gaussian":
-            try:
-                prior_score, _, prec_prior_0_t = prior_score_fn(theta, t)
-            except ValueError:
-                assert prior is not None
-                prior_score = prior_score_fn(theta, t)
-                prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, self)
+            prior_score = prior_score_fn(theta, t)
+            prec_prior_0_t = prec_matrix_backward(t, prior.covariance_matrix, self)
             prec_score_prior = (prec_prior_0_t @ prior_score[..., None])[..., 0]
             prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
             lda = prec_prior_0_t * (1 - n_obs) + prec_0_t.sum(dim=1)

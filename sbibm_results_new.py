@@ -30,14 +30,6 @@ BATCH_SIZE = 256 # 64
 N_EPOCHS = 5000 
 LR = 1e-4
 
-# # old
-# TASKS_DICT = {
-#     "slcp_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
-#     "lotka_volterra_good": {"lr": [1e-3, 1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256, 256]},
-#     "sir_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64, 64]},
-# }
-
-# new
 TASKS_DICT = {
     "slcp_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256, 256]},
     "lotka_volterra_good": {"lr": [1e-4, 1e-4, 1e-4, 1e-4, 1e-3], "bs": [256, 256, 256, 256, 256]},
