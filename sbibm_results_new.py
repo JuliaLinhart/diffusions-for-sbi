@@ -59,7 +59,7 @@ def path_to_results(task_name, result_name, num_obs, n_train, n_obs, cov_mode=No
         path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new_log/"
     else:
         path = PATH_EXPERIMENT + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new/"
-    path = path + "langevin_steps_400_5_new/" if langevin else path + f"{sampler}_steps_1000/"
+    path = path + "langevin_steps_400_5_new/" if langevin else path + f"{sampler}_steps_1000/" if sampler == "euler" or cov_mode == "GAUSS" else path + f"{sampler}_steps_400/"
     path  = path + result_name + f"_{num_obs}_n_obs_{n_obs}.pkl"
     if not langevin:
         path = path[:-4] + f"_{cov_mode}.pkl"
@@ -70,7 +70,7 @@ def path_to_results(task_name, result_name, num_obs, n_train, n_obs, cov_mode=No
 
 def load_samples(task_name, n_train, n_obs, cov_mode=None, sampler="euler", langevin=False, clip=False):
     samples = {}
-    for num_obs in [1]: #NUM_OBSERVATION_LIST:
+    for num_obs in NUM_OBSERVATION_LIST:
         filename = path_to_results(task_name, "posterior_samples", num_obs, n_train, n_obs, cov_mode, sampler, langevin, clip)
         samples[num_obs] = torch.load(filename)
     return samples
@@ -90,7 +90,7 @@ def load_reference_samples(task_name, n_obs):
 
 # compute mean distance to true theta over all observations
 def compute_mean_distance(
-    metric, task_name, n_train, n_obs, cov_mode=None, langevin=False, clip=False, percentage=0, load=False, prec_ignore_nums=None
+    metric, task_name, n_train, n_obs, cov_mode=None, sampler="euler", langevin=False, clip=False, load=False, prec_ignore_nums=None
 ):  
 
     samples = load_samples(
@@ -100,10 +100,11 @@ def compute_mean_distance(
         cov_mode=cov_mode,
         langevin=langevin,
         clip=clip,
+        sampler=sampler,
     )
 
     # load results if already computed
-    save_path = PATH_EXPERIMENT + f"{task_name}/metrics_new/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+    save_path = PATH_EXPERIMENT + f"{task_name}/metrics_{sampler}/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
     if load and os.path.exists(filename):
@@ -167,7 +168,7 @@ def compute_mean_distance(
                 # mmd to dirac
                 theta_true = torch.load(PATH_EXPERIMENT + f"{task_name}/theta_true_list_prior.pkl")[num_obs-1]
                 dist = dist_to_dirac(
-                    samples[num_obs], theta_true, percentage=percentage, scaled=True,
+                    samples[num_obs], theta_true, percentage=0, scaled=True,
                 )["mmd"]
 
                 dist_list.append(dist)
@@ -181,6 +182,7 @@ def compute_mean_distance(
         print()
         print(f"Computed {metric} for {len(dist_list)} observations.")
         print(f"NaNs in {len(ignore_nums)} observations: {ignore_nums}.")
+    
     dist_dict = {
         "mean": torch.tensor(dist_list).mean(),
         "std": torch.tensor(dist_list).std(),
@@ -194,6 +196,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--losses", action="store_true")
+    parser.add_argument("--sampler", type=str, required=True)
     parser.add_argument("--compute_dist", action="store_true")
     parser.add_argument("--plot_dist", action="store_true")
     parser.add_argument("--plot_samples", action="store_true")
@@ -276,15 +279,18 @@ if __name__ == "__main__":
                 for n_train in N_TRAIN:
                     for n_obs in N_OBS:
                         for method in METHODS_STYLE.keys():
+                            if method == "JAC" and task_name == "slcp_good" and n_train == 30000: # NaNs in samples
+                                continue
                             dist, ignore_nums = compute_mean_distance(
                                 task_name=task_name,
                                 n_train=n_train,
                                 n_obs=n_obs,
                                 cov_mode=method.split("_")[0],
+                                sampler=args.sampler,
                                 langevin=True if "LANGEVIN" in method else False,
                                 clip=True if "clip" in method else False,
                                 metric=metric,
-                                load=True,
+                                load=False,
                             )
                             dist_mean = dist["mean"]
                             dist_std = dist["std"]
@@ -296,20 +302,20 @@ if __name__ == "__main__":
                                     if metric in ["swd", "mmd"] and method in ["GAUSS","LANGEVIN"] and num not in final_ignore_nums:
                                         final_ignore_nums.append(num)
             
-            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_{metric}_new.pkl")
+            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_{metric}_{args.sampler}.pkl")
             print()
             print(f"Ignored observations: {IGNORE_NUMS}")
             print()
         
         # final_ignore_nums.append(14) # for sir
-        torch.save(final_ignore_nums, PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_new.pkl")
+        torch.save(final_ignore_nums, PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_{args.sampler}.pkl")
         print()
         print(f"Final ignored observations: {final_ignore_nums}")
         print()
 
     if args.plot_dist:
 
-        prec_ignore_nums = torch.load(PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_new.pkl")
+        prec_ignore_nums = torch.load(PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_{args.sampler}.pkl")
         print()
         print(f"Ignored observations: {prec_ignore_nums}")
         print()
@@ -332,11 +338,14 @@ if __name__ == "__main__":
                     std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                     for n_train in N_TRAIN:
                         for method in METHODS_STYLE.keys():
+                            if method == "JAC" and task_name == "slcp_good" and n_train == 30000: # NaNs in samples
+                                continue
                             dist, _ = compute_mean_distance(
                                 task_name=task_name,
                                 n_train=n_train,
                                 n_obs=n_obs,
                                 cov_mode=method.split("_")[0],
+                                sampler=args.sampler,
                                 langevin=True if "LANGEVIN" in method else False,
                                 clip=True if "clip" in method else False,
                                 metric=metric,
@@ -406,8 +415,8 @@ if __name__ == "__main__":
             handles, labels = axs[0, 0].get_legend_handles_labels()
             plt.legend(handles, labels, loc="lower right")
 
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_final.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_{args.sampler}.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_{args.sampler}.pdf")
             plt.clf()
             
             # plot mean distance as function of n_obs
@@ -423,6 +432,8 @@ if __name__ == "__main__":
                     std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
                     for n_obs in N_OBS:
                         for method in METHODS_STYLE.keys():
+                            if method == "JAC" and task_name == "slcp_good" and n_train == 30000: # NaNs in samples
+                                continue
                             dist, ignore_nums = compute_mean_distance(
                                 task_name=task_name,
                                 n_train=n_train,
@@ -493,8 +504,8 @@ if __name__ == "__main__":
             handles, labels = axs[0, 0].get_legend_handles_labels()
             plt.legend(handles, labels, loc="lower right")
 
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_final.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_{args.sampler}.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_{args.sampler}.pdf")
             plt.clf()
 
 
@@ -529,8 +540,8 @@ if __name__ == "__main__":
 
         #         for i, n_obs in enumerate(N_OBS):
         #             samples_ref = load_reference_samples(task_name, n_obs)
-        #             samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-        #             # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False)
+        #             samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False, sampler=args.sampler)
+        #             # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False, sampler=args.sampler)
         #             samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
         #             axs[j, i].scatter(samples_ref[num_obs][:, 0], samples_ref[num_obs][:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
         #             axs[j, i].scatter(samples_gauss[num_obs][:, 0], samples_gauss[num_obs][:, 1], alpha=0.5, label=f"GAUSS", color="blue")
@@ -544,8 +555,8 @@ if __name__ == "__main__":
         #             if i == 0:
         #                 axs[j, i].set_ylabel(f"num_obs = {num_obs}")
         #     plt.legend()
-        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.png")
-        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
+        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}_{args.sampler}.png")
+        #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}_{args.sampler}.pdf")
         #     plt.clf()
 
         # # Pairplot for all methods with increasing n_obs
@@ -558,7 +569,7 @@ if __name__ == "__main__":
         #             if method == "TRUE":
         #                 samples.append(load_reference_samples(task_name, n_obs)[num_obs])
         #             else:
-        #                 samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
+        #                 samples.append(load_samples(task_name, n_train, n_obs=n_obs, cov_mode=method.split("_")[0], sampler=args.sampler, langevin=True if "LANGEVIN" in method else False, clip=True if "clip" in method else False)[num_obs])
 
         #         colors = cm.get_cmap(color)(np.linspace(1, 0.2, len(samples))).tolist()
         #         labels = [rf"$n = {n_obs}$" for n_obs in N_OBS]
@@ -573,15 +584,15 @@ if __name__ == "__main__":
         #             size=5.5,
         #             title = METHODS_STYLE[method]["label"] if method != "TRUE" else "TRUE",
         #         )
-        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png")
-        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf")
+        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}_{args.sampler}.png")
+        #         plt.savefig(save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}_{args.sampler}.pdf")
         #         plt.clf()
 
         # Analytical vs. algorithms pairplot for all n_obs
         from plot_utils import pairplot_with_groundtruth_md
         for n_obs in N_OBS:
             samples_ref = load_reference_samples(task_name, n_obs)
-            samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False, sampler="ddim")
+            samples_gauss = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="GAUSS", clip=False, sampler=args.sampler)
             # samples_jac_clip = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=True)
             samples_langevin = load_samples(task_name, n_train, n_obs=n_obs, langevin=True, clip=False)
             for num_obs in [1]: #np.arange(1, 26):
@@ -596,8 +607,8 @@ if __name__ == "__main__":
                     ignore_xylabels=True,
                     size=5.5,
                 )
-                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_ddim.png")
-                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_ddim.pdf")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_{args.sampler}.png")
+                plt.savefig(save_path + f"pairplot_n_train_{n_train}_num_{num_obs}_n_obs_{n_obs}_{args.sampler}.pdf")
                 plt.clf()
                 
     
