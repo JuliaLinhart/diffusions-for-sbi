@@ -6,7 +6,7 @@ import warnings
 import torch
 import numpy as np
 
-from tasks.sbibm.task import Task, get_mcmc_samples, get_predictive_sample
+from tasks.sbibm.task_mcmc import MCMCTask, get_mcmc_samples, get_predictive_sample
 
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -56,7 +56,7 @@ def model(
             )
 
 
-class SLCP(Task):
+class SLCP(MCMCTask):
     def __init__(
         self,
         prior_params={"low": -3.0, "high": 3.0},
@@ -67,21 +67,13 @@ class SLCP(Task):
 
         self.num_samples_per_case = num_samples_per_case
 
-    def _prior_dist(self, torch_version):
-        if torch_version:
-            return torch.distributions.Uniform(
-                low=torch.tensor([self.prior_params["low"] for _ in range(5)]).float(),
-                high=torch.tensor(
-                    [self.prior_params["high"] for _ in range(5)]
-                ).float(),
-            )
-        else:
-            return dist.Uniform(
-                low=jnp.array([self.prior_params["low"] for _ in range(5)]),
-                high=jnp.array([self.prior_params["high"] for _ in range(5)]),
-            )
+    def prior(self):
+        return torch.distributions.Uniform(
+            low=torch.tensor([self.prior_params["low"] for _ in range(5)]).float(),
+            high=torch.tensor([self.prior_params["high"] for _ in range(5)]).float(),
+        )
 
-    def _simulate_one(self, rng_key, theta, n_obs, torch_version):
+    def _simulate_one(self, rng_key, theta, n_obs):
         # theta shape must be (5,) to iterate over the conditions
         if len(theta.shape) > 1:
             theta = theta[0]
@@ -97,12 +89,9 @@ class SLCP(Task):
             rng_key=rng_key, model=self.model, cond=cond, n_obs=n_obs
         )
 
-        if torch_version:
-            x = torch.from_numpy(np.asarray(x)).float()
-
         return x  # shape (n_obs, dim_x=8)
 
-    def _mcmc_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples):
+    def _posterior_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples):
         # prepare the data object for numpyro
         data = {}
         for i in range(n_obs):
@@ -154,8 +143,6 @@ class SLCP(Task):
         # keep only num_samples
         samples = samples[:num_samples]
 
-        if self.torch_version:
-            samples = torch.from_numpy(np.asarray(samples)).float()
         return samples
 
 
@@ -185,15 +172,15 @@ if __name__ == "__main__":
 
     rng_key = random.PRNGKey(1)
 
-    slcp = SLCP(torch_version=True, save_path=args.save_path, num_samples_per_case=2500)
+    slcp = SLCP(save_path=args.save_path, num_samples_per_case=2500)
     os.makedirs(slcp.save_path, exist_ok=True)
 
     if args.train_data:
-        data = slcp.generate_training_data(rng_key, n_simulations=50_000)
+        data = slcp.generate_training_data(rng_key=rng_key, n_simulations=50_000)
         print(data["x"].shape, data["theta"].shape)
 
     if args.reference_data:
-        ref_data = slcp.generate_reference_data(rng_key)
+        ref_data = slcp.generate_reference_data(rng_key=rng_key)
         print(ref_data[0].shape, ref_data[1][1].shape)
 
     if args.reference_posterior:
@@ -202,7 +189,7 @@ if __name__ == "__main__":
         for num_obs in num_obs_list:
             for n_obs in n_obs_list:
                 samples = slcp.generate_reference_posterior_samples(
-                    rng_key, num_obs, n_obs, num_samples=1_000
+                    rng_key=rng_key, num_obs=num_obs, n_obs=n_obs, num_samples=1_000
                 )
                 print(samples.shape)
 

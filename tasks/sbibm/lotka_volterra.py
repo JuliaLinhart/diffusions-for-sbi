@@ -6,7 +6,7 @@ import numpyro.distributions as dist
 from jax import random
 import torch
 
-from tasks.sbibm.task import Task, get_mcmc_samples, get_predictive_sample
+from tasks.sbibm.task_mcmc import MCMCTask, get_mcmc_samples, get_predictive_sample
 
 
 def dz_dt(z, t, theta):
@@ -79,7 +79,7 @@ def model(
             )
 
 
-class LotkaVolterra(Task):
+class LotkaVolterra(MCMCTask):
     def __init__(
         self,
         prior_params={
@@ -95,19 +95,13 @@ class LotkaVolterra(Task):
 
         self.summary = summary
 
-    def _prior_dist(self, torch_version):
-        if torch_version:
-            return torch.distributions.LogNormal(
-                loc=torch.tensor(self.prior_params["loc"]),
-                scale=torch.tensor(self.prior_params["scale"]),
-            )
-        else:
-            return dist.LogNormal(
-                loc=jnp.array(self.prior_params["loc"]),
-                scale=jnp.array(self.prior_params["scale"]),
-            )
+    def prior(self):
+        return torch.distributions.LogNormal(
+            loc=torch.tensor(self.prior_params["loc"]),
+            scale=torch.tensor(self.prior_params["scale"]),
+        )
 
-    def _simulate_one(self, rng_key, theta, n_obs, torch_version):
+    def _simulate_one(self, rng_key, theta, n_obs):
         x = get_predictive_sample(
             rng_key=rng_key,
             model=self.model,
@@ -115,13 +109,9 @@ class LotkaVolterra(Task):
             n_obs=n_obs,
             summary=self.summary,
         )
-
-        if torch_version:
-            x = torch.from_numpy(np.asarray(x)).float()
-
         return x  # shape (n_obs, dim_x=20)
 
-    def _mcmc_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples):
+    def _posterior_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples):
         samples = get_mcmc_samples(
             rng_key=rng_key,
             model=self.model,
@@ -131,9 +121,6 @@ class LotkaVolterra(Task):
             num_samples=num_samples,
             summary=self.summary,
         )["theta"]
-
-        if self.torch_version:
-            samples = torch.from_numpy(np.asarray(samples)).float()
         return samples
 
 
@@ -163,15 +150,15 @@ if __name__ == "__main__":
 
     rng_key = random.PRNGKey(1)
 
-    lv = LotkaVolterra(torch_version=True, save_path=args.save_path)
+    lv = LotkaVolterra(save_path=args.save_path)
     os.makedirs(lv.save_path, exist_ok=True)
 
     if args.train_data:
-        data = lv.generate_training_data(rng_key, n_simulations=50_000)
+        data = lv.generate_training_data(rng_key=rng_key, n_simulations=50_000)
         print(data["theta"].shape, data["x"].shape)
 
     if args.reference_data:
-        ref_data = lv.generate_reference_data(rng_key)
+        ref_data = lv.generate_reference_data(rng_key=rng_key)
         print(ref_data[0].shape, ref_data[1][1].shape)
 
     if args.reference_posterior:
@@ -180,11 +167,11 @@ if __name__ == "__main__":
         for num_obs in num_obs_list:
             for n_obs in n_obs_list:
                 samples = lv.generate_reference_posterior_samples(
-                    rng_key, num_obs, n_obs, num_samples=1_000
+                    rng_key=rng_key, num_obs=num_obs, n_obs=n_obs, num_samples=1_000
                 )
                 print(samples.shape)
 
     # # simulate one check
     # theta = lv.prior().sample((1,))
-    # x = lv.simulator(rng_key, theta, n_obs=1)
+    # x = lv.simulator(rng_key, theta, n_obs=8)
     # print(x.shape, theta.shape)
