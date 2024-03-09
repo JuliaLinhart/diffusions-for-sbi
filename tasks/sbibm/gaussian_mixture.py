@@ -74,8 +74,7 @@ class GaussianMixture(MCMCTask):
             data=x_star,
             num_samples=num_samples,
             n_obs=n_obs,
-        )["theta"][:, 0, :]
-
+        )["theta"]
         return samples
 
 
@@ -109,7 +108,7 @@ if __name__ == "__main__":
     os.makedirs(gmm.save_path, exist_ok=True)
 
     if args.train_data:
-        data = gmm.generate_training_data(rng_key=rng_key, n_simulations=50_000)
+        data = gmm.generate_training_data(rng_key=rng_key, n_simulations=50)
         print("Training data:", data["x"].shape, data["theta"].shape)
 
     if args.reference_data:
@@ -122,17 +121,32 @@ if __name__ == "__main__":
         for num_obs in num_obs_list:
             for n_obs in n_obs_list:
                 samples = gmm.generate_reference_posterior_samples(
-                    rng_key=rng_key, num_obs=num_obs, n_obs=n_obs, num_samples=1_000
+                    rng_key=rng_key, num_obs=num_obs, n_obs=n_obs, num_samples=5
                 )
                 print(samples.shape)
 
     # # simulate one check
-    # theta = gmm.prior().sample((1,))
+    theta = gmm.prior().sample((1,))
     # x = gmm.simulator(rng_key, theta, n_obs=1)
     # print(x.shape, theta.shape)
+                
+    # simulator distribution check
+    from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+    gmm_sbibm = GaussianMixtureSBIBM(dim=10)
+    x_sbibm = [gmm_sbibm.get_simulator()(theta) for _ in range(1000)]
+    x_sbibm = torch.concatenate(x_sbibm, axis=0)
+    x_jl = gmm.simulator(rng_key, theta, n_obs=1000)
+    print(x_sbibm.shape, x_jl.shape)
+
+    import matplotlib.pyplot as plt
+    plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+    plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+    plt.legend()
+    plt.savefig('gaussian_mixture_comparison.png')
+    plt.clf()
 
     # x_star = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/x_obs_100_num_1_new.pkl')
-    # theta_star = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/theta_true_list.pkl')[0]
+    # theta_star = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/theta_true_list.pkl')[0][0]
     # samples_sbibm = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/reference_posterior_samples/true_posterior_samples_num_1_n_obs_8.pkl')
     # samples_jl = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=8, num_samples=1000)
 

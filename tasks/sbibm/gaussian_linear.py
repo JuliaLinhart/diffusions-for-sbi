@@ -34,6 +34,7 @@ class GaussianLinear(Task):
         return torch.distributions.MultivariateNormal(
             loc=self.prior_params["loc"],
             precision_matrix=self.prior_params["precision_matrix"],
+            validate_args=False,
         )
 
     def simulator(self, theta, n_obs=1):
@@ -73,7 +74,7 @@ class GaussianLinear(Task):
 
         return posterior
 
-    def _posterior_sampler(self, x_star, theta_star, n_obs, num_samples):
+    def _posterior_sampler(self, x_star, n_obs, num_samples, **kwargs):
         return self._posterior_dist(x_star, n_obs).sample((num_samples,))
 
     def sample_reference_posterior(self, x_star, n_obs=1, num_samples=1000, **kwargs):
@@ -81,7 +82,6 @@ class GaussianLinear(Task):
             x_star=x_star,
             n_obs=n_obs,
             num_samples=num_samples,
-            theta_star=None,
             **kwargs,
         )
 

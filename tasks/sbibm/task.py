@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 import os
 
 from tqdm import tqdm
@@ -54,6 +53,7 @@ class Task:
         if save:
             filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
             print("Saving at", filename)
+            os.makedirs(self.save_path, exist_ok=True)
             torch.save(dataset_train, filename)
 
         return dataset_train
@@ -72,6 +72,7 @@ class Task:
             theta_star = prior.sample((nb_obs,))
             if save:
                 print("Saving at", filename)
+                os.makedirs(self.save_path, exist_ok=True)
                 torch.save(theta_star, filename)
         else:
             theta_star = torch.load(filename)
@@ -90,18 +91,6 @@ class Task:
 
         return theta_star, x_star
 
-    def get_reference_parameters(self):
-        filename = f"{self.save_path}theta_true_list.pkl"
-        theta_star = torch.load(filename)
-        return theta_star
-
-    def get_reference_observation(self, num_obs, n_repeat=100):
-        filename = (
-            f"{self.save_path}reference_observations/x_obs_{n_repeat}_num_{num_obs}.pkl"
-        )
-        x_star = torch.load(filename)
-        return x_star
-
     def generate_reference_posterior_samples(
         self, num_obs, n_obs, num_samples=1000, save=True, **kwargs
     ):
@@ -113,9 +102,9 @@ class Task:
         )
 
         # reference data for num_obs
-        theta_star = self.get_reference_parameters()[num_obs - 1]
-        x_star = self.get_reference_observation(num_obs=num_obs)
-
+        theta_star = self.get_reference_parameters(verbose=False)[num_obs - 1]
+        x_star = self.get_reference_observation(num_obs=num_obs, verbose=False)
+    
         # sample from the posterior
         samples = self.sample_reference_posterior(
             x_star=x_star,
@@ -131,8 +120,53 @@ class Task:
             print("Saving at", filename)
             torch.save(samples, filename)
         return samples
+    
+    def get_training_data(self, n_simulations):
+        filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
+        try:
+            print(f"Loading training data from {filename}")
+            dataset_train = torch.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+            "Training data not found. Please run `generate_training_data` first."
+        )
+        return dataset_train
+    
+    def get_reference_parameters(self, verbose=True):
+        filename = f"{self.save_path}theta_true_list.pkl"
+        try:
+            if verbose:
+                print(f"Loading reference parameters from {filename}")
+            theta_star = torch.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+            "Reference parameters not found. Please run `generate_reference_data` first."
+        )
+        return theta_star
+
+    def get_reference_observation(self, num_obs, n_repeat=100, verbose=True):
+        filename = (
+            f"{self.save_path}reference_observations/x_obs_{n_repeat}_num_{num_obs}.pkl"
+        )
+        try:
+            if verbose:
+                print(f"Loading reference observations from {filename}")
+            x_star = torch.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+            "Reference observations not found. Please run `generate_reference_data` first."
+        )
+        return x_star
 
     def get_reference_posterior_samples(self, num_obs, n_obs):
         filename = f"{self.save_path}reference_posterior_samples/true_posterior_samples_num_{num_obs}_n_obs_{n_obs}.pkl"
-        samples = torch.load(filename)
+        try:
+            print(f"Loading reference posterior samples from {filename}")
+            samples = torch.load(filename)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+            "Reference posterior samples not found. Please run `generate_reference_posterior_samples` first."
+        )
         return samples
+        
+   
