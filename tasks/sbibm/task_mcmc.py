@@ -18,13 +18,15 @@ class MCMCTask(Task):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self.model = model
+        if "prior_params" in kwargs:
+            if kwargs["prior_params"] is not None:
+                self.model = partial(model, prior_params=self.prior_params)
 
-        self.model = partial(model, prior_params=self.prior_params)
-
-    def _simulate_one(self, rng_key, theta, n_obs):
+    def _simulate_one(self, rng_key, theta, n_obs, **kwargs):
         raise NotImplementedError
 
-    def simulator(self, rng_key, theta, n_obs=1):
+    def simulator(self, rng_key, theta, n_obs=1, **kwargs):
         # ensure theta is a jax array
         if isinstance(theta, torch.Tensor):
             theta = theta.numpy()
@@ -35,6 +37,7 @@ class MCMCTask(Task):
             rng_key=rng_key,
             theta=theta,
             n_obs=n_obs,
+            **kwargs
         )
 
         # convert x to torch

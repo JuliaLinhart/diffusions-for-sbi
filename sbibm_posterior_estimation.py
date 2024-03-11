@@ -35,17 +35,20 @@ def setup(task, all=True, train_data=False, reference_data=False, reference_post
             reference_data = True
             reference_posterior = True
         if train_data:
-            task.generate_training_data(n_simulations=MAX_N_TRAIN, **kwargs)
+            data = task.generate_training_data(n_simulations=MAX_N_TRAIN, **kwargs)
+            print("Training data:", data["x"].shape, data["theta"].shape)
         if reference_data:
-            task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
+            data = task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
+            print("Reference data:", data[0].shape, data[1][1].shape)
         if reference_posterior:
             num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
             n_obs_list = N_OBS_LIST
             for num_obs in num_obs_list:
                 for n_obs in n_obs_list:
-                    task.generate_reference_posterior_samples(
+                    data = task.generate_reference_posterior_samples(
                         num_obs=num_obs, n_obs=n_obs, num_samples=NUM_SAMPLES, **kwargs
                     )
+            print("Posterior samples:", data.shape)
         return
 
 def run_train_sgm(
@@ -59,7 +62,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:0"
 
     # Prepare training data
     # normalize theta
@@ -153,7 +156,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -328,7 +331,7 @@ if __name__ == "__main__":
         "--task",
         type=str,
         required=True,
-        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture"],
+        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture", "two_moons", "bernoulli_glm", "bernoulli_glm_raw"],
         help="task name",
     )
     parser.add_argument(
@@ -502,7 +505,7 @@ if __name__ == "__main__":
                 "x_train_mean": x_train_mean,  # for (un)normalization
                 "x_train_std": x_train_std,  # for (un)normalization
                 "prior": task.prior(), # for score function
-                "prior_type": "uniform" if args.task == "slcp" else "gaussian", 
+                "prior_type": "uniform" if args.task in ["slcp", "two_moons"] else "gaussian", 
                 "cov_mode": args.cov_mode,
                 "clip": args.clip,  # for clipping
                 "sampler_type": args.sampler,

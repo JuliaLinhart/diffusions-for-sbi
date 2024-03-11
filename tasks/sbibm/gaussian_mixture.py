@@ -40,7 +40,8 @@ class GaussianMixture(MCMCTask):
             name="gaussian_mixture", prior_params=prior_params, model=model, **kwargs
         )
 
-        self.dim = dim
+        self.dim_theta = dim
+        self.dim_x = dim
 
         self.simulator_params = {
             "mixture_locs_factor": torch.tensor([1.0, 1.0]),
@@ -51,9 +52,9 @@ class GaussianMixture(MCMCTask):
     def prior(self):
         return torch.distributions.MultivariateNormal(
             loc=torch.tensor(
-                [self.prior_params["loc"] for _ in range(self.dim)]
+                [self.prior_params["loc"] for _ in range(self.dim_theta)]
             ).float(),
-            covariance_matrix=torch.eye(self.dim) * self.prior_params["scale"],
+            covariance_matrix=torch.eye(self.dim_theta) * self.prior_params["scale"],
         )
 
     def _simulate_one(self, rng_key, theta, n_obs):
@@ -62,7 +63,7 @@ class GaussianMixture(MCMCTask):
             model=self.model,
             cond={"theta": theta},
             n_obs=n_obs,
-            dim=self.dim,
+            dim=self.dim_theta,
         )
         return x  # shape (n_obs, dim_x=10)
 
@@ -133,6 +134,7 @@ if __name__ == "__main__":
     # simulator distribution check
     from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
     gmm_sbibm = GaussianMixtureSBIBM(dim=10)
+    gmm_sbibm.prior_dist = gmm.prior()
     x_sbibm = [gmm_sbibm.get_simulator()(theta) for _ in range(1000)]
     x_sbibm = torch.concatenate(x_sbibm, axis=0)
     x_jl = gmm.simulator(rng_key, theta, n_obs=1000)
@@ -142,17 +144,28 @@ if __name__ == "__main__":
     plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
     plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
     plt.legend()
-    plt.savefig('gaussian_mixture_comparison.png')
+    plt.savefig('gmm_sim_check.png')
     plt.clf()
 
-    # x_star = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/x_obs_100_num_1_new.pkl')
-    # theta_star = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/theta_true_list.pkl')[0][0]
-    # samples_sbibm = torch.load('/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/gaussian_mixture/reference_posterior_samples/true_posterior_samples_num_1_n_obs_8.pkl')
-    # samples_jl = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=8, num_samples=1000)
+    
+
+    # # reference posterior check
+    # from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+    # gmm_sbibm = GaussianMixtureSBIBM(dim=10)
+
+    # x_star = gmm.get_reference_observation(num_obs=2)
+    # theta_star = gmm.get_reference_parameters()[1]
+    # samples_sbibm = gmm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
+    # samples_jl = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+    # # samples_jl_30 = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
     # print(samples_sbibm.shape, samples_jl.shape)
     # import matplotlib.pyplot as plt
-    # plt.scatter(samples_sbibm[:,1], samples_sbibm[:,2], label='sbibm')
-    # plt.scatter(samples_jl[:,1], samples_jl[:,2], label='jl')
-    # plt.savefig('gaussian_mixture_comparison.png')
+    # plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
+    # plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+    # # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
+    # plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+    # plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
+    # plt.legend()
+    # plt.savefig('gmm_post_check.png')
     # plt.clf()

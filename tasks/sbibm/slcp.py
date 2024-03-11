@@ -66,6 +66,8 @@ class SLCP(MCMCTask):
         super().__init__(name="slcp", prior_params=prior_params, model=model, **kwargs)
 
         self.num_samples_per_case = num_samples_per_case
+        self.dim_theta = 5
+        self.dim_x = 8
 
     def prior(self):
         return torch.distributions.Uniform(
@@ -105,10 +107,10 @@ class SLCP(MCMCTask):
             init_value[f"theta_{i}"] = theta_star[i - 1]
 
         init_values_per_case = {
-            "case_1": init_value,
-            "case_2": init_value,
-            "case_3": init_value,
-            "case_4": init_value,
+            "case_1": init_value.copy(),
+            "case_2": init_value.copy(),
+            "case_3": init_value.copy(),
+            "case_4": init_value.copy(),
         }
         init_values_per_case["case_2"]["theta_3"] = -init_value["theta_3"]
         init_values_per_case["case_3"]["theta_4"] = -init_value["theta_4"]
@@ -116,11 +118,11 @@ class SLCP(MCMCTask):
         init_values_per_case["case_4"]["theta_4"] = -init_value["theta_4"]
 
         samples_mcmc = {}
-        for case, init_value in init_values_per_case.items():
+        for case, init_values in init_values_per_case.items():
             samples_ = get_mcmc_samples(
                 rng_key=rng_key,
                 model=self.model,
-                init_value=init_value,
+                init_value=init_values,
                 data=data,
                 num_samples=self.num_samples_per_case,
                 n_obs=n_obs,
@@ -172,7 +174,7 @@ if __name__ == "__main__":
 
     rng_key = random.PRNGKey(1)
 
-    slcp = SLCP(save_path=args.save_path, num_samples_per_case=2500)
+    slcp = SLCP(save_path=args.save_path, num_samples_per_case=250)
     os.makedirs(slcp.save_path, exist_ok=True)
 
     if args.train_data:
@@ -197,3 +199,43 @@ if __name__ == "__main__":
     # theta = slcp.prior().sample((1,))
     # x = slcp.simulator(rng_key, theta, n_obs=1)
     # print(x.shape, theta.shape)
+
+    # # simulator distribution check
+    # import sbibm
+    # slcp_sbibm = sbibm.get_task("slcp")
+    # theta = slcp.prior().sample((1,))
+    # x_sbibm = [slcp_sbibm.get_simulator()(theta) for _ in range(1000)]
+    # x_sbibm = torch.concatenate(x_sbibm, axis=0)
+    # x_jl = slcp.simulator(rng_key, theta, n_obs=1000)
+    # print(x_sbibm.shape, x_jl.shape)
+
+    # import matplotlib.pyplot as plt
+    # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+    # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+    # plt.legend()
+    # plt.savefig('slcp_sim_check.png')
+    # plt.clf()
+
+    # reference posterior check
+    import sbibm
+    slcp_sbibm = sbibm.get_task("slcp")
+    x_star = slcp_sbibm.get_observation(1)
+    theta_star = slcp_sbibm.get_true_parameters(1)
+    samples_sbibm = slcp_sbibm.get_reference_posterior_samples(1)
+
+    if x_star.ndim == 1:
+        x_star = x_star[None, :]
+    if theta_star.ndim > 1:
+        theta_star = theta_star[0]
+    samples_jl = slcp.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+    # samples_jl_30 = slcp.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
+
+    print(samples_sbibm.shape, samples_jl.shape)
+    import matplotlib.pyplot as plt
+    plt.scatter(samples_sbibm[:,1], samples_sbibm[:,2], label='sbibm')
+    plt.scatter(samples_jl[:,1], samples_jl[:,2], label='jl')
+    # plt.scatter(samples_jl_30[:,1], samples_jl_30[:,2], label='jl_30')
+    plt.scatter(theta_star[1], theta_star[2], label='theta_star')
+    plt.legend()
+    plt.savefig('slcp_post_check.png')
+    plt.clf()

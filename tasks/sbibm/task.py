@@ -128,7 +128,7 @@ class Task:
             dataset_train = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            "Training data not found. Please run `generate_training_data` first."
+            f"Training data not found {self.save_path}. Please run `generate_training_data` first."
         )
         return dataset_train
     
@@ -140,7 +140,7 @@ class Task:
             theta_star = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            "Reference parameters not found. Please run `generate_reference_data` first."
+            f"Reference parameters not found at {self.save_path}. Please run `generate_reference_data` first."
         )
         return theta_star
 
@@ -154,7 +154,7 @@ class Task:
             x_star = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            "Reference observations not found. Please run `generate_reference_data` first."
+            f"Reference observations not found at {self.save_path}. Please run `generate_reference_data` first."
         )
         return x_star
 
@@ -165,7 +165,7 @@ class Task:
             samples = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            "Reference posterior samples not found. Please run `generate_reference_posterior_samples` first."
+            f"Reference posterior samples not found at {self.save_path}. Please run `generate_reference_posterior_samples` first."
         )
         return samples
         

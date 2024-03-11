@@ -12,19 +12,13 @@ def model(
         prior_params={"bound": 1.},
         x_obs=None,
         n_obs=1,
+        predictive=False,
 ):  
-    theta_1 = numpyro.sample(
-        "theta_1",
+    theta = numpyro.sample(
+        "theta",
         dist.Uniform(
-            low=-prior_params["bound"],
-            high=prior_params["bound"],
-        ),
-    )
-    theta_2 = numpyro.sample(
-        "theta_2",
-        dist.Uniform(
-            low=-prior_params["bound"],
-            high=prior_params["bound"],
+            low=jnp.ones(2) * -prior_params["bound"],
+            high=jnp.ones(2) * prior_params["bound"],
         ),
     )
 
@@ -51,15 +45,17 @@ def model(
             ang = jnp.array([-math.pi / 4.0])
             c = jnp.cos(ang)
             s = jnp.sin(ang)
-            z0 = c * theta_1 - s * theta_2
-            z1 = s * theta_1 + c * theta_2
+            z0 = c * theta[0] - s * theta[1]
+            z1 = s * theta[0] + c * theta[1]
 
             transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1,-1)
             mvn = dist.MultivariateNormal(
                 loc=transformed_value,
                 covariance_matrix=jnp.eye(2) * 0.0001,
             )
-            numpyro.sample(f"obs_{i}", mvn)
+            delta = dist.Delta(transformed_value)
+            sample_dist = delta if predictive else mvn
+            numpyro.sample(f"obs_{i}", sample_dist)
     else:
         for i in range(n_obs):
             a = numpyro.sample(f"a_{i}", a_dist)
@@ -74,15 +70,17 @@ def model(
             ang = jnp.array([-math.pi / 4.0])
             c = jnp.cos(ang)
             s = jnp.sin(ang)
-            z0 = c * theta_1 - s * theta_2
-            z1 = s * theta_1 + c * theta_2
+            z0 = c * theta[0] - s * theta[1]
+            z1 = s * theta[0] + c * theta[1]
 
             transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1,-1)
             mvn = dist.MultivariateNormal(
                 loc=transformed_value,
-                covariance_matrix=jnp.eye(2) * 0.0001,
+                covariance_matrix=jnp.eye(2) * 1e-6,
             )
-            numpyro.sample(f"obs_{i}", mvn, obs=x_obs[f"obs_{i}"])
+            delta = dist.Delta(transformed_value)
+            sample_dist = delta if predictive else mvn
+            numpyro.sample(f"obs_{i}", sample_dist, obs=x_obs[f"obs_{i}"])
     
 
 class TwoMoons(MCMCTask):
@@ -98,6 +96,9 @@ class TwoMoons(MCMCTask):
         self.prior_params["high"] = torch.tensor([self.prior_params["bound"] for _ in range(2)]).float()
 
         self.num_samples_per_case = num_samples_per_case
+
+        self.dim_theta = 2
+        self.dim_x = 2
 
     def prior(self):
         return torch.distributions.Uniform(
@@ -115,6 +116,7 @@ class TwoMoons(MCMCTask):
             model=model,
             cond={"theta": theta},
             n_obs=n_obs,
+            predictive=True,
         )
         return x  # shape (n_obs, dim_x=2)
     
@@ -136,30 +138,25 @@ class TwoMoons(MCMCTask):
         q_0 = - x_star[0, 0]
         q_1 = x_star[0, 1]
 
-        init_1 = c * q_0 - s * q_1
-        init_2 = s * q_0 + c * q_1
-        init_3 = -c * q_0 - s * q_1
-        init_4 = -s * q_0 + c * q_1
+        init_1 = jnp.array([c * q_0 - s * q_1, s * q_0 + c * q_1])[:,0]
+        init_2 = jnp.array([-c * q_0 - s * q_1, -s * q_0 + c * q_1])[:,0]
 
         init_values_per_case = {
-            "case_1": {"theta_1": init_1[0], "theta_2": init_2[0]},
-            "case_2": {"theta_1": init_3[0], "theta_2": init_4[0]},
+            "case_1": {"theta": init_1},
+            "case_2": {"theta": init_2},
         }
 
         # sample from the posterior
         samples_mcmc = {}
         for case, init_value in init_values_per_case.items():
-            samples_ = get_mcmc_samples(
+            samples_mcmc[case] = get_mcmc_samples(
                 rng_key=rng_key,
                 model=self.model,
                 init_value=init_value,
                 data=data,
                 num_samples=self.num_samples_per_case,
                 n_obs=n_obs,
-            )
-            samples_mcmc[case] = jnp.stack(
-                [samples_[f"theta_{i+1}"] for i in range(2)]
-            ).T
+            )["theta"]
 
         samples = jnp.concatenate(
             [
@@ -231,6 +228,7 @@ if __name__ == "__main__":
     # # simulator distribution check
     # import sbibm
     # tm_sbibm = sbibm.get_task("two_moons")
+    # theta = two_moons.prior().sample((1,))
     # x_sbibm = [tm_sbibm.get_simulator()(theta) for _ in range(1000)]
     # x_sbibm = torch.concatenate(x_sbibm, axis=0)
     # x_jl = two_moons.simulator(rng_key, theta, n_obs=1000)
@@ -240,23 +238,26 @@ if __name__ == "__main__":
     # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
     # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
     # plt.legend()
-    # plt.savefig('two_moons_comparison.png')
+    # plt.savefig('two_moons_sim_check.png')
     # plt.clf()
 
-    import sbibm
-    tm_sbibm = sbibm.get_task("two_moons")
+    # # reference posterior check
+    # import sbibm
+    # tm_sbibm = sbibm.get_task("two_moons")
 
-    x_star = two_moons.get_reference_observation(num_obs=1)
-    theta_star = two_moons.get_reference_parameters()[0]
-    samples_sbibm = tm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=1)
-    samples_jl = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+    # x_star = two_moons.get_reference_observation(num_obs=2)
+    # theta_star = two_moons.get_reference_parameters()[1]
+    # samples_sbibm = tm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
+    # samples_jl = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+    # # samples_jl_30 = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
-    print(samples_sbibm.shape, samples_jl.shape)
-    import matplotlib.pyplot as plt
-    plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-    plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
-    plt.scatter(theta_star[0], theta_star[1], label='theta_star')
-    plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
-    plt.legend()
-    plt.savefig('two_moons_comparison.png')
-    plt.clf()
+    # print(samples_sbibm.shape, samples_jl.shape)
+    # import matplotlib.pyplot as plt
+    # plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
+    # plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+    # # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
+    # plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+    # plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
+    # plt.legend()
+    # plt.savefig('two_moons_post_check.png')
+    # plt.clf()
