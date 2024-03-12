@@ -12,18 +12,21 @@ def model(
     x_obs=None,
     n_obs=1,
     dim=10,
-):
-    theta = numpyro.sample(
-        "theta",
-        dist.MultivariateNormal(
+    uniform=False,
+):  
+    if uniform:
+        prior_dist = dist.Uniform(low = jnp.ones(dim) * -10.0, high = jnp.ones(dim) * 10.0)
+    else:
+        prior_dist = dist.MultivariateNormal(
             loc=jnp.ones(dim) * prior_params["loc"],
             covariance_matrix=jnp.eye(dim) * prior_params["scale"],
-        ),
-    )
+        )
+    theta = numpyro.sample("theta", prior_dist)
+
     mixing_dist = dist.Categorical(probs=jnp.ones(2) / 2.0)
     component_dists = [
-        dist.MultivariateNormal(loc=theta, covariance_matrix=jnp.eye(10) * 2.25),
-        dist.MultivariateNormal(loc=theta, covariance_matrix=jnp.eye(10) / 9.0),
+        dist.Normal(loc=theta, scale= jnp.array(2.25)).to_event(1),
+        dist.Normal(loc=theta, scale = jnp.array(1 / 9.0)).to_event(1),
     ]
     mixture = dist.MixtureGeneral(mixing_dist, component_dists)
     if x_obs is None:
@@ -35,27 +38,30 @@ def model(
 
 
 class GaussianMixture(MCMCTask):
-    def __init__(self, dim=10, prior_params={"loc": 0.0, "scale": 1.0}, **kwargs):
-        super().__init__(
-            name="gaussian_mixture", prior_params=prior_params, model=model, **kwargs
-        )
+    def __init__(self, dim=10, prior_params={"loc": 0.0, "scale": 1.0}, uniform=False, **kwargs):
 
         self.dim_theta = dim
         self.dim_x = dim
+        self.uniform = uniform
 
-        self.simulator_params = {
-            "mixture_locs_factor": torch.tensor([1.0, 1.0]),
-            "mixture_scales": torch.tensor([2.25, 1 / 9]),
-            "mixture_weights": torch.tensor([0.5, 0.5]),
-        }
+        name = "gaussian_mixture" if not uniform else "gaussian_mixture_uniform"
+        super().__init__(
+            name=name, prior_params=prior_params, model=model, **kwargs
+        )
 
     def prior(self):
-        return torch.distributions.MultivariateNormal(
-            loc=torch.tensor(
-                [self.prior_params["loc"] for _ in range(self.dim_theta)]
-            ).float(),
-            covariance_matrix=torch.eye(self.dim_theta) * self.prior_params["scale"],
-        )
+        if not self.uniform:
+            return torch.distributions.MultivariateNormal(
+                loc=torch.tensor(
+                    [self.prior_params["loc"] for _ in range(self.dim_theta)]
+                ).float(),
+                covariance_matrix=torch.eye(self.dim_theta) * self.prior_params["scale"],
+            )
+        else:
+            return torch.distributions.Uniform(
+                low = torch.ones(self.dim_theta) * -10.0,
+                high = torch.ones(self.dim_theta) * 10.0
+            )
 
     def _simulate_one(self, rng_key, theta, n_obs):
         x = get_predictive_sample(
@@ -64,6 +70,7 @@ class GaussianMixture(MCMCTask):
             cond={"theta": theta},
             n_obs=n_obs,
             dim=self.dim_theta,
+            uniform=self.uniform,
         )
         return x  # shape (n_obs, dim_x=10)
 
@@ -75,6 +82,8 @@ class GaussianMixture(MCMCTask):
             data=x_star,
             num_samples=num_samples,
             n_obs=n_obs,
+            dim=self.dim_theta,
+            uniform=self.uniform,
         )["theta"]
         return samples
 
@@ -99,6 +108,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
+    )
+    parser.add_argument(
+        "--check_sim", action="store_true", help="Check the simulator"
+    )
+    parser.add_argument(
+        "--check_post", action="store_true", help="Check the reference posterior"
     )
 
     args = parser.parse_args()
@@ -126,46 +141,51 @@ if __name__ == "__main__":
                 )
                 print(samples.shape)
 
-    # # simulate one check
-    theta = gmm.prior().sample((1,))
-    # x = gmm.simulator(rng_key, theta, n_obs=1)
-    # print(x.shape, theta.shape)
-                
-    # simulator distribution check
-    from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
-    gmm_sbibm = GaussianMixtureSBIBM(dim=10)
-    gmm_sbibm.prior_dist = gmm.prior()
-    x_sbibm = [gmm_sbibm.get_simulator()(theta) for _ in range(1000)]
-    x_sbibm = torch.concatenate(x_sbibm, axis=0)
-    x_jl = gmm.simulator(rng_key, theta, n_obs=1000)
-    print(x_sbibm.shape, x_jl.shape)
+    if args.check_sim:
+        # simulate one check
+        # theta = gmm.prior().sample((1,))
+        # x = gmm.simulator(rng_key, theta, n_obs=1)
+        # print(x.shape, theta.shape)
+                    
+        # simulator distribution check
+        from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+        gmm_sbibm = GaussianMixtureSBIBM(dim=10)
+        gmm_sbibm.simulator_params["mixture_scales"] = torch.tensor([2.25, 1/9.0])
 
-    import matplotlib.pyplot as plt
-    plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-    plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
-    plt.legend()
-    plt.savefig('gmm_sim_check.png')
-    plt.clf()
+        theta = gmm.prior().sample((1,))
+        x_sbibm = [gmm_sbibm.get_simulator()(theta) for _ in range(1000)]
+        x_sbibm = torch.concatenate(x_sbibm, axis=0)
+        x_jl = gmm.simulator(rng_key, theta, n_obs=1000)
+        print(x_sbibm.shape, x_jl.shape)
 
-    
+        import matplotlib.pyplot as plt
+        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        plt.legend()
+        plt.savefig('_checks/gmm_sim_check.png')
+        plt.clf()
 
-    # # reference posterior check
-    # from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
-    # gmm_sbibm = GaussianMixtureSBIBM(dim=10)
+    if args.check_post:
 
-    # x_star = gmm.get_reference_observation(num_obs=2)
-    # theta_star = gmm.get_reference_parameters()[1]
-    # samples_sbibm = gmm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
-    # samples_jl = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
-    # # samples_jl_30 = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
+        # reference posterior check
+        gmm = GaussianMixture(save_path=args.save_path, uniform=True) # uniform prior needed for comparison with sbibm
 
-    # print(samples_sbibm.shape, samples_jl.shape)
-    # import matplotlib.pyplot as plt
-    # plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-    # plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
-    # # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
-    # plt.scatter(theta_star[0], theta_star[1], label='theta_star')
-    # plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
-    # plt.legend()
-    # plt.savefig('gmm_post_check.png')
-    # plt.clf()
+        from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+        gmm_sbibm = GaussianMixtureSBIBM(dim=10) 
+        gmm_sbibm.simulator_params["mixture_scales"] = torch.tensor([2.25, 1/9.0])
+
+        x_star = gmm.get_reference_observation(num_obs=1)
+        theta_star = gmm.get_reference_parameters()[0]
+        samples_sbibm = gmm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star[0][None,:])
+        samples_jl = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        # samples_jl_30 = gmm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
+
+        print(samples_sbibm.shape, samples_jl.shape)
+        import matplotlib.pyplot as plt
+        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
+        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+        # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
+        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+        plt.legend()
+        plt.savefig('_checks/gmm_post_check.png')
+        plt.clf()

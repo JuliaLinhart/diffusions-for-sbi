@@ -207,6 +207,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--generate_stimulus", action="store_true", help="Generate stimulus"
     )
+    parser.add_argument(
+        "--check_sim", action="store_true", help="Check the simulator"
+    )
+    parser.add_argument(
+        "--check_post", action="store_true", help="Check the reference posterior"
+    )
 
     args = parser.parse_args()
 
@@ -237,48 +243,53 @@ if __name__ == "__main__":
                 )
                 print(samples.shape)
 
-    # # simulate one check
-    # theta = bglm.prior().sample((1,))
-    # x = bglm.simulator(rng_key, theta, n_obs=1)
-    # print(x.shape, theta.shape)
-                
-    # # simulator distribution check
-    # import sbibm
-    # name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
-    # bglm_sbibm = sbibm.get_task(name)
-    # theta = bglm.prior().sample((1,))
-    # x_sbibm = [bglm_sbibm.get_simulator()(theta) for _ in range(1000)]
-    # x_sbibm = torch.concatenate(x_sbibm, axis=0)
-    # x_jl = bglm.simulator(rng_key, theta, n_obs=1000)
-    # print(x_sbibm.shape, x_jl.shape)
+    if args.check_sim:
+        os.makedirs("_checks", exist_ok=True)
+        # # simulate one check
+        # theta = bglm.prior().sample((1,))
+        # x = bglm.simulator(rng_key, theta, n_obs=1)
+        # print(x.shape, theta.shape)
+                    
+        # simulator distribution check
+        import sbibm
+        name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
+        bglm_sbibm = sbibm.get_task(name)
+        theta = bglm.prior().sample((1,))
+        x_sbibm = [bglm_sbibm.get_simulator()(theta) for _ in range(1000)]
+        x_sbibm = torch.concatenate(x_sbibm, axis=0)
+        x_jl = bglm.simulator(rng_key, theta, n_obs=1000)
+        print(x_sbibm.shape, x_jl.shape)
 
-    # import matplotlib.pyplot as plt
-    # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-    # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
-    # plt.legend()
-    # plt.savefig(f'{name}_sim_check.png')
-    # plt.clf()
+        import matplotlib.pyplot as plt
+        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        plt.legend()
+        plt.savefig(f'_checks/{name}_sim_check.png')
+        plt.clf()
 
-    # # reference posterior check
-    # import sbibm
-    # name = "bernoulli_glm_raw" if args.summary == "raw" else "bernoulli_glm"
-    # bglm_sbibm = sbibm.get_task("bernoulli_glm_raw")
-    # x_star = bglm_sbibm.get_observation(1)
-    # theta_star = bglm_sbibm.get_true_parameters(1)
-    # samples_sbibm = bglm_sbibm.get_reference_posterior_samples(1)[:1000]
+    if args.check_post:
+        # reference posterior check
+        os.makedirs("_checks", exist_ok=True)
+        
+        import sbibm
+        name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
+        bglm_sbibm = sbibm.get_task("bernoulli_glm_raw")
+        x_star = bglm_sbibm.get_observation(1)
+        theta_star = bglm_sbibm.get_true_parameters(1)
+        samples_sbibm = bglm_sbibm.get_reference_posterior_samples(1)[:1000]
 
-    # if x_star.ndim == 1:
-    #     x_star = x_star[None, :]
-    # if theta_star.ndim > 1:
-    #     theta_star = theta_star[0]
-    
-    # samples_jl = bglm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        if x_star.ndim == 1:
+            x_star = x_star[None, :]
+        if theta_star.ndim > 1:
+            theta_star = theta_star[0]
+        
+        samples_jl = bglm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
 
-    # print(samples_sbibm.shape, samples_jl.shape)
-    # import matplotlib.pyplot as plt
-    # plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-    # plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
-    # plt.scatter(theta_star[0], theta_star[1], label='theta_star')
-    # plt.legend()
-    # plt.savefig(f'{name}_post_check.png')
-    # plt.clf()
+        print(samples_sbibm.shape, samples_jl.shape)
+        import matplotlib.pyplot as plt
+        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
+        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+        plt.legend()
+        plt.savefig(f'_checks/{name}_post_check.png')
+        plt.clf()

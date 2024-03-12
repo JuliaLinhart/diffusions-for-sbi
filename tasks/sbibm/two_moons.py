@@ -194,6 +194,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
+    parser.add_argument(
+        "--check_sim", action="store_true", help="Check the simulator"
+    )
+    parser.add_argument(
+        "--check_post", action="store_true", help="Check the reference posterior"
+    )
 
     args = parser.parse_args()
 
@@ -220,44 +226,46 @@ if __name__ == "__main__":
                 )
                 print(samples.shape)
 
-    # # simulate one check
-    # theta = two_moons.prior().sample((1,))
-    # x = two_moons.simulator(rng_key, theta, n_obs=1)
-    # print(x.shape, theta.shape)
+    if args.check_sim:
+        # # simulate one check
+        # theta = two_moons.prior().sample((1,))
+        # x = two_moons.simulator(rng_key, theta, n_obs=1)
+        # print(x.shape, theta.shape)
 
-    # # simulator distribution check
-    # import sbibm
-    # tm_sbibm = sbibm.get_task("two_moons")
-    # theta = two_moons.prior().sample((1,))
-    # x_sbibm = [tm_sbibm.get_simulator()(theta) for _ in range(1000)]
-    # x_sbibm = torch.concatenate(x_sbibm, axis=0)
-    # x_jl = two_moons.simulator(rng_key, theta, n_obs=1000)
-    # print(x_sbibm.shape, x_jl.shape)
+        # simulator distribution check
+        import sbibm
+        tm_sbibm = sbibm.get_task("two_moons")
+        theta = two_moons.prior().sample((1,))
+        x_sbibm = [tm_sbibm.get_simulator()(theta) for _ in range(1000)]
+        x_sbibm = torch.concatenate(x_sbibm, axis=0)
+        x_jl = two_moons.simulator(rng_key, theta, n_obs=1000)
+        print(x_sbibm.shape, x_jl.shape)
 
-    # import matplotlib.pyplot as plt
-    # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-    # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
-    # plt.legend()
-    # plt.savefig('two_moons_sim_check.png')
-    # plt.clf()
+        import matplotlib.pyplot as plt
+        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        plt.legend()
+        plt.savefig('_checks/two_moons_sim_check.png')
+        plt.clf()
 
-    # # reference posterior check
-    # import sbibm
-    # tm_sbibm = sbibm.get_task("two_moons")
+    if args.check_post:
+        # reference posterior check
+        import sbibm
+        tm_sbibm = sbibm.get_task("two_moons")
 
-    # x_star = two_moons.get_reference_observation(num_obs=2)
-    # theta_star = two_moons.get_reference_parameters()[1]
-    # samples_sbibm = tm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
-    # samples_jl = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
-    # # samples_jl_30 = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
+        x_star = two_moons.get_reference_observation(num_obs=2)
+        theta_star = two_moons.get_reference_parameters()[1]
+        samples_sbibm = tm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
+        samples_jl = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        # samples_jl_30 = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
-    # print(samples_sbibm.shape, samples_jl.shape)
-    # import matplotlib.pyplot as plt
-    # plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-    # plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
-    # # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
-    # plt.scatter(theta_star[0], theta_star[1], label='theta_star')
-    # plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
-    # plt.legend()
-    # plt.savefig('two_moons_post_check.png')
-    # plt.clf()
+        print(samples_sbibm.shape, samples_jl.shape)
+        import matplotlib.pyplot as plt
+        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
+        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+        # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
+        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+        plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
+        plt.legend()
+        plt.savefig('_checks/two_moons_post_check.png')
+        plt.clf()

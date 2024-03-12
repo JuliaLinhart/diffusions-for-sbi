@@ -1,7 +1,6 @@
 # Distribution / packaging
 __pycache__/
 *.egg-info/
-__init__.py
 .DS_Store
 
 # *.pkl

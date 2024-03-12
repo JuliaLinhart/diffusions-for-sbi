@@ -149,6 +149,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
+    parser.add_argument(
+        "--check_sim", action="store_true", help="Check the simulator"
+    )
+    parser.add_argument(
+        "--check_post", action="store_true", help="Check the reference posterior"
+    )
 
     args = parser.parse_args()
 
@@ -175,47 +181,49 @@ if __name__ == "__main__":
                 )
                 print(samples.shape)
 
-    # # simulate one check
-    # theta = lv.prior().sample((1,))
-    # x = lv.simulator(rng_key, theta, n_obs=8)
-    # print(x.shape, theta.shape)
-                
-    # # simulator distribution check
-    # import sbibm
-    # lv_sbibm = sbibm.get_task("lotka_volterra")
-    # theta = lv.prior().sample((1,))
-    # x_sbibm = [lv_sbibm.get_simulator()(theta) for _ in range(1000)]
-    # x_sbibm = torch.concatenate(x_sbibm, axis=0)
-    # x_jl = lv.simulator(rng_key, theta, n_obs=1000)
-    # print(x_sbibm.shape, x_jl.shape)
+    if args.check_sim:
+        # simulate one check
+        theta = lv.prior().sample((1,))
+        x = lv.simulator(rng_key, theta, n_obs=8)
+        print(x.shape, theta.shape)
+                    
+        # # simulator distribution check
+        # import sbibm
+        # lv_sbibm = sbibm.get_task("lotka_volterra")
+        # theta = lv.prior().sample((1,))
+        # x_sbibm = [lv_sbibm.get_simulator()(theta) for _ in range(1000)]
+        # x_sbibm = torch.concatenate(x_sbibm, axis=0)
+        # x_jl = lv.simulator(rng_key, theta, n_obs=1000)
+        # print(x_sbibm.shape, x_jl.shape)
 
-    # import matplotlib.pyplot as plt
-    # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-    # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
-    # plt.legend()
-    # plt.savefig('lv_sim_check.png')
-    # plt.clf()
+        # import matplotlib.pyplot as plt
+        # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
+        # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        # plt.legend()
+        # plt.savefig('_checks/lv_sim_check.png')
+        # plt.clf()
 
-    # reference posterior check
-    import sbibm
-    lv_sbibm = sbibm.get_task("lotka_volterra")
-    x_star = lv_sbibm.get_observation(1)
-    theta_star = lv_sbibm.get_true_parameters(1)
-    samples_sbibm = lv_sbibm.get_reference_posterior_samples(1)
+    if args.check_post:
+        # reference posterior check
+        import sbibm
+        lv_sbibm = sbibm.get_task("lotka_volterra")
+        x_star = lv_sbibm.get_observation(1)
+        theta_star = lv_sbibm.get_true_parameters(1)
+        samples_sbibm = lv_sbibm.get_reference_posterior_samples(1)[:1000]
 
-    if x_star.ndim == 1:
-        x_star = x_star[None, :]
-    if theta_star.ndim > 1:
-        theta_star = theta_star[0]
-    samples_jl = lv.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
-    # samples_jl_30 = lv.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
+        if x_star.ndim == 1:
+            x_star = x_star[None, :]
+        if theta_star.ndim > 1:
+            theta_star = theta_star[0]
+        samples_jl = lv.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        # samples_jl_30 = lv.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
-    print(samples_sbibm.shape, samples_jl.shape)
-    import matplotlib.pyplot as plt
-    plt.scatter(samples_sbibm[:,1], samples_sbibm[:,2], label='sbibm')
-    plt.scatter(samples_jl[:,1], samples_jl[:,2], label='jl')
-    # plt.scatter(samples_jl_30[:,1], samples_jl_30[:,2], label='jl_30')
-    plt.scatter(theta_star[1], theta_star[2], label='theta_star')
-    plt.legend()
-    plt.savefig('lv_post_check.png')
-    plt.clf()
+        print(samples_sbibm.shape, samples_jl.shape)
+        import matplotlib.pyplot as plt
+        plt.scatter(samples_sbibm[:,1], samples_sbibm[:,2], label='sbibm')
+        plt.scatter(samples_jl[:,1], samples_jl[:,2], label='jl')
+        # plt.scatter(samples_jl_30[:,1], samples_jl_30[:,2], label='jl_30')
+        plt.scatter(theta_star[1], theta_star[2], label='theta_star')
+        plt.legend()
+        plt.savefig('_checks/lv_post_check.png')
+        plt.clf()
