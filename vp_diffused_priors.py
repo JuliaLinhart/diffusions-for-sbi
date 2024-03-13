@@ -57,14 +57,69 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
 
     return vpdiff_gaussian_score
 
+def get_vpdiff_gamma_score(alpha, beta, nse):
+    # score of diffused prior: grad_t log prior_t (theta_t)
+    # for Gamma prior p(theta) = Gamma(theta | alpha, beta)
+
+    def gamma_n(x, alpha, beta, mu, scale):
+        gamma_pdf = torch.distributions.Gamma(alpha, beta, validate_args=False).log_prob(x).exp()
+        normal_pdf = torch.distributions.Normal(mu, scale, validate_args=False).log_prob(x).exp()
+        return gamma_pdf * normal_pdf
+
+
+    def integrate_gamma_n(alpha, beta, mu, scale):
+        from scipy.integrate import quad
+        import numpy as np
+
+        print(alpha, beta, mu, scale)
+        def integrand(x):
+            return gamma_n(x, alpha, beta, mu, scale)
+        # between 0 and infinity
+        return quad(integrand, 0, np.inf)[0]
+
+
+    def vp_diff_gamma_score(theta, t):
+        # p_t(theta_t | alpha, beta) = int p_{t|0}(theta_t|theta) Gamma(theta | alpha, beta) dtheta
+        # p_{t|0}(theta_t|theta)= N(theta_t | scaling_t * theta, sigma_t^2 I)
+
+        # grad_theta_t log p_t(theta_t) = grad_theta_t p_t(theta_t) / p_t(theta_t)
+
+        # grad_theta_t N(theta_t | scaling_t * theta, sigma_t^2) = - (theta_t - scaling_t * theta) / sigma_t^2
+        # grad_theta_t p_t(theta_t | alpha, beta) = - (theta_t / sigma_t^2) * p_t(theta_t | alpha, beta)
+        #     + scaling_t/sigma_t^2 * int theta * Gamma(theta | alpha, beta) N(theta_t | mu_t, sigma_t^2) dtheta
+
+        # but theta * Gamma(theta | alpha, beta) = Gamma(theta | alpha+1, beta)
+        # so grad_theta_t log p_t(theta_t) = - (theta_t / sigma_t^2) + scaling_t/sigma_t^2 * p_t(theta_t | alpha+1, beta) / p_t(theta_t | alpha, beta)
+
+        scaling_t = nse.alpha(t) ** 0.5
+        sigma_t = nse.sigma(t)
+
+        first_term = - (theta / (sigma_t**2))
+        # N(theta_t | scaling_t * theta, sigma_t^2 I) = N(theta | theta_t / scaling_t, sigma_t^2 I / scaling_t^2)
+        int_nominator = integrate_gamma_n(alpha+1, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t) * alpha / beta
+        int_denominator = integrate_gamma_n(alpha, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t)
+        print(int_nominator, int_denominator)
+        second_term = (scaling_t/(sigma_t**2)) * (int_nominator) /(int_denominator)
+        print(first_term, second_term)
+        prior_score_t = first_term + second_term
+
+        return prior_score_t
+
+    return vp_diff_gamma_score
+
+
+
 if __name__ == '__main__':
     from nse import NSE
     from tasks.toy_examples.prior import UniformPrior
-    theta_t = torch.randn((5,2))
-    t = torch.tensor(1)
-    nse = NSE(2,2)
-    prior = UniformPrior()
-    diffused_prior_score = get_vpdiff_uniform_score(prior.low, prior.high, nse)
+    nse = NSE(1,1)
+    beta = 2 # small beta gives big variance (heavy tail)
+    alpha = 0.5 # small alpha gives high skewness (heavy tail)
+    prior = torch.distributions.Gamma(alpha, beta, validate_args=False)
+    diffused_prior_score = get_vpdiff_gamma_score(prior.concentration, prior.rate, nse)
 
+    t = torch.tensor(0.001)
+    theta_t = prior.sample()
     prior_score_t = diffused_prior_score(theta_t, t)
-    # print(prior_score_t)
+    print(prior_score_t)
+    print((alpha-1)/theta_t - beta)
