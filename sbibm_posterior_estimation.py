@@ -41,7 +41,7 @@ def setup(task, all=True, train_data=False, reference_data=False, reference_post
             data = task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
             print("Reference data:", data[0].shape, data[1][1].shape)
         if reference_posterior:
-            num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
+            num_obs_list = range(15, 26) #range(1, len(NUM_OBSERVATION_LIST) + 1)
             n_obs_list = N_OBS_LIST
             for num_obs in num_obs_list:
                 for n_obs in n_obs_list:
@@ -331,7 +331,7 @@ if __name__ == "__main__":
         "--task",
         type=str,
         required=True,
-        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture", "two_moons", "bernoulli_glm", "bernoulli_glm_raw"],
+        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture", "gaussian_mixture_uniform", "two_moons", "bernoulli_glm", "bernoulli_glm_raw"],
         help="task name",
     )
     parser.add_argument(
@@ -444,6 +444,7 @@ if __name__ == "__main__":
             x_train = dataset_train["x"].float()
             # extract training data for given n_train
             theta_train, x_train = theta_train[:n_train], x_train[:n_train]
+            print("Training data:", theta_train.shape, x_train.shape)
 
             # log space transformation
             if args.task in ["lotka_volterra", "sir"]:
@@ -478,6 +479,10 @@ if __name__ == "__main__":
             # get reference observations
             x_obs_100 = task.get_reference_observation(num_obs, n_repeat=MAX_N_OBS)
             context = x_obs_100[:n_obs].reshape(n_obs, -1)
+            if args.task in ["bernoulli_glm"]:
+                # summary statistics
+                context = task.compute_summary_statistics(context)
+                print("Summary statistics:", context.shape)
 
             # Trained Score network
             score_network = torch.load(
@@ -505,7 +510,7 @@ if __name__ == "__main__":
                 "x_train_mean": x_train_mean,  # for (un)normalization
                 "x_train_std": x_train_std,  # for (un)normalization
                 "prior": task.prior(), # for score function
-                "prior_type": "uniform" if args.task in ["slcp", "two_moons"] else "gaussian", 
+                "prior_type": "uniform" if args.task in ["slcp", "two_moons", "gaussian_mixture_uniform"] else "gaussian", 
                 "cov_mode": args.cov_mode,
                 "clip": args.clip,  # for clipping
                 "sampler_type": args.sampler,

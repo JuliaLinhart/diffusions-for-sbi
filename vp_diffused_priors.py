@@ -71,11 +71,15 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
         from scipy.integrate import quad
         import numpy as np
 
-        print(alpha, beta, mu, scale)
-        def integrand(x):
-            return gamma_n(x, alpha, beta, mu, scale)
-        # between 0 and infinity
-        return quad(integrand, 0, np.inf)[0]
+        # print(alpha, beta, mu, scale)
+        def integrand(x, mu_):
+            return gamma_n(x, alpha, beta, mu_, scale)
+        
+        integral = []
+        for mu_ in mu:
+            # between 0 and infinity
+            integral.append(quad(integrand, 0, np.inf, args=(mu_))[0])
+        return torch.tensor(integral)
 
 
     def vp_diff_gamma_score(theta, t):
@@ -96,11 +100,12 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
 
         first_term = - (theta / (sigma_t**2))
         # N(theta_t | scaling_t * theta, sigma_t^2 I) = N(theta | theta_t / scaling_t, sigma_t^2 I / scaling_t^2)
+        
         int_nominator = integrate_gamma_n(alpha+1, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t) * alpha / beta
         int_denominator = integrate_gamma_n(alpha, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t)
-        print(int_nominator, int_denominator)
+        # print(int_nominator, int_denominator)
         second_term = (scaling_t/(sigma_t**2)) * (int_nominator) /(int_denominator)
-        print(first_term, second_term)
+        # print(first_term, second_term)
         prior_score_t = first_term + second_term
 
         return prior_score_t
@@ -119,7 +124,7 @@ if __name__ == '__main__':
     diffused_prior_score = get_vpdiff_gamma_score(prior.concentration, prior.rate, nse)
 
     t = torch.tensor(0.001)
-    theta_t = prior.sample()
+    theta_t = prior.sample((10,))
     prior_score_t = diffused_prior_score(theta_t, t)
     print(prior_score_t)
     print((alpha-1)/theta_t - beta)

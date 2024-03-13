@@ -229,7 +229,7 @@ if __name__ == "__main__":
         slcp_sbibm = sbibm.get_task("slcp")
         x_star = slcp_sbibm.get_observation(1)
         theta_star = slcp_sbibm.get_true_parameters(1)
-        samples_sbibm = slcp_sbibm.get_reference_posterior_samples(1)
+        samples_sbibm = slcp_sbibm.get_reference_posterior_samples(1)[:1000]
 
         if x_star.ndim == 1:
             x_star = x_star[None, :]

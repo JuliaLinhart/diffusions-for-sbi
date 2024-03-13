@@ -9,24 +9,38 @@ import jax.lax as lax
 
 from tasks.sbibm.task_mcmc import MCMCTask, get_mcmc_samples, get_predictive_sample
 
-def summary_statistics(y, stimulus_I):
+def summary_statistics(y, stimulus_I, torch_version=False):
+    if not torch_version:
+        if not isinstance(y, jnp.ndarray):
+            y = jnp.array(y.numpy())
+        if not isinstance(stimulus_I, jnp.ndarray):
+            stimulus_I = jnp.array(stimulus_I.numpy())
 
-    if not isinstance(y, jnp.ndarray):
-        y = jnp.array(y.numpy())
-    if not isinstance(stimulus_I, jnp.ndarray):
-        stimulus_I = jnp.array(stimulus_I.numpy())
+        num_spikes = jnp.sum(y).reshape(1)
 
-    num_spikes = jnp.sum(y).reshape(1)
+        sta = lax.conv_general_dilated(
+            y.reshape(1, 1, -1).astype(jnp.float32),
+            stimulus_I.reshape(1, 1, -1).astype(jnp.float32),
+            window_strides=(1,),
+            padding=[(8, 8)],
+            feature_group_count=1,
+        ).squeeze()[-9:]
 
-    sta = lax.conv_general_dilated(
-        y.reshape(1, 1, -1).astype(jnp.float32),
-        stimulus_I.reshape(1, 1, -1).astype(jnp.float32),
-        window_strides=(1,),
-        padding=[(8, 8)],
-        feature_group_count=1,
-    ).squeeze()[-9:]
+        sta = jnp.concatenate([num_spikes, sta], axis=0)
+    else:
+        if not isinstance(y, torch.Tensor):
+            y = torch.tensor(np.array(y)).float()
+        if not isinstance(stimulus_I, torch.Tensor):
+            stimulus_I = torch.tensor(np.array(stimulus_I)).float()
+        
+        num_spikes = torch.sum(y).unsqueeze(0)
+        sta = torch.nn.functional.conv1d(
+            y.reshape(1, 1, -1), stimulus_I.reshape(1, 1, -1), padding=8
+        ).squeeze()[-9:]
 
-    return jnp.concatenate([num_spikes, sta], axis=0)
+        sta = torch.cat([num_spikes, sta], axis=0)
+
+    return sta
 
 
 def model(
@@ -144,7 +158,18 @@ class BernoulliGLM(MCMCTask):
         kwargs["raw"] = True
         return super().generate_reference_data(nb_obs, n_repeat, save, load_theta, **kwargs)
     
+    def compute_summary_statistics(self, x):
+        stimulus_I = torch.load(f"{self.save_path}files/stimulus_I.pt")
+        
+        if len(x.shape) == 1:
+            x = x.unsqueeze(0)
+        
+        sta = []
+        for i in range(x.shape[0]):
+            sta.append(summary_statistics(x[i], stimulus_I, torch_version=True))
+        sta = torch.stack(sta)
 
+        return sta
     
     def generate_stimulus(self):
         path = f"{self.save_path}files/"
