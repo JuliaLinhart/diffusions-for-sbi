@@ -6,7 +6,7 @@ from tasks.sbibm.task import Task
 class GaussianLinear(Task):
     def __init__(
         self,
-        prior_params={"loc": 0, "scale": 1},
+        prior_params={"loc_": 0, "scale_": 1},
         simulator_scale=(0.6, 1.4),
         dim=10,
         **kwargs,
@@ -16,10 +16,10 @@ class GaussianLinear(Task):
         self.dim_theta = dim
         self.dim_x = dim
         self.prior_params["loc"] = torch.tensor(
-            [self.prior_params["loc"] for _ in range(self.dim_theta)]
+            [self.prior_params["loc_"] for _ in range(self.dim_theta)]
         ).float()
         self.prior_params["precision_matrix"] = torch.inverse(
-            self.prior_params["scale"] * torch.eye(self.dim_theta)
+            self.prior_params["scale_"] * torch.eye(self.dim_theta)
         )
 
         self.simulator_scale = torch.linspace(

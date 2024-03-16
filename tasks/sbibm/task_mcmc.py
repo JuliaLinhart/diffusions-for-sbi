@@ -26,11 +26,14 @@ class MCMCTask(Task):
     def _simulate_one(self, rng_key, theta, n_obs, **kwargs):
         raise NotImplementedError
 
-    def simulator(self, rng_key, theta, n_obs=1, **kwargs):
+    def simulator(self, theta, n_obs=1, rng_key=None, **kwargs):
         # ensure theta is a jax array
         if isinstance(theta, torch.Tensor):
             theta = theta.numpy()
         theta = jnp.array(theta)
+
+        if rng_key is None:
+            rng_key = random.PRNGKey(np.random.randint(0, 2 ** 32))
 
         # simulate with numpyro model
         x = self._simulate_one(
@@ -74,6 +77,10 @@ class MCMCTask(Task):
         # convert samples to torch
         samples = torch.from_numpy(np.asarray(samples)).float()
         return samples
+    
+    def generate_training_data(self, n_simulations, save=True, **kwargs):
+        kwargs["rng_key"] = None
+        return super().generate_training_data(n_simulations, save, **kwargs)
 
 
 def get_predictive_sample(rng_key, model, cond, n_obs, **model_kwargs):

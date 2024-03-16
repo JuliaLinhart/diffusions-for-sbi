@@ -269,3 +269,26 @@ if __name__ == "__main__":
         plt.legend()
         plt.savefig('_checks/two_moons_post_check.png')
         plt.clf()
+
+    import sbibm
+    import matplotlib.pyplot as plt
+    tm_sbibm = sbibm.get_task("two_moons")
+    theta = tm_sbibm.get_prior()(1000)
+    x = [tm_sbibm.get_simulator()(theta_) for theta_ in theta]
+    x = torch.cat(x, axis=0)
+    
+    data = two_moons.generate_training_data(n_simulations=1000, save=False)
+    x_new = data["x"]
+    theta_new = data["theta"]
+
+    plt.scatter(x[:,0], x[:,1], label='sbibm')
+    plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+    plt.legend()
+    plt.savefig('_checks/two_moons_train_x_check.png')
+    plt.clf()
+
+    plt.scatter(theta[:,0], theta[:,1], label='sbibm')
+    plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+    plt.legend()
+    plt.savefig('_checks/two_moons_train_theta_check.png')
+    plt.clf()

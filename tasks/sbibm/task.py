@@ -158,10 +158,11 @@ class Task:
         )
         return x_star
 
-    def get_reference_posterior_samples(self, num_obs, n_obs):
+    def get_reference_posterior_samples(self, num_obs, n_obs, verbose=True):
         filename = f"{self.save_path}reference_posterior_samples/true_posterior_samples_num_{num_obs}_n_obs_{n_obs}.pkl"
         try:
-            print(f"Loading reference posterior samples from {filename}")
+            if verbose:
+                print(f"Loading reference posterior samples from {filename}")
             samples = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(

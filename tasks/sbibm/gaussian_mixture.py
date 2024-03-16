@@ -155,7 +155,7 @@ if __name__ == "__main__":
         theta = gmm.prior().sample((1,))
         x_sbibm = [gmm_sbibm.get_simulator()(theta) for _ in range(1000)]
         x_sbibm = torch.concatenate(x_sbibm, axis=0)
-        x_jl = gmm.simulator(rng_key, theta, n_obs=1000)
+        x_jl = gmm.simulator(theta, n_obs=1000, rng_key=rng_key)
         print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
@@ -189,3 +189,30 @@ if __name__ == "__main__":
         plt.legend()
         plt.savefig('_checks/gmm_post_check.png')
         plt.clf()
+
+    import matplotlib.pyplot as plt
+    from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+    from tqdm import tqdm
+    gmm = GaussianMixture(save_path=args.save_path)
+    gmm_sbibm = GaussianMixtureSBIBM(dim=10) 
+    gmm_sbibm.simulator_params["mixture_scales"] = torch.tensor([2.25, 1/9.0])
+    gmm_sbibm.prior_dist = gmm.prior()
+    theta = gmm_sbibm.prior_dist.sample((1000,))
+    x = [gmm_sbibm.get_simulator()(theta_) for theta_ in theta]
+    x = torch.cat(x, axis=0)
+    
+    data = gmm.generate_training_data(n_simulations=1000, save=False)
+    x_new = data["x"]
+    theta_new = data["theta"]
+
+    plt.scatter(x[:,0], x[:,1], label='sbibm')
+    plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+    plt.legend()
+    plt.savefig('_checks/gmm_train_x_check.png')
+    plt.clf()
+
+    plt.scatter(theta[:,0], theta[:,1], label='sbibm')
+    plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+    plt.legend()
+    plt.savefig('_checks/gmm_train_theta_check.png')
+    plt.clf()
