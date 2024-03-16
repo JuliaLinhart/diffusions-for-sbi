@@ -155,6 +155,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
+    parser.add_argument(
+        "--check_train", action="store_true", help="Check the training data"
+    )
 
     args = parser.parse_args()
 
@@ -187,21 +190,21 @@ if __name__ == "__main__":
         x = lv.simulator(rng_key, theta, n_obs=8)
         print(x.shape, theta.shape)
                     
-        # # simulator distribution check
+        # simulator distribution check
         # import sbibm
         # lv_sbibm = sbibm.get_task("lotka_volterra")
-        # theta = lv.prior().sample((1,))
+        theta = lv.prior().sample((1,))
         # x_sbibm = [lv_sbibm.get_simulator()(theta) for _ in range(1000)]
         # x_sbibm = torch.concatenate(x_sbibm, axis=0)
-        # x_jl = lv.simulator(rng_key, theta, n_obs=1000)
+        x_jl = lv.simulator(theta, n_obs=1000, rng_key=rng_key)
         # print(x_sbibm.shape, x_jl.shape)
 
-        # import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt
         # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-        # plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
-        # plt.legend()
-        # plt.savefig('_checks/lv_sim_check.png')
-        # plt.clf()
+        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        plt.legend()
+        plt.savefig('_checks/lv_sim_check.png')
+        plt.clf()
 
     if args.check_post:
         # reference posterior check
@@ -226,4 +229,26 @@ if __name__ == "__main__":
         plt.scatter(theta_star[1], theta_star[2], label='theta_star')
         plt.legend()
         plt.savefig('_checks/lv_post_check.png')
+        plt.clf()
+
+    if args.check_train:
+        import matplotlib.pyplot as plt
+        data = torch.load("/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/lotka_volterra_good/dataset_n_train_50000.pkl")
+        theta = data["theta"][:1000]
+        x = data["x"][:1000]
+        
+        data_new = lv.generate_training_data(n_simulations=1000, save=False)
+        x_new = data_new["x"]
+        theta_new = data_new["theta"]
+
+        plt.scatter(x[:,0], x[:,1], label='sbibm')
+        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig('_checks/lv_train_x_check.png')
+        plt.clf()
+
+        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
+        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig('_checks/lv_train_theta_check.png')
         plt.clf()

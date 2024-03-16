@@ -238,6 +238,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
+    parser.add_argument(
+        "--check_train", action="store_true", help="Check the training data"
+    )
 
     args = parser.parse_args()
 
@@ -282,7 +285,7 @@ if __name__ == "__main__":
         theta = bglm.prior().sample((1,))
         x_sbibm = [bglm_sbibm.get_simulator()(theta) for _ in range(1000)]
         x_sbibm = torch.concatenate(x_sbibm, axis=0)
-        x_jl = bglm.simulator(rng_key, theta, n_obs=1000)
+        x_jl = bglm.simulator(theta, n_obs=1000, rng_key=rng_key)
         print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
@@ -317,4 +320,31 @@ if __name__ == "__main__":
         plt.scatter(theta_star[0], theta_star[1], label='theta_star')
         plt.legend()
         plt.savefig(f'_checks/{name}_post_check.png')
+        plt.clf()
+
+    if args.check_train:
+        import sbibm
+        import matplotlib.pyplot as plt
+
+        name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
+
+        bglm_sbibm = sbibm.get_task(name)
+        theta = bglm_sbibm.get_prior()(1000)
+        x = [bglm_sbibm.get_simulator()(theta_) for theta_ in theta]
+        x = torch.cat(x, axis=0)
+        
+        data = bglm.generate_training_data(n_simulations=1000, save=False)
+        x_new = data["x"]
+        theta_new = data["theta"]
+
+        plt.scatter(x[:,0], x[:,1], label='sbibm')
+        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig(f'_checks/{name}_train_x_check.png')
+        plt.clf()
+
+        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
+        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig(f'_checks/{name}_train_theta_check.png')
         plt.clf()

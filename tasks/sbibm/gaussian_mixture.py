@@ -115,6 +115,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
+    parser.add_argument(
+        "--check_train", type=str, default="gaussian", choices=["gaussian", "uniform"], help="Check the training data"
+    )
 
     args = parser.parse_args()
 
@@ -190,29 +193,31 @@ if __name__ == "__main__":
         plt.savefig('_checks/gmm_post_check.png')
         plt.clf()
 
-    import matplotlib.pyplot as plt
-    from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
-    from tqdm import tqdm
-    gmm = GaussianMixture(save_path=args.save_path)
-    gmm_sbibm = GaussianMixtureSBIBM(dim=10) 
-    gmm_sbibm.simulator_params["mixture_scales"] = torch.tensor([2.25, 1/9.0])
-    gmm_sbibm.prior_dist = gmm.prior()
-    theta = gmm_sbibm.prior_dist.sample((1000,))
-    x = [gmm_sbibm.get_simulator()(theta_) for theta_ in theta]
-    x = torch.cat(x, axis=0)
-    
-    data = gmm.generate_training_data(n_simulations=1000, save=False)
-    x_new = data["x"]
-    theta_new = data["theta"]
+    if args.check_train in ["gaussian", "uniform"]:
 
-    plt.scatter(x[:,0], x[:,1], label='sbibm')
-    plt.scatter(x_new[:,0], x_new[:,1], label='jl')
-    plt.legend()
-    plt.savefig('_checks/gmm_train_x_check.png')
-    plt.clf()
+        import matplotlib.pyplot as plt
+        from sbibm.tasks.gaussian_mixture.task import GaussianMixture as GaussianMixtureSBIBM
+        
+        gmm = GaussianMixture(save_path=args.save_path, uniform=args.check_train == "uniform")
+        gmm_sbibm = GaussianMixtureSBIBM(dim=10) 
+        gmm_sbibm.simulator_params["mixture_scales"] = torch.tensor([2.25, 1/9.0])
+        gmm_sbibm.prior_dist = gmm.prior()
+        theta = gmm_sbibm.prior_dist.sample((1000,))
+        x = [gmm_sbibm.get_simulator()(theta_) for theta_ in theta]
+        x = torch.cat(x, axis=0)
+        
+        data = gmm.generate_training_data(n_simulations=1000, save=False)
+        x_new = data["x"]
+        theta_new = data["theta"]
 
-    plt.scatter(theta[:,0], theta[:,1], label='sbibm')
-    plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
-    plt.legend()
-    plt.savefig('_checks/gmm_train_theta_check.png')
-    plt.clf()
+        plt.scatter(x[:,0], x[:,1], label='sbibm')
+        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig(f'_checks/gmm_train_x_check_{args.check_train}.png')
+        plt.clf()
+
+        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
+        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.legend()
+        plt.savefig(f'_checks/gmm_train_theta_check_{args.check_train}.png')
+        plt.clf()
