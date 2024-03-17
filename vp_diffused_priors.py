@@ -1,4 +1,7 @@
 import torch
+import math
+from torch.func import jacrev, vmap
+from torch.autograd.functional import jacobian
 
 
 def get_vpdiff_uniform_score(a, b, nse):
@@ -11,7 +14,9 @@ def get_vpdiff_uniform_score(a, b, nse):
     # ---> prior_t: uniform_cst * f_1(theta_t_1) * f_2(theta_t_2)
     # ---> grad log prior_t: (f_1_prime / f_1, f_2_prime / f_2)
     norm = torch.distributions.Normal(
-        loc=torch.zeros((1,), device=a.device), scale=torch.ones((1,), device=a.device), validate_args=False
+        loc=torch.zeros((1,), device=a.device),
+        scale=torch.ones((1,), device=a.device),
+        validate_args=False,
     )
 
     def vpdiff_uniform_score(theta, t):
@@ -23,8 +28,19 @@ def get_vpdiff_uniform_score(a, b, nse):
         # N(theta_t|mu_t, sigma^2_t) = N(mu_t|theta_t, sigma^2_t)
         # int N(theta_t|mu_t, sigma^2_t) dtheta = int N(mu_t|theta_t, sigma^2_t) dmu_t / scaling_t
         # theta in [a, b] -> mu_t in [a, b] * scaling_t
-        f = (norm.cdf((b * scaling_t - theta) / sigma_t) - norm.cdf((a * scaling_t - theta) / sigma_t)) / scaling_t
-        f_prime = -1/sigma_t * (torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t)) - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t)))/ scaling_t
+        f = (
+            norm.cdf((b * scaling_t - theta) / sigma_t)
+            - norm.cdf((a * scaling_t - theta) / sigma_t)
+        ) / scaling_t
+        f_prime = (
+            -1
+            / sigma_t
+            * (
+                torch.exp(norm.log_prob((b * scaling_t - theta) / sigma_t))
+                - torch.exp(norm.log_prob((a * scaling_t - theta) / sigma_t))
+            )
+            / scaling_t
+        )
 
         # score of diffused prior: grad_t log prior_t (theta_t)
         prior_score_t = f_prime / (f + 1e-6)
@@ -39,7 +55,6 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
     # for Gaussian prior p(theta) = N(theta | mean, cov)
 
     def vpdiff_gaussian_score(theta, t):
-
         # transition kernel p_{t|0}(theta_t) = N(theta_t | mu_t, sigma^2_t I)
         # with mu_t = theta * scaling_t
         scaling_t = nse.alpha(t) ** 0.5
@@ -48,8 +63,11 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
         # from Bishop 2006 (2.115)
         # p_t(theta_t) = int p_{t|0}(theta_t|theta) p(theta)dtheta
         # = N(theta_t | scaling_t * mean, sigma^2_t I + scaling_t^2 * cov)
-        loc=scaling_t * mean
-        covariance_matrix=sigma_t**2 * torch.eye(theta.shape[-1], device=mean.device) + scaling_t**2 * cov
+        loc = scaling_t * mean
+        covariance_matrix = (
+            sigma_t**2 * torch.eye(theta.shape[-1], device=mean.device)
+            + scaling_t**2 * cov
+        )
 
         # grad_theta_t log N(theta_t | loc, cov) = - cov^{-1} * (theta_t - loc)
         prior_score_t = -(theta - loc) @ torch.linalg.inv(covariance_matrix)
@@ -57,56 +75,59 @@ def get_vpdiff_gaussian_score(mean, cov, nse):
 
     return vpdiff_gaussian_score
 
+
 def get_vpdiff_gamma_score(alpha, beta, nse):
     # score of diffused prior: grad_t log prior_t (theta_t)
     # for Gamma prior p(theta) = Gamma(theta | alpha, beta)
-
-    def gamma_n(x, alpha, beta, mu, scale):
-        gamma_pdf = torch.distributions.Gamma(alpha, beta, validate_args=False).log_prob(x).exp()
-        normal_pdf = torch.distributions.Normal(mu, scale, validate_args=False).log_prob(x).exp()
-        return gamma_pdf * normal_pdf
-
-
-    def integrate_gamma_n(alpha, beta, mu, scale):
-        from scipy.integrate import quad
-        import numpy as np
-
-        # print(alpha, beta, mu, scale)
-        def integrand(x, mu_):
-            return gamma_n(x, alpha, beta, mu_, scale)
-        
-        integral = []
-        for mu_ in mu:
-            # between 0 and infinity
-            integral.append(quad(integrand, 0, np.inf, args=(mu_))[0])
-        return torch.tensor(integral)
-
+    # with theta 1D and alpha an integer
 
     def vp_diff_gamma_score(theta, t):
-        # p_t(theta_t | alpha, beta) = int p_{t|0}(theta_t|theta) Gamma(theta | alpha, beta) dtheta
-        # p_{t|0}(theta_t|theta)= N(theta_t | scaling_t * theta, sigma_t^2 I)
+        # p_t(theta_t) = int p(theta)p_{t|0}(theta_t|theta)dtheta
+        # = int Gamma(theta | alpha, beta) N(theta_t | theta * scaling_t, sigma^2_t) dtheta
+        # = int theta^(alpha-1) * N(theta | mu_t, S2_t) dtheta * exp log_f_t(theta_t) * C
+        # = M(alpha-1) * f_t(theta_t) * C where M(m) = E[theta^m] is the m-th moment of N(mu_t, S2_t) but only integral over R+
 
-        # grad_theta_t log p_t(theta_t) = grad_theta_t p_t(theta_t) / p_t(theta_t)
-
-        # grad_theta_t N(theta_t | scaling_t * theta, sigma_t^2) = - (theta_t - scaling_t * theta) / sigma_t^2
-        # grad_theta_t p_t(theta_t | alpha, beta) = - (theta_t / sigma_t^2) * p_t(theta_t | alpha, beta)
-        #     + scaling_t/sigma_t^2 * int theta * Gamma(theta | alpha, beta) N(theta_t | mu_t, sigma_t^2) dtheta
-
-        # but theta * Gamma(theta | alpha, beta) = Gamma(theta | alpha+1, beta)
-        # so grad_theta_t log p_t(theta_t) = - (theta_t / sigma_t^2) + scaling_t/sigma_t^2 * p_t(theta_t | alpha+1, beta) / p_t(theta_t | alpha, beta)
-
-        scaling_t = nse.alpha(t) ** 0.5
+        # grad_t log p_t(theta_t) = grad_t log M(alpha-1)  + grad_t log_f_t(theta_t)
+        alpha_t = nse.alpha(t)
+        scaling_t = alpha_t**0.5
         sigma_t = nse.sigma(t)
+        upsilon_t = sigma_t**2
 
-        first_term = - (theta / (sigma_t**2))
-        # N(theta_t | scaling_t * theta, sigma_t^2 I) = N(theta | theta_t / scaling_t, sigma_t^2 I / scaling_t^2)
+        S2_t = upsilon_t / alpha_t
+
+        # def log_f_t(theta_t):
+        #     return -(
+        #         (theta_t**2) / alpha_t
+        #         - (scaling_t * theta_t / upsilon_t - beta) ** 2 * (S2_t**2)
+        #     ) / (2 * S2_t)
         
-        int_nominator = integrate_gamma_n(alpha+1, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t) * alpha / beta
-        int_denominator = integrate_gamma_n(alpha, beta, mu=theta/scaling_t, scale=sigma_t/scaling_t)
-        # print(int_nominator, int_denominator)
-        second_term = (scaling_t/(sigma_t**2)) * (int_nominator) /(int_denominator)
-        # print(first_term, second_term)
-        prior_score_t = first_term + second_term
+        def compute_grad_log_f_t(theta_t):
+            return - beta / scaling_t
+
+        def log_M_t(theta_t):
+            mu_t = (scaling_t * theta_t / upsilon_t - beta) * S2_t
+            return half_moments_gaussian(mu_t, S2_t, alpha - 1).log()
+        
+        def compute_grad_log_M_t(theta_t, m):
+            mu_t = (scaling_t * theta_t / upsilon_t - beta) * S2_t
+            grad_mu_t = scaling_t / upsilon_t * S2_t
+            M_t = half_moments_gaussian(mu_t, S2_t, m)
+            if m == 0:
+                grad_M_t = grad_mu_t / math.sqrt(2*S2_t*torch.pi) * torch.exp(-mu_t**2 / (2*S2_t))
+            elif m == 1:
+                grad_M_t = (1-torch.special.gammainc(0.5*torch.ones_like(mu_t), mu_t**2 / (2*S2_t))/ (2 * math.sqrt(torch.pi))) * grad_mu_t
+            else:
+                raise NotImplementedError
+            return grad_M_t / (M_t + 1e-6)
+
+        try:
+            grad_log_M_t = compute_grad_log_M_t(theta_t, alpha-1)
+        except NotImplementedError:
+            grad_log_M_t = vmap(jacrev(log_M_t))(theta)
+        # grad_log_f_t = vmap(jacrev(log_f_t))(theta)
+        grad_log_f_t = compute_grad_log_f_t(theta)
+        
+        prior_score_t = grad_log_M_t + grad_log_f_t
 
         return prior_score_t
 
@@ -114,17 +135,78 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
 
 
 
-if __name__ == '__main__':
+
+def moments_gaussian(mu, sigma, m):
+    # recursive formula for the m-th moment of N(mu, sigma^2)
+
+    if m == 0:
+        return torch.ones_like(mu).float()
+    elif m == 1:
+        return mu
+    elif m == 2:
+        return mu**2 + sigma**2
+    else:
+        return mu * moments_gaussian(mu, sigma, m - 1) + sigma**2 * (
+            m - 1
+        ) * moments_gaussian(mu, sigma, m - 2)
+
+
+def half_moments_gaussian(mu, sigma, m):
+    # recursive formula for the m-th half moment of N(mu, sigma^2)
+
+    if m == 0:
+        return (torch.special.erf(mu / torch.sqrt(2 * sigma**2)) + 1) / 2
+    elif m == 1:
+        return (
+            math.sqrt(2)
+            * torch.special.gammainc(torch.ones_like(mu), mu**2 / (2 * sigma**2))
+            * sigma
+            + (
+                2 * math.sqrt(torch.pi)
+                - torch.special.gammainc(
+                    0.5 * torch.ones_like(mu), mu**2 / (2 * sigma**2)
+                )
+            )
+            * mu
+        ) / (2 * math.sqrt(torch.pi))
+    elif m == 2:
+        return -(
+            (
+                2
+                * torch.special.gammainc(
+                    1.5 * torch.ones_like(mu), mu**2 / (2 * sigma**2)
+                )
+                - 2 * math.sqrt(torch.pi)
+            )
+            * sigma**2
+            - 2**1.5
+            * torch.special.gammainc(torch.ones_like(mu), mu**2 / (2 * sigma**2))
+            * mu
+            * sigma
+            + (
+                torch.special.gammainc(
+                    0.5 * torch.ones_like(mu), mu**2 / (2 * sigma**2)
+                )
+                - 2 * math.sqrt(torch.pi)
+            )
+            * mu**2
+        ) / (2 * math.sqrt(torch.pi))
+    else:
+        raise NotImplementedError
+
+
+if __name__ == "__main__":
     from nse import NSE
     from tasks.toy_examples.prior import UniformPrior
-    nse = NSE(1,1)
-    beta = 2 # small beta gives big variance (heavy tail)
-    alpha = 0.5 # small alpha gives high skewness (heavy tail)
+
+    nse = NSE(1, 1)
+    beta = 2  # small beta gives big variance (heavy tail)
+    alpha = 2  # small alpha gives high skewness (heavy tail)
     prior = torch.distributions.Gamma(alpha, beta, validate_args=False)
     diffused_prior_score = get_vpdiff_gamma_score(prior.concentration, prior.rate, nse)
 
-    t = torch.tensor(0.001)
-    theta_t = prior.sample((10,))
+    t = torch.tensor(0.0)
+    theta_t = prior.sample((1,))
     prior_score_t = diffused_prior_score(theta_t, t)
     print(prior_score_t)
-    print((alpha-1)/theta_t - beta)
+    print((alpha - 1) / theta_t - beta)
