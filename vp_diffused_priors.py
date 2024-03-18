@@ -95,41 +95,30 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
 
         S2_t = upsilon_t / alpha_t
 
-        # def log_f_t(theta_t):
-        #     return -(
-        #         (theta_t**2) / alpha_t
-        #         - (scaling_t * theta_t / upsilon_t - beta) ** 2 * (S2_t**2)
-        #     ) / (2 * S2_t)
-        
-        def compute_grad_log_f_t(theta_t):
-            return - beta / scaling_t
+        # print("S2_t: ", S2_t, ", sqrt(alpha_t): ", scaling_t)
 
-        def log_M_t(theta_t):
-            mu_t = (scaling_t * theta_t / upsilon_t - beta) * S2_t
-            return half_gaussian_moments(mu_t, S2_t, alpha - 1).log()
-        
-        def compute_grad_log_M_t(theta_t, m):
-            mu_t = (scaling_t * theta_t / upsilon_t - beta) * S2_t
-            print(mu_t)
-            print(mu_t > 0)
-            grad_mu_t = scaling_t / upsilon_t * S2_t
-            M_t = half_gaussian_moments(mu_t, S2_t, m)
-            # if m == 0:
-            #     grad_M_t = grad_mu_t / math.sqrt(2*S2_t*torch.pi) * torch.exp(-mu_t**2 / (2*S2_t))
-            # elif m == 1:
-            #     grad_M_t = (1-torch.special.gammainc(0.5*torch.ones_like(mu_t), mu_t**2 / (2*S2_t))/ (2 * math.sqrt(torch.pi))) * grad_mu_t
-            # else:
-            raise NotImplementedError
-            # return grad_M_t / (M_t + 1e-6)
+        mu_t = (
+            theta / scaling_t - beta * S2_t
+        )  # (scaling_t * theta / upsilon_t - beta) * S2_t
+        # print("mu_t: ", mu_t)
+        grad_mu_t = 1 / scaling_t  # scaling_t / upsilon_t * S2_t
+        # print("grad_mu_t: ", grad_mu_t)
 
-        try:
-            grad_log_M_t = compute_grad_log_M_t(theta_t, alpha-1)
-        except NotImplementedError:
-            grad_log_M_t = vmap(jacrev(log_M_t))(theta)
-        
-        # grad_log_f_t = vmap(jacrev(log_f_t))(theta)
-        grad_log_f_t = compute_grad_log_f_t(theta)
-        
+        m = alpha - 1
+        M_t = half_gaussian_moments(mu_t, torch.sqrt(S2_t), m)
+        # print("M_t: ", M_t)
+        grad_M_t = grad_half_gaussian_moments(grad_mu_t, mu_t, torch.sqrt(S2_t), m)
+        # print("grad_M_t: ", grad_M_t)
+
+        if (M_t == 0).any():
+            grad_log_M_t = torch.zeros_like(grad_M_t)
+        else:
+            grad_log_M_t = grad_M_t / M_t
+        # print("grad_log_M_t: ", grad_log_M_t)
+
+        grad_log_f_t = -beta / scaling_t
+        # print("grad_log_f_t: ", grad_log_f_t)
+
         prior_score_t = grad_log_M_t + grad_log_f_t
 
         return prior_score_t
@@ -139,34 +128,69 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
 
 def half_gaussian_moments(mu, sigma, m):
     # m must be integer
-    assert(m % 1 == 0)
-    if m==0:
-        return (torch.special.erf(mu / torch.sqrt(2 * sigma**2)) + 1) * sigma * math.sqrt(math.pi/2)
-    elif m==1:
-        return sigma**2 * torch.exp(-mu**2/(2*sigma**2)) + mu * half_gaussian_moments(mu, sigma, 0)
+    assert m % 1 == 0
+    if m == 0:
+        # print("x=mu/sqrt(2*sigma^2): ", mu / torch.sqrt(2 * sigma**2))
+        # print("erf: ", torch.special.erf(mu / torch.sqrt(2 * sigma**2)))
+        return (
+            (torch.special.erf(mu / torch.sqrt(2 * sigma**2)) + 1)
+            * sigma
+            * math.sqrt(math.pi / 2)
+        )
+    elif m == 1:
+        return sigma**2 * torch.exp(
+            -(mu**2) / (2 * sigma**2)
+        ) + mu * half_gaussian_moments(mu, sigma, 0)
     else:
-        assert(m>1)
-        i_m = mu * half_gaussian_moments(mu, sigma, m-1) + sigma**2 * (m-1) * half_gaussian_moments(mu, sigma, m-2)
+        assert m > 1
+        M = mu * half_gaussian_moments(mu, sigma, m - 1) + sigma**2 * (
+            m - 1
+        ) * half_gaussian_moments(mu, sigma, m - 2)
         # case m is even
         if m % 2 == 0:
-            return i_m
+            return M
         # case m is odd
         else:
-            return i_m + sigma**2 * torch.exp(-mu**2/(2*sigma**2))
+            return M + sigma**2 * torch.exp(-(mu**2) / (2 * sigma**2))
+
+
+def grad_half_gaussian_moments(grad_mu, mu, sigma, m):
+    # m must be integer
+    assert m % 1 == 0
+    if m == 0:
+        return grad_mu * torch.exp(-(mu**2) / (2 * sigma**2))
+    elif m == 1:
+        return grad_mu * half_gaussian_moments(mu, sigma, 0)
+    else:
+        grad_M = (
+            grad_mu * half_gaussian_moments(mu, sigma, m - 1)
+            + mu * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 1)
+            + sigma**2 * (m - 1) * half_gaussian_moments(mu, sigma, m - 2)
+        )
+        # case if m is even
+        if m % 2 == 0:
+            return grad_M
+        # case if m is odd
+        else:
+            return grad_M - grad_mu * mu * torch.exp(-(mu**2) / (2 * sigma**2))
 
 
 if __name__ == "__main__":
     from nse import NSE
-    from tasks.toy_examples.prior import UniformPrior
 
     nse = NSE(1, 1)
     beta = 2  # small beta gives big variance (heavy tail)
-    alpha = 10  # small alpha gives high skewness (heavy tail)
+    alpha = 1  # small alpha gives high skewness (heavy tail)
     prior = torch.distributions.Gamma(alpha, beta, validate_args=False)
     diffused_prior_score = get_vpdiff_gamma_score(prior.concentration, prior.rate, nse)
 
-    t = torch.tensor(0.0)
-    theta_t = prior.sample((5,))
-    prior_score_t = diffused_prior_score(theta_t, t)
-    print(prior_score_t)
-    print((alpha - 1) / theta_t - beta)
+    # t = torch.tensor(0.0)
+    # theta_t = prior.sample((5,))
+    # t = torch.tensor(0.1)
+    theta_t = torch.randn((5,))
+    t_ = torch.linspace(1, 0, 10)
+    for t in t_:
+        prior_score_t = diffused_prior_score(theta_t, t)
+        print(prior_score_t)
+        print((alpha - 1) / theta_t - beta)
+        print()
