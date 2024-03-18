@@ -111,6 +111,7 @@ def get_vpdiff_gamma_score(alpha, beta, nse):
         # print("grad_M_t: ", grad_M_t)
 
         if (M_t == 0).any():
+            print("M_t is zero")
             grad_log_M_t = torch.zeros_like(grad_M_t)
         else:
             grad_log_M_t = grad_M_t / M_t
@@ -143,36 +144,23 @@ def half_gaussian_moments(mu, sigma, m):
         ) + mu * half_gaussian_moments(mu, sigma, 0)
     else:
         assert m > 1
-        M = mu * half_gaussian_moments(mu, sigma, m - 1) + sigma**2 * (
+        return mu * half_gaussian_moments(mu, sigma, m - 1) + sigma**2 * (
             m - 1
         ) * half_gaussian_moments(mu, sigma, m - 2)
-        # case m is even
-        if m % 2 == 0:
-            return M
-        # case m is odd
-        else:
-            return M + sigma**2 * torch.exp(-(mu**2) / (2 * sigma**2))
-
 
 def grad_half_gaussian_moments(grad_mu, mu, sigma, m):
     # m must be integer
     assert m % 1 == 0
     if m == 0:
-        return grad_mu * torch.exp(-(mu**2) / (2 * sigma**2))
+        return grad_mu * torch.exp(-(mu**2) / (2 * sigma**2)) 
     elif m == 1:
-        return grad_mu * half_gaussian_moments(mu, sigma, 0)
+        return grad_mu * half_gaussian_moments(mu, sigma, 0) 
     else:
-        grad_M = (
+        return (
             grad_mu * half_gaussian_moments(mu, sigma, m - 1)
             + mu * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 1)
-            + sigma**2 * (m - 1) * half_gaussian_moments(mu, sigma, m - 2)
+            + (sigma**2) * (m - 1) * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 2)
         )
-        # case if m is even
-        if m % 2 == 0:
-            return grad_M
-        # case if m is odd
-        else:
-            return grad_M - grad_mu * mu * torch.exp(-(mu**2) / (2 * sigma**2))
 
 
 if __name__ == "__main__":
