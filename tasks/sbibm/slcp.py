@@ -60,7 +60,7 @@ class SLCP(MCMCTask):
     def __init__(
         self,
         prior_params={"low": -3.0, "high": 3.0},
-        num_samples_per_case=2500,
+        num_samples_per_case=250,
         **kwargs,
     ):
         super().__init__(name="slcp", prior_params=prior_params, model=model, **kwargs)
@@ -183,7 +183,7 @@ if __name__ == "__main__":
 
     rng_key = random.PRNGKey(1)
 
-    slcp = SLCP(save_path=args.save_path, num_samples_per_case=250)
+    slcp = SLCP(save_path=args.save_path)
     os.makedirs(slcp.save_path, exist_ok=True)
 
     if args.train_data:

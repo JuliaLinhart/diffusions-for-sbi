@@ -35,13 +35,13 @@ def setup(task, all=True, train_data=False, reference_data=False, reference_post
             reference_data = True
             reference_posterior = True
         if train_data:
-            data = task.generate_training_data(n_simulations=MAX_N_TRAIN, **kwargs)
+            data = task.generate_training_data(n_simulations=MAX_N_TRAIN)
             print("Training data:", data["x"].shape, data["theta"].shape)
         if reference_data:
             data = task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
             print("Reference data:", data[0].shape, data[1][1].shape)
         if reference_posterior:
-            num_obs_list = range(15, 26) #range(1, len(NUM_OBSERVATION_LIST) + 1)
+            num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
             n_obs_list = N_OBS_LIST
             for num_obs in num_obs_list:
                 for n_obs in n_obs_list:
@@ -413,8 +413,6 @@ if __name__ == "__main__":
 
     # Define task path
     task_path = PATH_EXPERIMENT + f"{args.task}/"
-    if args.task in ["slcp", "sir", "lotka_volterra"]:
-        task_path = PATH_EXPERIMENT + f"{args.task}_good/"
 
     def run(
         n_train=args.n_train, num_obs=args.num_obs, n_obs=args.n_obs, run_type=args.run
@@ -479,6 +477,7 @@ if __name__ == "__main__":
             # get reference observations
             x_obs_100 = task.get_reference_observation(num_obs, n_repeat=MAX_N_OBS)
             context = x_obs_100[:n_obs].reshape(n_obs, -1)
+            print("Context:", context.shape)
             if args.task in ["bernoulli_glm"]:
                 # summary statistics
                 context = task.compute_summary_statistics(context)

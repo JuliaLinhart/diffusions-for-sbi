@@ -19,3 +19,4 @@ score_net*.pkl
 
 /test_toy
 *old*
+*dataset*

@@ -24,12 +24,14 @@ def set_plotting_style(size=5):
 
 markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
+    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
+    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    # "LANGEVIN_ours": {"label":"LANGEVIN (ours)", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    # "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
     # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
-    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
-    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
 }
 
 METRICS_STYLE = {
