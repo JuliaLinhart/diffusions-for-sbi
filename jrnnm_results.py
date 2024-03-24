@@ -6,7 +6,7 @@ from experiment_utils import dist_to_dirac
 from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style, plot_pairgrid_with_groundtruth_jrnnm
 
 PATH_EXPERIMENT = "results/jrnnm/"
-DIMS = [4] #, 4]
+DIMS = [3, 4]
 N_OBS = [1, 8, 14, 22, 30]
 METRICS = ["mmd_to_dirac"]
 N_EPOCHS = 5000
@@ -21,12 +21,15 @@ def load_losses(dim, lr=LR, n_epochs=N_EPOCHS):
     return train_losses, val_losses, best_epoch
 
 
-def load_results(dim, result_name, n_obs, lr=LR, n_epochs=N_EPOCHS, gain=0.0, cov_mode=None, langevin=False, clip=False, single_obs=None):
+def load_results(dim, result_name, n_obs, lr=LR, n_epochs=N_EPOCHS, gain=0.0, cov_mode=None, sampler="ddim", langevin=False, clip=False, single_obs=None):
     theta_true = [135.0, 220.0, 2000.0, gain]
     if dim == 3:
         theta_true = theta_true[:3]
     path = PATH_EXPERIMENT + f"{dim}d/n_train_50000_n_epochs_{n_epochs}_lr_{lr}/"
-    path = path + "langevin_steps_400_5/" if langevin else path + "euler_steps_1000/"
+    if langevin:
+        path = path + "langevin_steps_400_5_new/" 
+    else:
+        path = path + f"{sampler}_steps_1000/" if sampler == "euler" or cov_mode == "GAUSS" else path + f"{sampler}_steps_400/"
     if single_obs is not None:
         path = path + f"single_obs/num_{i}_" + result_name + f"_{theta_true}_n_obs_1.pkl"
     else:
@@ -103,9 +106,9 @@ if __name__ == "__main__":
 
         # plot mean distance to true theta as function of n_obs
         for metric in METRICS:
-            fig, axs = plt.subplots(1, 1, figsize=(5, 5))
-            fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.25)
             for i, dim in enumerate(DIMS):
+                fig, axs = plt.subplots(1, 1, figsize=(5, 5))
+                fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.25)
                 for method in METHODS_STYLE.keys():
                     if method == "JAC":
                         continue
@@ -169,8 +172,10 @@ if __name__ == "__main__":
         method = "GAUSS"
         for dim in DIMS:
             theta_true = [135.0, 220.0, 2000.0, gain]
+            param_names = ["$C$", "$\mu$", "$\sigma$", "$g$"]
             if dim == 3:
                 theta_true = theta_true[:3]
+                param_names = param_names[:3]
 
             # for j, n_obs in enumerate(N_OBS):
             #     if n_obs == 1:
@@ -216,7 +221,8 @@ if __name__ == "__main__":
                     langevin=True if "LANGEVIN" in method else False,
                     clip=True if "clip" in method else False,
                 )
-                for k,name in enumerate(["$C$", "$\mu$", "$\sigma$"]):
+
+                for k,name in enumerate(param_names):
                     sns.kdeplot(samples[:, k], alpha=0.1, label=rf"$n={n_obs}$", color=colors[j+1], ax=axs[k], linewidth=3, fill=True)
                     # line for theta_true 
                     axs.ravel()[k].axvline(theta_true[k], ls="--", linewidth=3, c="black")
@@ -229,34 +235,3 @@ if __name__ == "__main__":
             plt.savefig(PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.pdf")
             plt.clf()
             
-
-    # # runtime comparison
-    # fig, axs = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
-    # for i, task_name in enumerate(TASKS):
-    #     times_jac = []
-    #     times_gauss = []
-    #     times_langevin = []
-    #     for n_obs in N_OBS:
-    #         _, time_j = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="JAC"
-    #         )
-    #         _, time_g = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, cov_mode="GAUSS"
-    #         )
-    #         _, time_l = load_results(
-    #             task_name, lr=1e-3, n_obs=n_obs, gain=gain, langevin=True
-    #         )
-    #         times_jac.append(time_j)
-    #         times_gauss.append(time_g)
-    #         times_langevin.append(time_l)
-    #     axs[i].plot(N_OBS, times_jac, marker="o", label=f"JAC")
-    #     axs[i].plot(N_OBS, times_gauss, marker="o", label=f"GAUSS")
-    #     axs[i].plot(N_OBS, times_langevin, marker="o", label=f"langevin")
-    #     axs[i].set_xticks(N_OBS)
-    #     axs[i].set_xlabel("n_obs")
-    #     axs[i].legend()
-    #     axs[i].set_title(f"{task_name}")
-    # plt.suptitle(f"Runtime comparison")
-    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.png")
-    # plt.savefig(PATH_EXPERIMENT + f"runtime_comparison_n_obs_g_{gain}.pdf")
-    # plt.clf()

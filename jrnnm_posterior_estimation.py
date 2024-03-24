@@ -64,7 +64,7 @@ def run_train_sgm(
         x_dim=x_dim,
         embedding_nn_theta=theta_embedding_net,
         embedding_nn_x=x_embedding_net,
-        hidden_features=[128, 256, 128],
+        hidden_features=[256, 256, 256],
         freqs=32,
     ).to(device)
 
@@ -124,8 +124,9 @@ def run_sample_sgm(
     x_train_std,
     prior,
     cov_mode,
-    langevin,
-    clip,
+    sampler_type="ddim",
+    langevin=False,
+    clip=False,
     save_path=PATH_EXPERIMENT,
     single_obs=None,
 ):
@@ -142,6 +143,9 @@ def run_sample_sgm(
     # normalize prior
     low_norm = (prior.low - theta_train_mean) / theta_train_std * 2
     high_norm = (prior.high - theta_train_mean) / theta_train_std * 2
+    prior_norm = torch.distributions.Uniform(
+        low_norm.to(device), high_norm.to(device)
+    )
     prior_score_fn_norm = get_vpdiff_uniform_score(
         low_norm.to(device), high_norm.to(device), score_network.to(device)
     )
@@ -160,22 +164,32 @@ def run_sample_sgm(
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
-        samples = score_network.predictor_corrector(
-            (nsamples,),
+        # samples = score_network.predictor_corrector(
+        #     (nsamples,),
+        #     x=context_norm.to(device),
+        #     steps=400,
+        #     prior_score_fun=prior_score_fn_norm,
+        #     eta=1,
+        #     corrector_lda=0,
+        #     n_steps=5,
+        #     r=0.5,
+        #     predictor_type="id",
+        #     verbose=True,
+        #     theta_clipping_range=theta_clipping_range,
+        # ).cpu()
+        samples = score_network.annealed_langevin_geffner(
+            shape=(nsamples,),
             x=context_norm.to(device),
+            prior_score_fn=prior_score_fn_norm,
             steps=400,
-            prior_score_fun=prior_score_fn_norm,
-            eta=1,
-            corrector_lda=0,
-            n_steps=5,
-            r=0.5,
-            predictor_type="id",
-            verbose=True,
+            lsteps=5,
+            tau=0.5,
             theta_clipping_range=theta_clipping_range,
+            verbose=True,
         ).cpu()
 
         # save  path
-        save_path += f"langevin_steps_400_5/"
+        save_path += f"langevin_steps_400_5_new/"
         if single_obs is not None:
             save_path += f"single_obs/"
             samples_filename = (
@@ -188,27 +202,8 @@ def run_sample_sgm(
 
     else:
         print()
-        print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
+        print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
-        # estimate cov
-        cov_est = vmap(
-            lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=1),
-            randomness="different",
-        )(context_norm.to(device))
-
-        cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
-
-        # define score function for tall posterior
-        score_fn = partial(
-            diffused_tall_posterior_score,
-            prior_type="uniform",
-            prior=None,  
-            prior_score_fn=prior_score_fn_norm,  # analytical prior score function
-            x_obs=context_norm.to(device),  # observations
-            nse=score_network,  # trained score network
-            dist_cov_est=cov_est,
-            cov_mode=cov_mode,
-        )
 
         cov_mode_name = cov_mode
         theta_clipping_range = (None, None)
@@ -216,24 +211,61 @@ def run_sample_sgm(
             theta_clipping_range = (-3, 3)
             cov_mode_name += "_clip"
 
-        # sample from tall posterior
-        (
-            samples,
-            _,
-        ) = euler_sde_sampler(
-            score_fn,
-            nsamples,
-            dim_theta=len(theta_true),
-            beta=score_network.beta,
-            device=device,
-            debug=False,
-            theta_clipping_range=theta_clipping_range,
-        )
+        cov_est = None
+        if cov_mode == "GAUSS":
+            # estimate cov
+            cov_est = vmap(
+                lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
+                randomness="different",
+            )(context_norm.to(device))
+            cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
+
+        if sampler_type == "ddim":
+            save_path += f"ddim_steps_{steps}/"
+
+            samples = score_network.ddim(
+                shape=(nsamples,),
+                x=context_norm.to(device),
+                eta=1 if steps == 1000 else 0.8 if steps == 400 else 0.5, # corresponds to the equivalent time setting from section 4.1
+                steps=steps,
+                theta_clipping_range=theta_clipping_range,
+                prior=prior_norm,
+                prior_type="uniform",
+                prior_score_fn=prior_score_fn_norm,
+                dist_cov_est=cov_est,
+                cov_mode=cov_mode,
+                verbose=True,
+            ).cpu()
+        else:
+            save_path += f"euler_steps_{steps}/"
+            # define score function for tall posterior
+            score_fn = partial(
+                diffused_tall_posterior_score,
+                prior_type="uniform",
+                prior=None,  
+                prior_score_fn=prior_score_fn_norm,  # analytical prior score function
+                x_obs=context_norm.to(device),  # observations
+                nse=score_network,  # trained score network
+                dist_cov_est=cov_est,
+                cov_mode=cov_mode,
+            )
+            # sample from tall posterior
+            (
+                samples,
+                _,
+            ) = euler_sde_sampler(
+                score_fn,
+                nsamples,
+                dim_theta=len(theta_true),
+                beta=score_network.beta,
+                device=device,
+                debug=False,
+                theta_clipping_range=theta_clipping_range,
+            )
 
         assert torch.isnan(samples).sum() == 0
 
         # save  path
-        save_path += f"euler_steps_{steps}/"
         if single_obs is not None:
             save_path += f"single_obs/"
             samples_filename = (
@@ -318,6 +350,13 @@ if __name__ == "__main__":
         default="GAUSS",
         choices=COV_MODES,
         help="covariance mode",
+    )
+    parser.add_argument(
+        "--sampler",
+        type=str,
+        default="ddim",
+        choices=["euler", "ddim"],
+        help="SDE sampler type",
     )
     parser.add_argument(
         "--langevin",
@@ -450,6 +489,7 @@ if __name__ == "__main__":
                         "x_train_std": x_train_std,  # for (un)normalization
                         "prior": prior,  # for score function
                         "cov_mode": args.cov_mode,
+                        "sampler_type": args.sampler,
                         "langevin": args.langevin,
                         "clip": args.clip,
                         "save_path": save_path,
@@ -464,13 +504,14 @@ if __name__ == "__main__":
                     "context": x_obs_100[:n_obs],
                     "nsamples": args.nsamples,
                     "score_network": score_network,
-                    "steps": args.steps,
+                    "steps": 1000 if args.cov_mode == "GAUSS" else 400, # corresponds to the equivalent time setting from section 4.1
                     "theta_train_mean": theta_train_mean,  # for (un)normalization
                     "theta_train_std": theta_train_std,  # for (un)normalization
                     "x_train_mean": x_train_mean,  # for (un)normalization
                     "x_train_std": x_train_std,  # for (un)normalization
                     "prior": prior,  # for score function
                     "cov_mode": args.cov_mode,
+                    "sampler_type": args.sampler,
                     "langevin": args.langevin,
                     "clip": args.clip,
                     "save_path": save_path,

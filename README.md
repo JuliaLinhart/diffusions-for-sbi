@@ -82,10 +82,10 @@ The script to reproduce experiments and generate figures are `jrnnm_posterior_es
   python jrnnm_posterior_estimation.py --run train --lr <1e-3/1e-4> --theta_dim <3/4>
   ```
   
-- To sample from the approximate posterior, run:
+- To sample from the approximate posterior for `n_obs = 1,8,14,22,30`, run:
   ```
-  python jrnnm_posterior_estimation.py --run sample --lr <1e-3/1e-4> --theta_dim <3/4>
+  python jrnnm_posterior_estimation.py --run sample_all --lr <1e-3/1e-4> --theta_dim <3/4>
   ```
-  and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used.
+  and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used. Specifying `--run sample --n_obs 30 --single_obs` will generate results for each of the `n_obs=30` observation seperately.
   
 - To reproduce the figures run `python jrnnm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.

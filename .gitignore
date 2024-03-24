@@ -8,9 +8,11 @@ __pycache__/
 *.png
 /results/jrnnm/4d/*/euler*/*
 /results/jrnnm/4d/*/langevin*/*
+/results/jrnnm/4d/*/ddim*/*
 /results/jrnnm/dataset*.pkl
 /results/jrnnm/3d/*/euler*/*
 /results/jrnnm/3d/*/langevin*/*
+/results/jrnnm/3d/*/ddim*/*
 /results/uniform/*
 /results/gaussian/*
 /results/sbibm/*/*/euler*/
