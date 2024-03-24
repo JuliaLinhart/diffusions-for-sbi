@@ -40,46 +40,52 @@ This will create CSV files in `path_to_save`.
 
 ### SBIBM examples (cf. Section 4.2):
 
-The script to reproduce experiments and generate figures are `sbibm_posterior_estomation.py` and `sbibm_results_rebuttal.py`:
+The script to reproduce experiments and generate figures are `sbibm_posterior_estomation.py` and `sbibm_results_rebuttal.py`. The tasks for which the results are shown in the main paper are `task_name = lotka_volterra`, `sir` and `slcp`. We also computes results for the following tasks: `gaussian_linear`, `gaussian_mixture/_uniform`, `bernoulli_glm/_raw`, `two_moons`. They will be included in the Appendix of the camera ready version of the paper.
+
 - To generate the training and reference data/posterior samples run:
   ```
   python sbibm_posterior_estimation.py --setup <all/train_data/reference_data/reference_posterior> --task <task_name>
   ```
   The data will be saved in the `tasks/sbibm/data/<task_name>` folder. 
+
 - To train the score models run:
   ```
   python sbibm_posterior_estimation.py --run train --n_train <1000/3000/10000/30000> --lr <1e-3/1e-4> --task <lotka_volterra/sir/slcp>
   ```
-  The trained score models will be saved in `results/sbibm`.
-  
+  The trained score models will be saved in `results/sbibm/<task_name>/`.
+
 - To sample from the approximate posterior for all observations (`num_obs = 1, ... 25`) and number of observations (`n_obs = 1,8,14,22,30`), run:
   ```
     python sbibm_posterior_estimation.py --run sample_all --n_train <1000/3000/10000/30000> --lr <1e-3/1e-4> --task <lotka_volterra/sir/slcp>
   ```
-  and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used.
+  and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used. The samples will be saved in the same folder as the used trained score model.
 
-- To reproduce the figures for the `sW` (resp. `MMD` or `MMD to Dirac`) metric, run:
+- To reproduce the figures for the `sW` (resp. `MMD` or `MMD to Dirac`) metric, first run
   ```
   python sbibm_results_rebuttal.py --compute_dist
   ```
-  to compute the distances (this might take some time) and then 
+  to compute the distances (this might take some time). Precomputed results can be found in `results/sbibm/<task_name>/metrics/`. 
+
+  To quickly generate the figures, run 
   ```
   python sbibm_results_rebuttal.py --plot_dist --swd
   ```
-  (resp `--mmd` or `--dirac`) to quickly generate the figures. Loss functions can be plotted using the `--losses` argument. To visualize the reference and estimated posterior samples, you can specify the `--plot_samples` argument.
+  (resp `--mmd` or `--dirac`). 
+  
+- Use the `--losses` argument to plot the loss functions and the `--plot_samples` argument to visualize the reference and estimated posterior samples.
 
 ### JR-NMM example (cf. Section 4.3)
 
-The script to reproduce experiments and generate figures are `jrnmm_posterior_estomation.py` and `jrnmm_results.py`:
+The script to reproduce experiments and generate figures are `jrnnm_posterior_estomation.py` and `jrnnm_results.py`. Results are saved in `results/jrnnm/<theta_dim>d/`.
 - To train the score models run:
   ```
-  python jrnmm_posterior_estimation.py --run train --lr <1e-3/1e-4> --theta_dim <3/4>
+  python jrnnm_posterior_estimation.py --run train --lr <1e-3/1e-4> --theta_dim <3/4>
   ```
   
 - To sample from the approximate posterior, run:
   ```
-  python sbibm_posterior_estimation.py --run sample --lr <1e-3/1e-4> --theta_dim <3/4>
+  python jrnnm_posterior_estimation.py --run sample --lr <1e-3/1e-4> --theta_dim <3/4>
   ```
   and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used.
   
-- To reproduce the figures run `python jrnmm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
+- To reproduce the figures run `python jrnnm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
