@@ -1,6 +1,6 @@
 import math
 from functools import partial
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
@@ -380,6 +380,7 @@ class NSE(nn.Module):
         shape: Size,
         x: Tensor,
         prior_score_fn: Callable[[torch.tensor, torch.tensor], torch.tensor],
+        prior_type: Optional[str] = None,
         steps: int = 400,
         lsteps: int = 5,
         tau: float = 0.5,
@@ -405,7 +406,7 @@ class NSE(nn.Module):
                     score = self.score(theta, x, t).detach()
                 else:
                     score = self.factorized_score_geffner(
-                        theta, x, t, prior_score_fn, **kwargs
+                        theta, x, t, prior_score_fn, prior_type=prior_type, **kwargs
                     ).detach()
 
                 theta = theta + delta * score + ((2 * delta) ** 0.5) * z
@@ -416,7 +417,7 @@ class NSE(nn.Module):
         return theta
 
     def factorized_score_geffner(
-        self, theta, x, t, prior_score_fun, **kwargs
+        self, theta, x, t, prior_score_fun, prior_type=None, **kwargs
     ):
         r"""Factorized score function for the tall data setting with n context observations x.
         From Geffner et al. (2023).
@@ -439,6 +440,11 @@ class NSE(nn.Module):
             scores = self.score(theta[:,None], x[None, :], t).detach()
 
         prior_score = prior_score_fun(theta[None], t)[0]
+        x_ = torch.zeros_like(x)
+        if prior_type == "clf_free_guidance":
+            prior_score_old = prior_score
+            prior_score = self.score(theta, x_, t).detach()
+            assert prior_score.shape == prior_score_old.shape, f"{prior_score.shape} != {prior_score_old.shape}"
         aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
         theta_.detach()
         return aggregated_score
@@ -480,6 +486,7 @@ class NSE(nn.Module):
             ).sum(dim=1)
 
             total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+
         else:
             prior_score = prior_score_fn(theta, t)
             total_score = (1 - n_obs) * prior_score + scores.sum(dim=1)
@@ -495,6 +502,28 @@ class NSE(nn.Module):
                 ).sum(dim=1)
 
                 total_score = torch.linalg.solve(A=lda, B=weighted_scores)
+
+        if prior_type == "clf_free_guidance":
+            x=torch.zeros((1, x_obs.shape[-1]))
+            prec_prior_0_t_cfg, _, prior_score_cfg = tweedies_approximation(
+                x=x,
+                theta=theta,
+                nse=self,
+                t=t,
+                score_fn=self.score,
+                dist_cov_est=dist_cov_est,
+                mode=cov_mode,
+            )
+            assert prior_score_cfg.shape == prior_score.shape, f"{prior_score_cfg.shape} != {prior_score.shape}"
+            assert prec_prior_0_t_cfg.shape == prec_prior_0_t.shape, f"{prec_prior_0_t_cfg.shape} != {prec_prior_0_t.shape}"
+            prec_score_prior_cfg = (prec_prior_0_t_cfg @ prior_score_cfg[..., None])[..., 0]
+            prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
+            lda = prec_prior_0_t_cfg * (1 - n_obs) + prec_0_t.sum(dim=1)
+            weighted_scores = prec_score_prior_cfg + (
+                prec_score_post - prec_score_prior_cfg[:, None]
+            ).sum(dim=1)
+
+            total_score = torch.linalg.solve(A=lda, B=weighted_scores)
 
         return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
 

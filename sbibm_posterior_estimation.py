@@ -57,6 +57,7 @@ def run_train_sgm(
     n_epochs,
     batch_size,
     lr,
+    clf_free_guidance=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -111,10 +112,10 @@ def run_train_sgm(
         n_epochs=n_epochs,
         lr=lr,
         batch_size=batch_size,
-        # track_loss=True,
         validation_split=0.2,
         early_stopping=True,
         min_nb_epochs=min_nb_epochs,
+        classifier_free_guidance=0.2 if clf_free_guidance else 0.,
     )
     score_network = avg_score_net.module
 
@@ -151,6 +152,7 @@ def run_sample_sgm(
     clip=False,
     theta_log_space=False,
     x_log_space=False,
+    clf_free_guidance=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -192,6 +194,8 @@ def run_sample_sgm(
         prior_score_fn_norm = get_vpdiff_gaussian_score(
             loc_norm.to(device), cov_norm.to(device), score_network.to(device)
         )
+    elif clf_free_guidance:
+        prior_type = "clf_free_guidance"
     else:
         raise NotImplementedError
 
@@ -215,6 +219,7 @@ def run_sample_sgm(
             shape=(nsamples,),
             x=context_norm.to(device),
             prior_score_fn=prior_score_fn_norm,
+            prior_type=prior_type,
             steps=400,
             lsteps=5,
             tau=0.5,
@@ -393,7 +398,9 @@ if __name__ == "__main__":
         help="whether to clip the samples during sampling",
     )
     parser.add_argument(
-        "--reference", action="store_true", help="whether to sample from ref. posterior"
+        "--clf_free_guidance",
+        action="store_true",
+        help="whether to use classifier free guidance to learn the diffused prior score",
     )
 
     # Parse Arguments
@@ -427,6 +434,10 @@ if __name__ == "__main__":
                 task_path
                 + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_log/"
             )
+
+        if args.clf_free_guidance:
+            save_path += "clf_free_guidance/"
+
         os.makedirs(save_path, exist_ok=True)
 
         print()
@@ -471,6 +482,7 @@ if __name__ == "__main__":
                 "n_epochs": args.n_epochs,
                 "batch_size": args.batch_size,
                 "lr": args.lr,
+                "clf_free_guidance": args.clf_free_guidance,
                 "save_path": save_path,
             }
         elif run_type == "sample":
@@ -516,6 +528,7 @@ if __name__ == "__main__":
                 "langevin": args.langevin,
                 "theta_log_space": args.task in ["lotka_volterra", "sir"],
                 "x_log_space": args.task == "lotka_volterra",
+                "clf_free_guidance": args.clf_free_guidance,
                 "save_path": save_path,
             }
 
