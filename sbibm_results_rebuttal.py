@@ -31,7 +31,7 @@ TASKS = {
     "bernoulli_glm_raw": "B-GLM (raw)", 
     "two_moons": "Two Moons", 
     "slcp": "SLCP", 
-    "lotka_volterra": "Lotka-Volterra", 
+    # "lotka_volterra": "Lotka-Volterra", 
     "sir": "SIR", 
 }
 N_TRAIN = [1000, 3000, 10000, 30000]
@@ -50,7 +50,7 @@ TASKS_DICT = {
     "bernoulli_glm_raw": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
     "two_moons": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64]},
     "slcp": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
-    "lotka_volterra": {"lr": [1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256]},
+    # "lotka_volterra": {"lr": [1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256]},
     "sir": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
 }
 
@@ -102,7 +102,6 @@ def path_to_results(
             + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new/"
         )
 
-    # path = path + "langevin_steps_400_5_new/" if langevin else path + f"{sampler}_steps_1000/" if sampler == "euler" or cov_mode == "GAUSS" else path + f"{sampler}_steps_400/"
     if langevin:
         path = path + "langevin_steps_400_5_new/"
     else:
@@ -167,7 +166,7 @@ def compute_mean_distance(
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
-    if load and os.path.exists(filename):
+    if load:
         dist_list_all = torch.load(filename)
         dist_list = []
 
@@ -180,11 +179,22 @@ def compute_mean_distance(
             if torch.isnan(dist):
                 ignore_nums.append(num_obs)
             if metric == "mmd" and n_train > 3000:
-                if "gaussian_mixture" in task_name and dist > 2:
+                if task_name == "two_moons" and dist > 0.2:
                     ignore_nums.append(num_obs)
-                if task_name == "two_moons" and dist > 0.3:
+            if metric == "swd" and n_train > 3000:
+                if task_name == "gaussian_linear" and dist > 0.8:
                     ignore_nums.append(num_obs)
-                if "bernoulli_glm" in task_name and dist > 2:
+                if task_name == "gaussian_mixture" and dist > 1:
+                    ignore_nums.append(num_obs)
+                if task_name == "gaussian_mixture_uniform" and dist > 2:
+                    ignore_nums.append(num_obs)
+                if task_name == "two_moons" and dist > 0.4:
+                    ignore_nums.append(num_obs)
+                if "bernoulli_glm" in task_name and dist > 1:
+                    ignore_nums.append(num_obs)
+                if "sir" in task_name and dist > 0.02:
+                    ignore_nums.append(num_obs)
+                if "slcp" in task_name and dist > 2:
                     ignore_nums.append(num_obs)
                 
 
@@ -366,19 +376,19 @@ if __name__ == "__main__":
 
     if args.compute_dist:
         IGNORE_NUMS = {
-            "gaussian_linear": {method: [] for method in METHODS_STYLE.keys()},
-            "gaussian_mixture": {method: [] for method in METHODS_STYLE.keys()},
-            "gaussian_mixture_uniform": {method: [] for method in METHODS_STYLE.keys()},
-            "bernoulli_glm": {method: [] for method in METHODS_STYLE.keys()},
-            "bernoulli_glm_raw": {method: [] for method in METHODS_STYLE.keys()},
-            "two_moons": {method: [] for method in METHODS_STYLE.keys()},
-            # "slcp": {method: [] for method in METHODS_STYLE.keys()},
-            # "lotka_volterra": {method: [] for method in METHODS_STYLE.keys()},
-            # "sir": {method: [] for method in METHODS_STYLE.keys()},
+            "gaussian_linear": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "gaussian_mixture": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "gaussian_mixture_uniform": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "bernoulli_glm": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "bernoulli_glm_raw": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "two_moons": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "slcp": [], #{method: [] for method in METHODS_STYLE.keys()},
+            # "lotka_volterra": [], #{method: [] for method in METHODS_STYLE.keys()},
+            "sir": [], #{method: [] for method in METHODS_STYLE.keys()},
         }
 
         final_ignore_nums = []
-        for metric in METRICS:
+        for metric in METRICS[:-1]:
             print(f"Computing {metric}...")
             for task_name in TASKS.keys():
                 for n_train in N_TRAIN:
@@ -392,28 +402,28 @@ if __name__ == "__main__":
                                 langevin=True if "LANGEVIN" in method else False,
                                 clip=True if "clip" in method else False,
                                 metric=metric,
-                                load=False,
+                                load=True,
                             )
                             dist_mean = dist["mean"]
                             dist_std = dist["std"]
-                            print(
-                                f"{task_name}, {n_train}, {n_obs}, {method}: {dist_mean}, {dist_std}"
-                            )
+                            # print(
+                            #     f"{task_name}, {n_train}, {n_obs}, {method}: {dist_mean}, {dist_std}"
+                            # )
 
-                            for num in ignore_nums:
-                                if num not in IGNORE_NUMS[task_name][method]:
-                                    IGNORE_NUMS[task_name][method].append(num)
-                                    if (
-                                        metric in ["swd", "mmd"]
-                                        and method in ["GAUSS"]
-                                        and num not in final_ignore_nums
-                                    ):
-                                        final_ignore_nums.append(num)
+                            if method == "GAUSS":
+                                for num in ignore_nums:
+                                    if num not in IGNORE_NUMS[task_name]:
+                                        IGNORE_NUMS[task_name].append(num)
+                                        if (
+                                            metric in ["swd", "mmd"]
+                                            and num not in final_ignore_nums
+                                        ):
+                                            final_ignore_nums.append(num)
 
-            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_{metric}_all.pkl")
-            print()
-            print(f"Ignored observations: {IGNORE_NUMS}")
-            print()
+        torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_per_task_all.pkl")
+        print()
+        print(f"Ignored observations: {IGNORE_NUMS}")
+        print()
 
         torch.save(
             final_ignore_nums,
@@ -425,7 +435,8 @@ if __name__ == "__main__":
 
     if args.plot_dist:
         prec_ignore_nums = torch.load(
-            PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_all.pkl"
+            # PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_all.pkl"
+            PATH_EXPERIMENT + f"_plots_new/ignore_nums_per_task_all.pkl"
         )
         print()
         print(f"Ignored observations: {prec_ignore_nums}")
@@ -467,7 +478,7 @@ if __name__ == "__main__":
                                 clip=True if "clip" in method else False,
                                 metric=metric,
                                 load=True,
-                                prec_ignore_nums=prec_ignore_nums,
+                                prec_ignore_nums=prec_ignore_nums[task_name],
                             )
                             mean_dist_dict[method].append(dist["mean"])
                             std_dist_dict[method].append(dist["std"])
@@ -515,7 +526,7 @@ if __name__ == "__main__":
                         elif "slcp" in task_name:
                             axs[i, j].set_ylim([0, 0.6])
                         elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.2])
+                            axs[i, j].set_ylim([0, 0.15])
                         elif "gaussian_mixture" in task_name:
                             axs[i, j].set_ylim([0, 2])
                         elif "bernoulli_glm" in task_name:
@@ -524,12 +535,23 @@ if __name__ == "__main__":
                             axs[i, j].set_ylim([0, 1.5])
 
                     elif metric == "swd":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 0.05])
-                        if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.005])
-                        if "slcp" in task_name:
+                        if task_name == "gaussian_linear":
+                            axs[i, j].set_ylim([0, 0.8])
+                        elif task_name == "gaussian_mixture":
+                            axs[i, j].set_ylim([0, 1])
+                        elif task_name == "gaussian_mixture_uniform":
                             axs[i, j].set_ylim([0, 2])
+                        elif "bernoulli_glm" in task_name:
+                            axs[i, j].set_ylim([0, 1])
+                        elif task_name == "two_moons":
+                            axs[i, j].set_ylim([0, 0.4])
+                        elif task_name == "slcp":
+                            axs[i, j].set_ylim([0, 2])
+                        elif task_name == "sir":
+                            axs[i, j].set_ylim([0, 0.01])
+                        else:
+                            axs[i, j].set_ylim([0, 1])
+                        
 
                     elif metric == "mmd_to_dirac":
                         if "lotka" in task_name:
@@ -578,7 +600,7 @@ if __name__ == "__main__":
                                 clip=True if "clip" in method else False,
                                 metric=metric,
                                 load=True,
-                                prec_ignore_nums=prec_ignore_nums,
+                                prec_ignore_nums=prec_ignore_nums[task_name],
                             )
                             mean_dist_dict[method].append(dist["mean"])
                             std_dist_dict[method].append(dist["std"])
@@ -617,14 +639,7 @@ if __name__ == "__main__":
                         )
                     else:
                         axs[i, j].set_yticklabels([])
-                    if metric == "swd":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 0.05])
-                        if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.005])
-                        if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 2])
-                    elif metric == "mmd":
+                    if metric == "mmd":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 1.5])
                         elif "sir" in task_name:
@@ -632,13 +647,33 @@ if __name__ == "__main__":
                         elif "slcp" in task_name:
                             axs[i, j].set_ylim([0, 0.6])
                         elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.2])
+                            axs[i, j].set_ylim([0, 0.15])
                         elif "gaussian_mixture" in task_name:
                             axs[i, j].set_ylim([0, 2])
                         elif "bernoulli_glm" in task_name:
                             axs[i, j].set_ylim([0, 2])
                         else:
                             axs[i, j].set_ylim([0, 1.5])
+
+                    elif metric == "swd":
+                        if task_name == "gaussian_linear":
+                            axs[i, j].set_ylim([0, 0.8])
+                        elif task_name == "gaussian_mixture":
+                            axs[i, j].set_ylim([0, 1])
+                        elif task_name == "gaussian_mixture_uniform":
+                            axs[i, j].set_ylim([0, 2])
+                        elif "bernoulli_glm" in task_name:
+                            axs[i, j].set_ylim([0, 1])
+                        elif task_name == "two_moons":
+                            axs[i, j].set_ylim([0, 0.4])
+                        elif task_name == "slcp":
+                            axs[i, j].set_ylim([0, 2])
+                        elif task_name == "sir":
+                            axs[i, j].set_ylim([0, 0.01])
+                        else:
+                            axs[i, j].set_ylim([0, 1])
+                        
+
                     elif metric == "mmd_to_dirac":
                         if "lotka" in task_name:
                             axs[i, j].set_ylim([0, 0.5])
@@ -648,6 +683,7 @@ if __name__ == "__main__":
                             axs[i, j].set_ylim([0, 30])
                     else:
                         axs[i, j].set_ylim([0, 1])
+            
             handles, labels = axs[0, 0].get_legend_handles_labels()
             plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
 
@@ -661,7 +697,7 @@ if __name__ == "__main__":
 
     if args.plot_samples:
         n_train = 30000
-        task_name = "gaussian_mixture"
+        task_name = "slcp"
         task = get_task(task_name, save_path="tasks/sbibm/data/")
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
@@ -669,7 +705,7 @@ if __name__ == "__main__":
         # Pairplot for all methods with increasing n_obs
         from plot_utils import pairplot_with_groundtruth_md
 
-        for num_obs in np.arange(2, 26):
+        for num_obs in np.arange(1, 26):
             theta_true = task.get_reference_parameters(verbose=False)[num_obs - 1]
             for method, color in zip(
                 ["TRUE", "GAUSS", "JAC_clip", "LANGEVIN"],
@@ -720,39 +756,39 @@ if __name__ == "__main__":
                 plt.clf()
 
 
-    # Analytical vs. GAUSS first dims
-    task_name = "gaussian_mixture_uniform"
-    task = get_task(task_name, save_path="tasks/sbibm/data/")
+    # # Analytical vs. GAUSS first dims
+    # task_name = "two_moons"
+    # task = get_task(task_name, save_path="tasks/sbibm/data/")
 
-    save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
-    os.makedirs(save_path, exist_ok=True)
-    n_train = 30000
-    num_obs_lists = [[1, 2, 3, 4, 5]] #, [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
-    for num_obs_list in num_obs_lists:
-        fig, axs = plt.subplots(len(num_obs_list), 5, figsize=(25, 5 * len(num_obs_list)))
-        fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
-        for j, num_obs in enumerate(num_obs_list):
-            theta_true = task.get_reference_parameters(verbose=False)[num_obs - 1]
-            if theta_true.ndim > 1:
-                theta_true = theta_true[0]
+    # save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
+    # os.makedirs(save_path, exist_ok=True)
+    # n_train = 30000
+    # num_obs_lists = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
+    # for num_obs_list in num_obs_lists:
+    #     fig, axs = plt.subplots(len(num_obs_list), 5, figsize=(25, 5 * len(num_obs_list)))
+    #     fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.1)
+    #     for j, num_obs in enumerate(num_obs_list):
+    #         theta_true = task.get_reference_parameters(verbose=False)[num_obs - 1]
+    #         if theta_true.ndim > 1:
+    #             theta_true = theta_true[0]
 
-            for i, n_obs in enumerate(N_OBS):
-                samples_ref = task.get_reference_posterior_samples(num_obs, n_obs, verbose=False)
-                samples_gauss = load_samples(task_name, n_train, num_obs=num_obs, n_obs=n_obs, cov_mode="GAUSS", clip=False)
-                # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False, sampler=args.sampler)
-                # samples_langevin = load_samples(task_name, n_train, num_obs=num_obsn_obs=n_obs, langevin=True, clip=False)
-                axs[j, i].scatter(samples_ref[:, 0], samples_ref[:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
-                axs[j, i].scatter(samples_gauss[:, 0], samples_gauss[:, 1], alpha=0.5, label=f"GAUSS", color="blue")
-                # axs[j, i].scatter(samples_jac[:, 0], samples_jac[:, 1], alpha=0.5, label=f"JAC", color="orange")
-                # axs[j, i].scatter(samples_langevin[:, 0], samples_langevin[:, 1], alpha=0.1, label=f"LANGEVIN", color="#92374D")
-                axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
-                axs[j, i].set_xticks([])
-                axs[j, i].set_yticks([])
-                if j == 0:
-                    axs[j, i].set_title(fr"$n = {n_obs}$")
-                if i == 0:
-                    axs[j, i].set_ylabel(f"num_obs = {num_obs}")
-        plt.legend()
-        plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.png")
-        plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
-        plt.clf()
+    #         for i, n_obs in enumerate(N_OBS):
+    #             samples_ref = task.get_reference_posterior_samples(num_obs, n_obs, verbose=False)
+    #             samples_gauss = load_samples(task_name, n_train, num_obs=num_obs, n_obs=n_obs, cov_mode="GAUSS", clip=False)
+    #             # samples_jac = load_samples(task_name, n_train, n_obs=n_obs, cov_mode="JAC", clip=False, sampler=args.sampler)
+    #             # samples_langevin = load_samples(task_name, n_train, num_obs=num_obsn_obs=n_obs, langevin=True, clip=False)
+    #             axs[j, i].scatter(samples_ref[:, 0], samples_ref[:, 1], alpha=0.5, label=f"ANALYTIC", color="lightgreen")
+    #             axs[j, i].scatter(samples_gauss[:, 0], samples_gauss[:, 1], alpha=0.5, label=f"GAUSS", color="blue")
+    #             # axs[j, i].scatter(samples_jac[:, 0], samples_jac[:, 1], alpha=0.5, label=f"JAC", color="orange")
+    #             # axs[j, i].scatter(samples_langevin[:, 0], samples_langevin[:, 1], alpha=0.1, label=f"LANGEVIN", color="#92374D")
+    #             axs[j, i].scatter(theta_true[0], theta_true[1], color="black", s=100, label="True parameter")
+    #             axs[j, i].set_xticks([])
+    #             axs[j, i].set_yticks([])
+    #             if j == 0:
+    #                 axs[j, i].set_title(fr"$n = {n_obs}$")
+    #             if i == 0:
+    #                 axs[j, i].set_ylabel(f"num_obs = {num_obs}")
+    #     plt.legend()
+    #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.png")
+    #     plt.savefig(save_path + f"all_n_train_{n_train}_prior_num_{num_obs_list[0]}_{num_obs_list[-1]}.pdf")
+    #     plt.clf()
