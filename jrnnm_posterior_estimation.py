@@ -160,7 +160,6 @@ def run_sample_sgm(
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
-        start_time = time.time()
         samples = score_network.predictor_corrector(
             (nsamples,),
             x=context_norm.to(device),
@@ -174,8 +173,6 @@ def run_sample_sgm(
             verbose=True,
             theta_clipping_range=theta_clipping_range,
         ).cpu()
-        time_elapsed = time.time() - start_time
-        results_dict = None
 
         # save  path
         save_path += f"langevin_steps_400_5/"
@@ -188,21 +185,18 @@ def run_sample_sgm(
             samples_filename = (
                 save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
             )
-            time_filename = save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
 
     else:
         print()
         print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
         # estimate cov
-        # start_time = time.time()
         cov_est = vmap(
             lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=1),
             randomness="different",
         )(context_norm.to(device))
 
         cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
-        # time_cov_est = time.time() - start_time
 
         # define score function for tall posterior
         score_fn = partial(
@@ -214,9 +208,6 @@ def run_sample_sgm(
             nse=score_network,  # trained score network
             dist_cov_est=cov_est,
             cov_mode=cov_mode,
-            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
-            # psd_clipping=True if cov_mode == 'JAC' else False,
-            # scale_gradlogL=True,
         )
 
         cov_mode_name = cov_mode
@@ -226,15 +217,9 @@ def run_sample_sgm(
             cov_mode_name += "_clip"
 
         # sample from tall posterior
-        start_time = time.time()
         (
             samples,
-            all_samples,
-            # gradlogL,
-            # lda,
-            # posterior_scores,
-            # means_posterior_backward,
-            # sigma_posterior_backward,
+            _,
         ) = euler_sde_sampler(
             score_fn,
             nsamples,
@@ -244,18 +229,8 @@ def run_sample_sgm(
             debug=False,
             theta_clipping_range=theta_clipping_range,
         )
-        time_elapsed = time.time() - start_time  # + time_cov_est
 
         assert torch.isnan(samples).sum() == 0
-
-        # results_dict = {
-        #     "all_theta_learned": all_samples,
-        #     # "gradlogL": gradlogL,
-        #     # "lda": lda,
-        #     # "posterior_scores": posterior_scores,
-        #     # "means_posterior_backward": means_posterior_backward,
-        #     # "sigma_posterior_backward": sigma_posterior_backward,
-        # }
 
         # save  path
         save_path += f"euler_steps_{steps}/"
@@ -270,13 +245,6 @@ def run_sample_sgm(
                 save_path
                 + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
             )
-        # results_dict_filename = (
-        #     save_path
-        #     + f"results_dict_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        # )
-        time_filename = (
-            save_path + f"time_{theta_true.tolist()}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        )
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -288,11 +256,6 @@ def run_sample_sgm(
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
-    if single_obs is None:
-        torch.save(time_elapsed, time_filename)
-    # if results_dict is not None:
-    #     torch.save(results_dict, results_dict_filename)
-
 
 if __name__ == "__main__":
     # Define Arguments
@@ -463,6 +426,7 @@ if __name__ == "__main__":
                 save_path + f"score_network.pkl",
                 map_location=torch.device("cpu"),
             )
+            score_network.net_type = "default"
 
             # Mean and std of training data
             means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
