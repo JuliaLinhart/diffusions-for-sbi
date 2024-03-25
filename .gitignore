@@ -18,6 +18,9 @@ __pycache__/
 /results/sbibm/*/*/euler*/
 /results/sbibm/*/*/ddim*/
 /results/sbibm/*/*/langevin*/
+/results/sbibm/*/*/*/euler*/
+/results/sbibm/*/*/*/ddim*/
+/results/sbibm/*/*/*/langevin*/
 /results/sbibm/*/*metrics*/
 /results/sbibm/*good/
 /results/*/_*/

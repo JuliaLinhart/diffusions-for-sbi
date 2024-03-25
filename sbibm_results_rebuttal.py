@@ -61,16 +61,10 @@ METRICS = ["mmd", "swd", "mmd_to_dirac"]
 
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS, batch_size=BATCH_SIZE):
-    if task_name == "lotka_volterra":
-        path = (
-            path
-            + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new_log/"
-        )
-    else:
-        path = (
-            path
-            + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}_new/"
-        )
+    path = (
+        path
+        + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{n_epochs}_lr_{lr}/"
+    )
     losses = torch.load(path + f"train_losses.pkl")
     train_losses = losses["train_losses"]
     val_losses = losses["val_losses"]
@@ -352,8 +346,8 @@ if __name__ == "__main__":
                         axs[i, j].set_ylabel(TASKS[task_name])
                     axs[i, j].set_ylim([0, 0.5])
             axs[i, j].legend()
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/losses_bs_{bs}_all.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_new/sbibm_losses_bs_{bs}_all.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuutal/losses_bs_{bs}.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuutal/sbibm_losses_bs_{bs}.pdf")
             plt.clf()
 
         # print losses to select lr and bs
@@ -420,14 +414,14 @@ if __name__ == "__main__":
                                         ):
                                             final_ignore_nums.append(num)
 
-        torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"_plots_new/ignore_nums_per_task_all.pkl")
+        torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
         print()
         print(f"Ignored observations: {IGNORE_NUMS}")
         print()
 
         torch.save(
             final_ignore_nums,
-            PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_all.pkl",
+            PATH_EXPERIMENT + f"ignore_nums_final.pkl",
         )
         print()
         print(f"Final ignored observations: {final_ignore_nums}")
@@ -435,8 +429,8 @@ if __name__ == "__main__":
 
     if args.plot_dist:
         prec_ignore_nums = torch.load(
-            # PATH_EXPERIMENT + f"_plots_new/ignore_nums_final_all.pkl"
-            PATH_EXPERIMENT + f"_plots_new/ignore_nums_per_task_all.pkl"
+            # PATH_EXPERIMENT + f"ignore_nums_final.pkl"
+            PATH_EXPERIMENT + f"ignore_nums_per_task.pkl"
         )
         print()
         print(f"Ignored observations: {prec_ignore_nums}")
@@ -567,10 +561,10 @@ if __name__ == "__main__":
             plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
 
             plt.savefig(
-                PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_all.png"
+                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_train.png"
             )
             plt.savefig(
-                PATH_EXPERIMENT + f"_plots_new/{metric}_n_train_all.pdf"
+                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_train.pdf"
             )
             plt.clf()
 
@@ -688,10 +682,10 @@ if __name__ == "__main__":
             plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
 
             plt.savefig(
-                PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_all.png"
+                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_obs.png"
             )
             plt.savefig(
-                PATH_EXPERIMENT + f"_plots_new/{metric}_n_obs_all.pdf"
+                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_obs.pdf"
             )
             plt.clf()
 
@@ -747,11 +741,11 @@ if __name__ == "__main__":
                 )
                 plt.savefig(
                     save_path
-                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}_all.png"
+                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png"
                 )
                 plt.savefig(
                     save_path
-                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}_all.pdf"
+                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf"
                 )
                 plt.clf()
 
