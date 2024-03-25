@@ -176,8 +176,10 @@ class Gaussian_MixtGaussian_mD:
                 loc=posterior_0.component_distribution.loc * (alpha_t**0.5),
                 covariance_matrix=cov * alpha_t
                 + (1 - alpha_t) * torch.eye(cov.shape[-1])[None].to(cov.device),
+                validate_args=False,
             ),
             mixture_distribution=posterior_0.mixture_distribution,
+            validate_args=False,
         )
 
 
@@ -256,3 +258,36 @@ class SBIGaussian2d:
         )
 
         return posterior
+    
+
+class Conjugate_GammaPrior():
+    """Conjugate prior for the Gaussian likelihood with known mean.
+
+    - The simulator is a Gaussian distribution with known mean and unknown variance.
+    - The prior is a Gamma distribution.
+    - The task is to infer the precision (inverse variance) from the observed data.
+    """
+    def __init__(self, alpha, beta, mu=0) -> None:
+        self.alpha = alpha
+        self.beta = beta
+        self.mu = mu
+
+        self.prior = torch.distributions.Gamma(alpha, beta)
+
+
+    def simulator(self, theta):
+        return torch.distributions.Normal(loc=self.mu, scale=1 / theta.sqrt()).sample()
+    
+    def true_posterior(self, x_obs):
+        """Gets posterior for the case with multiple observations
+
+        Args:
+            x_obs: observations to condition on
+
+        Returns:
+            Posterior distribution
+        """
+        N = len(x_obs)
+        alpha_post = self.alpha + N / 2
+        beta_post = self.beta + 0.5 * (x_obs - self.mu).square().sum()
+        return torch.distributions.Gamma(alpha_post, beta_post)
