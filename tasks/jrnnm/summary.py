@@ -1,8 +1,7 @@
 from functools import partial
 
-from scipy.signal import welch
-
 import torch
+from scipy.signal import welch
 from torch import nn
 
 torch.autograd.set_detect_anomaly(True)

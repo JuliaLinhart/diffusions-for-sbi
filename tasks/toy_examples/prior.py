@@ -1,6 +1,6 @@
 import torch
-
 from sbi.utils import BoxUniform
+
 from vp_diffused_priors import get_vpdiff_uniform_score
 
 bounds = {

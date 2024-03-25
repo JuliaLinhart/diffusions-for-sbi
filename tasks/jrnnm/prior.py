@@ -1,5 +1,4 @@
 import torch
-
 from sbi.utils import BoxUniform
 
 parameters = [
@@ -49,7 +48,7 @@ if __name__ == "__main__":
     print(prior.bounds)
     print(prior.low)
     print(prior.high)
-    
+
     low = (prior.low - theta.mean(0)) / theta.std(0) * 2
     high = (prior.high - theta.mean(0)) / theta.std(0) * 2
 
