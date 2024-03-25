@@ -1,22 +1,20 @@
-Following installations are required for the `jrnnm` sbi-task:
+Following installation steps are required to reproduce the experiemts for the JR-NMM SBI example:
 
-create conda environment:
+Create conda environment:
 `conda create --channel conda-forge -n jrnnm`
 
-prepare work environment:
+Prepare work environment:
 - `nano ~/.bashrc` and write `export LC_ALL=fr_FR.UTF-8`
 - `source ~/.bashrc`
 
-install packages with `conda`:
+Install packages with `conda`:
 - r-devtools
 - rpy2
 - pytorch torchvision -c pytorch
 - numpy
 - -c r r-bh
 
-install `sdbmABC` package (simualtor):
-run `Rscript -e "devtools::install_github('massimilianotamborrino/sdbmpABC')"`
+Install `sdbmABC` package (for the simualtor model):
+- run `Rscript -e "devtools::install_github('massimilianotamborrino/sdbmpABC')"`
 
-
-install additional packages with `pip`:
-- sbi
+Install the general dependencies of this repository via `pip install -e .`

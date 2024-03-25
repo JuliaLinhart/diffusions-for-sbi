@@ -275,4 +275,3 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     return g
 
 
-
