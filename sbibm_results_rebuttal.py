@@ -31,7 +31,7 @@ TASKS = {
     "bernoulli_glm_raw": "B-GLM (raw)", 
     "two_moons": "Two Moons", 
     "slcp": "SLCP", 
-    # "lotka_volterra": "Lotka-Volterra", 
+    "lotka_volterra": "Lotka-Volterra", 
     "sir": "SIR", 
 }
 N_TRAIN = [1000, 3000, 10000, 30000]
@@ -50,7 +50,7 @@ TASKS_DICT = {
     "bernoulli_glm_raw": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
     "two_moons": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [64, 64, 64, 64]},
     "slcp": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
-    # "lotka_volterra": {"lr": [1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256]},
+    "lotka_volterra": {"lr": [1e-3, 1e-3, 1e-3, 1e-3], "bs": [256, 256, 256, 256]},
     "sir": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
 }
 
@@ -91,7 +91,7 @@ def path_to_results(
         path = path + f"clf_free_guidance/"
 
     if langevin:
-        path = path + "langevin_steps_400_5_new/"
+        path = path + "langevin_steps_400_5/"
     else:
         path = (
             path + f"{sampler}_steps_1000/"
@@ -267,7 +267,7 @@ def compute_mean_distance(
     return dist_dict, ignore_nums
 
 
-def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums):
+def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=""):
 
     n_rows = len(task_names)
     n_cols = len(N_OBS)
@@ -382,10 +382,10 @@ def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums)
     plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
 
     plt.savefig(
-        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train.png"
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train{title_ext}.png"
     )
     plt.savefig(
-        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train.pdf"
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train{title_ext}.pdf"
     )
     plt.clf()
 
@@ -504,10 +504,10 @@ def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums)
     plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
 
     plt.savefig(
-        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs.png"
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs{title_ext}.png"
     )
     plt.savefig(
-        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs.pdf"
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs{title_ext}.pdf"
     )
     plt.clf()
 
@@ -615,7 +615,7 @@ if __name__ == "__main__":
     if args.compute_dist:
 
         if args.clf_free_guidance:
-            task_names = ["slcp", "sir"] #"lotka_volterra",
+            task_names = ["lotka_volterra", "slcp", "sir"] 
             method_names = ["GAUSS_cfg"]
         else:
             task_names = TASKS.keys()
@@ -694,13 +694,16 @@ if __name__ == "__main__":
             if args.clf_free_guidance:
                 task_names = ["slcp", "sir"] #"lotka_volterra",
                 method_names = ["GAUSS", "GAUSS_cfg"]
+                title_ext = "_cfg"
             else:
                 task_names = TASKS.keys()
                 method_names = METHODS_STYLE.keys()
                 # remove cfg 
                 method_names = [method for method in method_names if "cfg" not in method]
+                title_ext = ""
+            
             # plot mean distance as function of n_train, then n_obs
-            plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums)
+            plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=title_ext)
             
 
     if args.plot_samples:

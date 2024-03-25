@@ -225,7 +225,7 @@ def run_sample_sgm(
             verbose=True,
         ).cpu()
 
-        save_path += f"langevin_steps_400_5_new/"
+        save_path += f"langevin_steps_400_5/"
         samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
     else:
         print()
