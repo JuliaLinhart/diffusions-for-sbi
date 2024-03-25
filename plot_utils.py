@@ -1,74 +1,37 @@
-import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+import matplotlib
+import matplotlib.pyplot as plt
 from lampe.plots import corner
-from tueplots import axes, fonts
 
+from tueplots import fonts, axes
 
-def set_plotting_style():
-    plt.rcParams.update(fonts.neurips2022())
+def set_plotting_style(size=5):
+    style = fonts.neurips2022()
+    # delete the font.serif key to use the default font
+    del style["font.serif"]
+    plt.rcParams.update(style)
     plt.rcParams.update(axes.color(base="black"))
-    plt.rcParams["legend.fontsize"] = 25.0
-    plt.rcParams["xtick.labelsize"] = 25.0
-    plt.rcParams["ytick.labelsize"] = 25.0
-    plt.rcParams["axes.labelsize"] = 30.0
-    plt.rcParams["font.size"] = 30.0
-    plt.rcParams["axes.titlesize"] = 30.0
+    plt.rcParams["legend.fontsize"] = size * 5
+    plt.rcParams["xtick.labelsize"] = size * 5
+    plt.rcParams["ytick.labelsize"] = size * 5
+    plt.rcParams["axes.labelsize"] = size * 6
+    plt.rcParams["font.size"] = size * 6
+    plt.rcParams["axes.titlesize"] = size * 6
     alpha = 0.9
     alpha_fill = 0.1
     return alpha, alpha_fill
 
-
-markersize = plt.rcParams["lines.markersize"] * 1.5
+markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
-    "GAUSS": {
-        "label": "GAUSS",
-        "color": "blue",
-        "marker": "o",
-        "linestyle": "-",
-        "linewidth": 3,
-        "markersize": markersize + 0.5,
-    },
-    "GAUSS_clip": {
-        "label": "GAUSS (clip)",
-        "color": "blue",
-        "marker": "o",
-        "linestyle": "--",
-        "linewidth": 4,
-        "markersize": markersize,
-    },
-    "JAC": {
-        "label": "JAC",
-        "color": "orange",
-        "marker": "o",
-        "linestyle": "-",
-        "linewidth": 3,
-        "markersize": markersize,
-    },
-    "JAC_clip": {
-        "label": "JAC (clip)",
-        "color": "orange",
-        "marker": "o",
-        "linestyle": "--",
-        "linewidth": 4,
-        "markersize": markersize,
-    },
-    "LANGEVIN": {
-        "label": "LANGEVIN",
-        "color": "#92374D",
-        "marker": "o",
-        "linestyle": "-",
-        "linewidth": 3,
-        "markersize": markersize,
-    },
-    "LANGEVIN_clip": {
-        "label": "LANGEVIN (clip)",
-        "color": "#92374D",
-        "marker": "o",
-        "linestyle": "--",
-        "linewidth": 4,
-        "markersize": markersize,
-    },
+    "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
+    "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    # "LANGEVIN_ours": {"label":"LANGEVIN (ours)", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    # "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
+    "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
+    # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
+    "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
 }
 
 METRICS_STYLE = {
@@ -78,13 +41,11 @@ METRICS_STYLE = {
     "mmd_to_dirac": {"label": "MMD to Dirac"},
 }
 
-
 def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
     fig = None
     for s, l, c in zip(samples_list, legends, colors):
         fig = corner(s, legend=l, color=c, figure=fig, smooth=2, **kwargs)
         plt.suptitle(title)
-
 
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_2d(
@@ -135,7 +96,6 @@ def pairplot_with_groundtruth_2d(
 
     return pg
 
-
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_md(
     samples_list,
@@ -143,9 +103,19 @@ def pairplot_with_groundtruth_md(
     colors,
     theta_true=None,
     param_names=None,
+    title="",
     plot_bounds=None,
-):
-    columns = [r"$\theta_1$", rf"$\theta_2$"]
+    ignore_ticks=False,
+    ignore_xylabels=False,
+    legend = True,
+    size=5,
+):  
+    
+    # # adjust marker size
+    # markersize = plt.rcParams['lines.markersize']
+    # plt.rcParams['lines.markersize'] = markersize - (samples_list[0].shape[-1] * 0.2)
+
+    columns = [rf"$\theta_{i+1}$" for i in range(len(samples_list[0][0]))]
     if param_names is not None:
         columns = param_names
 
@@ -157,40 +127,61 @@ def pairplot_with_groundtruth_md(
 
     dfs = pd.concat(dfs, ignore_index=True)
 
-    pg = sns.pairplot(
+    pg = sns.PairGrid(
         dfs,
         hue="Distribution",
-        corner=True,
         palette=dict(zip(labels, colors)),
+        corner=True,
+        diag_sharey=False,
     )
+
+    pg.fig.set_size_inches(size, size)
+
+    pg.map_lower(sns.kdeplot, linewidths=2, constrained_layout=False, zorder=1)
+    pg.map_diag(sns.kdeplot, fill=True, linewidths=2, alpha=0.1)
 
     if theta_true is not None:
         if theta_true.ndim > 1:
             theta_true = theta_true[0]
-            dim = len(theta_true)
+        dim = len(theta_true)
         for i in range(dim):
-            # plot dirac on diagonal
-            pg.axes.ravel()[i * (dim + 1)].axvline(
-                x=theta_true[i], ls="--", linewidth=2, c="black"
-            )
+            # plot dirac on diagonal 
+            pg.axes.ravel()[i*(dim+1)].axvline(x=theta_true[i], linewidth=2, ls="--", c="black")
+            # place above the kdeplots
+            pg.axes.ravel()[i*(dim+1)].set_zorder(1000)
             # plot point on off-diagonal, lower triangle
             for j in range(i):
-                pg.axes.ravel()[i * dim + j].scatter(
-                    theta_true[j],
-                    theta_true[i],
-                    marker="o",
-                    c="black",
-                    s=50,
-                    edgecolor="white",
-                )
+                pg.axes.ravel()[i*dim+j].scatter(
+                    theta_true[j], theta_true[i], marker="o", c="black", edgecolor='white', #s=plt.rcParams['lines.markersize'] - (dim * 0.1),
+                )  
+                # place above the kdeplots
+                pg.axes.ravel()[i*dim+j].set_zorder(10000)      
 
     if plot_bounds is not None:
         # set plot bounds
         for i in range(dim):
-            pg.axes.ravel()[i * (dim + 1)].set_xlim(plot_bounds[i])
+            pg.axes.ravel()[i*(dim+1)].set_xlim(plot_bounds[i])
             for j in range(i):
-                pg.axes.ravel()[i * dim + j].set_xlim(plot_bounds[j])
-                pg.axes.ravel()[i * dim + j].set_ylim(plot_bounds[i])
+                pg.axes.ravel()[i*dim+j].set_xlim(plot_bounds[j])
+                pg.axes.ravel()[i*dim+j].set_ylim(plot_bounds[i])
+
+    if ignore_ticks:
+        # remove x and y tick labels
+        for ax in pg.axes.ravel():
+            if ax is not None:
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+    
+    if ignore_xylabels:
+        # remove xlabels and ylabels
+        for ax in pg.axes.ravel():
+            if ax is not None:
+                ax.set_xlabel('')
+                ax.set_ylabel('')
+
+    if legend:
+        # add legend
+        pg.add_legend(title=title)
 
     return pg
 
@@ -204,8 +195,7 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     dfs = []
     for n in range(len(samples)):
         df = pd.DataFrame(
-            samples[n].detach().numpy(),
-            columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"][:dim],
+            samples[n].detach().numpy(), columns=[r"$C$", r"$\mu$", r"$\sigma$", r"$g$"][:dim]
         )
         df["Distribution"] = labels[n]
         dfs.append(df)
@@ -217,9 +207,9 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
         hue="Distribution",
         palette=dict(zip(labels, colors)),
         diag_sharey=False,
-        corner=True,
+        corner=True
     )
-
+    
     g.fig.set_size_inches(8, 8)
 
     g.map_lower(sns.kdeplot, linewidths=3, constrained_layout=False)
@@ -273,9 +263,7 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
             g.axes[1][1].axvline(x=mu, ls="--", c="black", linewidth=1, zorder=100)
             g.axes[2][2].axvline(x=sigma, ls="--", c="black", linewidth=1, zorder=100)
             if dim == 4:
-                g.axes[3][3].axvline(
-                    x=gain, ls="--", c="black", linewidth=1, zorder=100
-                )
+                g.axes[3][3].axvline(x=gain, ls="--", c="black", linewidth=1, zorder=100)
 
     handles, labels = g.axes[0][0].get_legend_handles_labels()
     # make handle lines larger
@@ -284,3 +272,5 @@ def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     g.add_legend(handles=handles, labels=labels, title="")
 
     return g
+
+

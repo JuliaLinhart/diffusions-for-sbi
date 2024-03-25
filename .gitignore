@@ -1,27 +1,33 @@
 # Distribution / packaging
 __pycache__/
 *.egg-info/
-__init__.py
 .DS_Store
 
-# *.pkl
 *.pdf
 *.png
 /results/jrnnm/4d/*/euler*/*
 /results/jrnnm/4d/*/langevin*/*
+/results/jrnnm/4d/*/ddim*/*
 /results/jrnnm/dataset*.pkl
 /results/jrnnm/3d/*/euler*/*
 /results/jrnnm/3d/*/langevin*/*
+/results/jrnnm/3d/*/ddim*/*
 /results/uniform/*
 /results/gaussian/*
-score_net*.pkl
-*train_losses*.pkl
-/results/sbibm
+/results/sbibm/*/*/euler*/
+/results/sbibm/*/*/ddim*/
+/results/sbibm/*/*/langevin*/
+/results/sbibm/*/*/*/euler*/
+/results/sbibm/*/*/*/ddim*/
+/results/sbibm/*/*/*/langevin*/
+/results/sbibm/*/*metrics*/
+/results/sbibm/*good/
+/results/*/_*/
 
 /notebooks
 /test_toy
-
-nse_new.py
-pf_npse.py
-gaussian_dim_scale_experiment.py
-gaussian_dim_scale_results.py
+*old*
+*dataset*
+sbibm_results_submission*
+sbibm_results_new*
+debug*

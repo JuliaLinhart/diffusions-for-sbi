@@ -1,35 +1,55 @@
-# Script for the SBIBM posterior estimation tasks from section 4.2 of the paper.
-#
-# Commented parts involve the MCMC sampling of the true posterior using jax and numpyro.
-# Precomputed samples are available for the results computation and loaded in sbibm_results.py.
-# You will need to comment out these lines if you want to run the MCMC sampling.
-
-import argparse
+import numpy as np
 import os
-import time
-from functools import partial
-
 import torch
-from torch.func import vmap
-from tqdm import tqdm
-from zuko.nn import MLP
 
+from functools import partial
 from nse import NSE, NSELoss
 from sm_utils import train_with_validation as train
-from tall_posterior_sampler import (diffused_tall_posterior_score,
-                                    euler_sde_sampler)
-from tasks.sbibm.data_generators import get_task  # , get_multiobs_task
-from vp_diffused_priors import (get_vpdiff_gaussian_score,
-                                get_vpdiff_uniform_score)
+from torch.func import vmap
+
+from zuko.nn import MLP
+
+from tasks.sbibm import get_task 
+from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
+from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
 
 PATH_EXPERIMENT = "results/sbibm/"
-NUM_OBSERVATION_LIST = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+NUM_OBSERVATION_LIST = list(np.arange(1,26))
 
-N_TRAIN_LIST = [1000, 3000, 10000, 30000]
+N_TRAIN_LIST = [1000, 3000, 10000, 30000] #, 50000]
+MAX_N_TRAIN = 50_000
 N_OBS_LIST = [1, 8, 14, 22, 30]
+MAX_N_OBS = 100
+NUM_SAMPLES = 1000
 
 COV_MODES = ["GAUSS", "JAC"]
 
+def setup(task, all=True, train_data=False, reference_data=False, reference_posterior=False):
+        kwargs = {}
+        if task.name != "gaussian_linear":
+            from jax import random
+            rng_key = random.PRNGKey(1)
+            kwargs = {"rng_key": rng_key}
+        if all:
+            train_data = True
+            reference_data = True
+            reference_posterior = True
+        if train_data:
+            data = task.generate_training_data(n_simulations=MAX_N_TRAIN)
+            print("Training data:", data["x"].shape, data["theta"].shape)
+        if reference_data:
+            data = task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
+            print("Reference data:", data[0].shape, data[1][1].shape)
+        if reference_posterior:
+            num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
+            n_obs_list = N_OBS_LIST
+            for num_obs in num_obs_list:
+                for n_obs in n_obs_list:
+                    data = task.generate_reference_posterior_samples(
+                        num_obs=num_obs, n_obs=n_obs, num_samples=NUM_SAMPLES, **kwargs
+                    )
+            print("Posterior samples:", data.shape)
+        return
 
 def run_train_sgm(
     theta_train,
@@ -37,6 +57,7 @@ def run_train_sgm(
     n_epochs,
     batch_size,
     lr,
+    clf_free_guidance=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -57,18 +78,12 @@ def run_train_sgm(
     )
 
     # Score network
-    # embedding nets
     theta_dim = theta_train.shape[-1]
     x_dim = x_train.shape[-1]
-    theta_embedding_net = MLP(theta_dim, 32, [64, 64, 64])
-    x_embedding_net = MLP(x_dim, 32, [64, 64, 64])
     score_network = NSE(
         theta_dim=theta_dim,
         x_dim=x_dim,
-        embedding_nn_theta=theta_embedding_net,
-        embedding_nn_x=x_embedding_net,
-        hidden_features=[128, 256, 128],
-        freqs=32,
+        hidden_features=[256, 256, 256],
     ).to(device)
 
     # Train score network
@@ -84,10 +99,11 @@ def run_train_sgm(
     print()
 
     if theta_train.shape[0] > 10000:
-        min_nb_epochs = n_epochs * 0.8  # 4000
+        # min_nb_epochs = n_epochs * 0.8 # 4000
+        min_nb_epochs = 2000
     else:
         min_nb_epochs = 100
-
+    
     # Train Score Network
     avg_score_net, train_losses, val_losses, best_epoch = train(
         score_network,
@@ -96,10 +112,10 @@ def run_train_sgm(
         n_epochs=n_epochs,
         lr=lr,
         batch_size=batch_size,
-        # track_loss=True,
         validation_split=0.2,
         early_stopping=True,
         min_nb_epochs=min_nb_epochs,
+        classifier_free_guidance=0.2 if clf_free_guidance else 0.,
     )
     score_network = avg_score_net.module
 
@@ -113,11 +129,7 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {
-            "train_losses": train_losses,
-            "val_losses": val_losses,
-            "best_epoch": best_epoch,
-        },
+        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
         save_path + f"train_losses.pkl",
     )
 
@@ -135,9 +147,12 @@ def run_sample_sgm(
     prior,
     prior_type,
     cov_mode,
+    sampler_type="euler",
     langevin=False,
     clip=False,
-    log_space=False,
+    theta_log_space=False,
+    x_log_space=False,
+    clf_free_guidance=False,
     save_path=PATH_EXPERIMENT,
 ):
     # Set Device
@@ -147,9 +162,9 @@ def run_sample_sgm(
 
     n_obs = context.shape[0]
 
-    # # normalize context
-    # if log_space:
-    #     context = torch.log(context)
+    # normalize context
+    if x_log_space:
+        context = torch.log(context)
     context_norm = (context - x_train_mean) / x_train_std
     # replace nan by 0 (due to std in sir for n_train = 1000)
     context_norm = torch.nan_to_num(context_norm, nan=0.0, posinf=0.0, neginf=0.0)
@@ -165,16 +180,14 @@ def run_sample_sgm(
             low_norm.to(device), high_norm.to(device), score_network.to(device)
         )
     elif prior_type == "gaussian":
-        if log_space:
+        if theta_log_space:
             loc = prior.base_dist.loc
             cov = torch.diag_embed(prior.base_dist.scale.square())
         else:
             loc = prior.loc
             cov = prior.covariance_matrix
         loc_norm = (loc - theta_train_mean) / theta_train_std
-        cov_norm = (
-            torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
-        )
+        cov_norm = torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
         prior_norm = torch.distributions.MultivariateNormal(
             loc_norm.to(device), cov_norm.to(device)
         )
@@ -199,107 +212,108 @@ def run_sample_sgm(
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
-        start_time = time.time()
-        samples = score_network.predictor_corrector(
-            (nsamples,),
-            x=context_norm.to(device),
-            steps=400,
-            prior_score_fun=prior_score_fn_norm,
-            eta=1,
-            corrector_lda=0,
-            n_steps=5,
-            r=0.5,
-            predictor_type="id",
-            verbose=True,
-            theta_clipping_range=theta_clipping_range,
-        ).cpu()
-        time_elapsed = time.time() - start_time
-        results_dict = None
 
-        save_path += f"langevin_steps_400_5/"
-        samples_filename = (
-            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}.pkl"
-        )
-        time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}{ext}.pkl"
+        samples = score_network.annealed_langevin_geffner(
+            shape=(nsamples,),
+            x=context_norm.to(device),
+            prior_score_fn=prior_score_fn_norm,
+            clf_free_guidance=clf_free_guidance,
+            steps=400,
+            lsteps=5,
+            tau=0.5,
+            theta_clipping_range=theta_clipping_range,
+            verbose=True,
+        ).cpu()
+
+        save_path += f"langevin_steps_400_5_new/"
+        samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
     else:
         print()
-        print(f"Using EULER sampler, cov_mode = {cov_mode}, clip = {clip}.")
+        print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
         print()
 
-        # estimate cov
-        # start_time = time.time()
-        cov_est = vmap(
-            lambda x: score_network.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
-            randomness="different",
-        )(context_norm.to(device))
-        cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
-        # time_cov_est = time.time() - start_time
-
-        # define score function for tall posterior
-        score_fn = partial(
-            diffused_tall_posterior_score,
-            prior=prior_norm,  # normalized prior
-            prior_type=prior_type,
-            prior_score_fn=prior_score_fn_norm,  # analytical prior score function
-            x_obs=context_norm.to(device),  # observations
-            nse=score_network,  # trained score network
-            dist_cov_est=cov_est,
-            cov_mode=cov_mode,
-            # warmup_alpha=0.5 if cov_mode == 'JAC' else 0.0,
-            # psd_clipping=True if cov_mode == 'JAC' else False,
-            # scale_gradlogL=True,
-        )
         cov_mode_name = cov_mode
         theta_clipping_range = (None, None)
         if clip:
             theta_clipping_range = (-3, 3)
             cov_mode_name += "_clip"
 
-        # sample from tall posterior
-        start_time = time.time()
-        (
-            samples,
-            all_samples,
-            # gradlogL,
-            # lda,
-            # posterior_scores,
-            # means_posterior_backward,
-            # sigma_posterior_backward,
-        ) = euler_sde_sampler(
-            score_fn,
-            nsamples,
-            dim_theta=theta_train_mean.shape[-1],
-            beta=score_network.beta,
-            device=device,
-            debug=False,
-            theta_clipping_range=theta_clipping_range,
-        )
-        time_elapsed = time.time() - start_time  # + time_cov_est
+        cov_est, cov_est_prior = None, None
+        if cov_mode == "GAUSS":
+            # estimate cov for GAUSS
+            cov_est = vmap(
+                lambda x: score_network.ddim(shape=(nsamples,), x=x, steps=100, eta=0.5),
+                randomness="different",
+            )(context_norm.to(device))
+            cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
 
-        assert torch.isnan(samples).sum() == 0
+            if clf_free_guidance:
+                x_=torch.zeros_like(context_norm[0][None,:]) #
+                cov_est_prior = vmap(
+                    lambda x: score_network.ddim(shape=(nsamples,), x=x, steps=100, eta=0.5),
+                    randomness="different",
+                )(x_.to(device))
+                cov_est_prior = vmap(lambda x: torch.cov(x.mT))(cov_est_prior)
+                
 
-        # results_dict = {
-        #     "all_theta_learned": all_samples,
-        #     # "gradlogL": gradlogL,
-        #     # "lda": lda,
-        #     # "posterior_scores": posterior_scores,
-        #     # "means_posterior_backward": means_posterior_backward,
-        #     # "sigma_posterior_backward": sigma_posterior_backward,
-        # }
+        if sampler_type == "ddim":
+            save_path += f"ddim_steps_{steps}/"
 
-        save_path += f"euler_steps_{steps}/"
+            samples = score_network.ddim(
+                shape=(nsamples,),
+                x=context_norm.to(device),
+                eta=1 if steps == 1000 else 0.8 if steps == 400 else 0.5, # corresponds to the equivalent time setting from section 4.1
+                steps=steps,
+                theta_clipping_range=theta_clipping_range,
+                prior=prior_norm,
+                prior_type=prior_type,
+                prior_score_fn=prior_score_fn_norm,
+                clf_free_guidance=clf_free_guidance,
+                dist_cov_est=cov_est,
+                dist_cov_est_prior=cov_est_prior,
+                cov_mode=cov_mode,
+                verbose=True,
+            ).cpu()
+        else:
+            save_path += f"euler_steps_{steps}/"
+
+            # define score function for tall posterior
+            score_fn = partial(
+                diffused_tall_posterior_score,
+                prior=prior_norm,  # normalized prior
+                prior_type=prior_type,
+                prior_score_fn=prior_score_fn_norm,  # analytical prior score function
+                x_obs=context_norm.to(device),  # observations
+                nse=score_network,  # trained score network
+                dist_cov_est=cov_est,
+                cov_mode=cov_mode,
+            )
+        
+            # sample from tall posterior
+            (
+                samples,
+                _,
+            ) = euler_sde_sampler(
+                score_fn,
+                nsamples,
+                dim_theta=theta_train_mean.shape[-1],
+                beta=score_network.beta,
+                device=device,
+                debug=False,
+                theta_clipping_range=theta_clipping_range,
+            )
+
+
+        assert torch.isnan(samples).sum() == 0, f"NaN in samples: {torch.isnan(samples).sum()}"
+
         samples_filename = (
-            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
+            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
         )
-        # results_dict_filename = (
-        #     save_path + f"results_dict_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
-        # )
-        time_filename = save_path + f"time_{num_obs}_n_obs_{n_obs}_{cov_mode_name}.pkl"
 
     # unnormalize
     samples = samples.detach().cpu()
     samples = samples * theta_train_std + theta_train_mean
-    if log_space:
+    if theta_log_space:
         samples = torch.exp(samples)
 
     # save  results
@@ -308,37 +322,20 @@ def run_sample_sgm(
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
-    torch.save(time_elapsed, time_filename)
-    # if results_dict is not None:
-    #     torch.save(results_dict, results_dict_filename)
-
-
-# def run_sample_reference(task_name, x_obs, num_obs, theta_true, save_path):
-#     print("=======================================================================")
-#     print(
-#         f"Sampling from the reference posterior for observation {num_obs}: n_obs = {len(x_obs)} ."
-#     )
-#     print(f"======================================================================")
-#     if theta_true.ndim > 1:
-#         theta_true = theta_true[0]
-
-#     task_multiobs = get_multiobs_task(task_name)
-#     kwargs = {}
-#     if task_name in ["lotka_volterra", "sir"]:
-#         kwargs = {"theta_true": theta_true}
-#     samples_ref = task_multiobs._sample_reference_posterior_multiobs(1000, x_obs, **kwargs)
-
-#     # save  results
-#     os.makedirs(
-#         save_path,
-#         exist_ok=True,
-#     )
-#     torch.save(samples_ref, save_path + f"true_posterior_samples_num_{num_obs}_n_obs_{len(x_obs)}.pkl")
 
 
 if __name__ == "__main__":
+    import argparse
+    
     # Define Arguments
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--setup",
+        type=str,
+        default=None,
+        choices=["all", "train_data", "reference_data", "reference_posterior"],
+        help="setup task data",
+    )
     parser.add_argument(
         "--submitit",
         action="store_true",
@@ -347,14 +344,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--task",
         type=str,
-        default="gaussian_linear",
-        choices=[
-            "gaussian_linear",
-            "gaussian_mixture",
-            "slcp",
-            "lotka_volterra",
-            "sir",
-        ],
+        required=True,
+        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture", "gaussian_mixture_uniform", "two_moons", "bernoulli_glm", "bernoulli_glm_raw"],
         help="task name",
     )
     parser.add_argument(
@@ -367,29 +358,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_train",
         type=int,
-        default=50_000,
+        default=MAX_N_TRAIN,
         help="number of training data samples (1000, 3000, 10000, 30000 in [Geffner et al. 2023])",
     )
     parser.add_argument(
         "--n_epochs", type=int, default=5000, help="number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=64, help="batch size for training"
+        "--batch_size", type=int, default=256, help="batch size for training"
     )
     parser.add_argument(
         "--lr",
         type=float,
         default=1e-4,
         help="learning rate for training (1e-3/1e-4 in [Geffner et al. 2023]))",
-    )
-    parser.add_argument(
-        "--nsamples",
-        type=int,
-        default=1000,
-        help="number of samples from the approximate posterior",
-    )
-    parser.add_argument(
-        "--steps", type=int, default=1000, help="number of steps for ddim sampler"
     )
     parser.add_argument(
         "--n_obs",
@@ -408,6 +390,13 @@ if __name__ == "__main__":
         help="covariance mode",
     )
     parser.add_argument(
+        "--sampler",
+        type=str,
+        default="ddim",
+        choices=["euler", "ddim"],
+        help="SDE sampler type",
+    )
+    parser.add_argument(
         "--langevin",
         action="store_true",
         help="whether to use langevin sampler (Geffner et al. 2023)",
@@ -418,7 +407,9 @@ if __name__ == "__main__":
         help="whether to clip the samples during sampling",
     )
     parser.add_argument(
-        "--reference", action="store_true", help="whether to sample from ref. posterior"
+        "--clf_free_guidance",
+        action="store_true",
+        help="whether to use classifier free guidance to learn the diffused prior score",
     )
 
     # Parse Arguments
@@ -427,22 +418,35 @@ if __name__ == "__main__":
     # seed
     torch.manual_seed(42)
 
+    # SBI Task: prior and simulator
+    task = get_task(args.task, save_path="tasks/sbibm/data/")
+
+    # Setup task data
+    if args.setup is not None:
+        print("Setting up task data.")
+        setup(task, all=args.setup == "all", train_data=args.setup == "train_data", reference_data=args.setup == "reference_data", reference_posterior=args.setup == "reference_posterior")
+        exit()
+
     # Define task path
     task_path = PATH_EXPERIMENT + f"{args.task}/"
-    if args.task == "lotka_volterra":
-        task_path = PATH_EXPERIMENT + f"{args.task}_f2/"
 
     def run(
         n_train=args.n_train, num_obs=args.num_obs, n_obs=args.n_obs, run_type=args.run
     ):
-        batch_size = args.batch_size
-        if n_train > 10000:
-            batch_size = 256
         # Define Experiment Path
         save_path = (
-            task_path
-            + f"n_train_{n_train}_bs_{batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
-        )
+                task_path
+                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new/"
+            )
+        if args.task == "lotka_volterra":
+            save_path = (
+                task_path
+                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_log/"
+            )
+
+        if args.clf_free_guidance:
+            save_path += "clf_free_guidance/"
+
         os.makedirs(save_path, exist_ok=True)
 
         print()
@@ -450,139 +454,106 @@ if __name__ == "__main__":
         print("CUDA available: ", torch.cuda.is_available())
         print()
 
-        # SBI Task: prior and simulator
-        task = get_task(args.task)
-        prior = task.get_prior()
-        simulator = task.get_simulator()
-
-        # Simulate Training Data
-        filename = task_path + f"dataset_n_train_50000.pkl"
-        if os.path.exists(filename):
-            print(f"Loading training data from {filename}")
-            dataset_train = torch.load(filename)
-            theta_train = dataset_train["theta"][:n_train].float()
-            x_train = dataset_train["x"][:n_train].float()
-        else:
-            theta_train = prior(50000)
-            x_train = simulator(theta_train)
-
-            dataset_train = {"theta": theta_train, "x": x_train}
-            torch.save(dataset_train, filename)
-        # extract training data for given n_train
-        theta_train, x_train = theta_train[:n_train], x_train[:n_train]
-
-        if args.task in ["lotka_volterra", "sir"]:
-            # transform theta to log space
-            print("Transforming data to log space.")
-            theta_train = torch.log(theta_train)
-            # x_train = torch.log(x_train)
-
-        # compute mean and std of training data
-        theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(
-            dim=0
-        )
-        x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
-        means_stds_dict = {
-            "theta_train_mean": theta_train_mean,
-            "theta_train_std": theta_train_std,
-            "x_train_mean": x_train_mean,
-            "x_train_std": x_train_std,
-        }
-        torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
-
         if run_type == "train":
+
+            # get training data
+            dataset_train = task.get_training_data(n_simulations=MAX_N_TRAIN)
+            theta_train = dataset_train["theta"].float()
+            x_train = dataset_train["x"].float()
+            # extract training data for given n_train
+            theta_train, x_train = theta_train[:n_train], x_train[:n_train]
+            print("Training data:", theta_train.shape, x_train.shape)
+
+            # log space transformation
+            if args.task in ["lotka_volterra", "sir"]:
+                print("Transforming data to log space.")
+                theta_train = torch.log(theta_train)
+                if args.task == "lotka_volterra":
+                    x_train = torch.log(x_train)
+
+            # compute mean and std of training data
+            theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(
+                dim=0
+            )
+            x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
+            means_stds_dict = {
+                "theta_train_mean": theta_train_mean,
+                "theta_train_std": theta_train_std,
+                "x_train_mean": x_train_mean,
+                "x_train_std": x_train_std,
+            }
+            torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
+
             run_fn = run_train_sgm
             kwargs_run = {
                 "theta_train": theta_train,
                 "x_train": x_train,
                 "n_epochs": args.n_epochs,
-                "batch_size": batch_size,
+                "batch_size": args.batch_size,
                 "lr": args.lr,
+                "clf_free_guidance": args.clf_free_guidance,
                 "save_path": save_path,
             }
         elif run_type == "sample":
-            # # Reference parameter and observations
-            if os.path.exists(task_path + f"theta_true_list.pkl"):
-                theta_true_list = torch.load(task_path + f"theta_true_list.pkl")
-            else:
-                theta_true_list = [prior(1) for _ in NUM_OBSERVATION_LIST]
-                torch.save(theta_true_list, task_path + f"theta_true_list.pkl")
-
-            theta_true = theta_true_list[num_obs - 1]
-
-            filename = task_path + f"x_obs_100_num_{num_obs}_new.pkl"
-            if args.task in ["lotka_volterra", "sir"]:
-                filename = task_path + f"x_obs_100_num_{num_obs}_plcr.pkl"
-            if os.path.exists(filename):
-                x_obs_100 = torch.load(filename)
-            else:
-                x_obs_100 = torch.cat(
-                    [simulator(theta_true).reshape(1, -1) for _ in tqdm(range(100))],
-                    dim=0,
-                )
-                torch.save(x_obs_100, filename)
+            # get reference observations
+            x_obs_100 = task.get_reference_observation(num_obs, n_repeat=MAX_N_OBS)
             context = x_obs_100[:n_obs].reshape(n_obs, -1)
+            print("Context:", context.shape)
+            if args.task in ["bernoulli_glm"]:
+                # summary statistics
+                context = task.compute_summary_statistics(context)
+                print("Summary statistics:", context.shape)
 
-            if args.reference:
-                # run_fn = run_sample_reference
-                # kwargs_run = {
-                #     "task_name": args.task,
-                #     "x_obs": context,
-                #     "num_obs": num_obs,
-                #     "theta_true": theta_true,
-                #     "save_path": task_path + f"reference_posterior_samples/",
-                # }
-                pass
-            else:
-                # Trained Score network
-                score_network = torch.load(
-                    save_path + f"score_network.pkl",
-                    map_location=torch.device("cpu"),
-                )
-                score_network.net_type = "default"
+            # Trained Score network
+            score_network = torch.load(
+                save_path + f"score_network.pkl",
+                map_location=torch.device("cpu"),
+            )
+            score_network.net_type = "default"
 
-                # Mean and std of training data
-                means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
-                theta_train_mean = means_stds_dict["theta_train_mean"]
-                theta_train_std = means_stds_dict["theta_train_std"]
-                x_train_mean = means_stds_dict["x_train_mean"]
-                x_train_std = means_stds_dict["x_train_std"]
+            # Mean and std of training data
+            means_stds_dict = torch.load(save_path + f"train_means_stds_dict.pkl")
+            theta_train_mean = means_stds_dict["theta_train_mean"]
+            theta_train_std = means_stds_dict["theta_train_std"]
+            x_train_mean = means_stds_dict["x_train_mean"]
+            x_train_std = means_stds_dict["x_train_std"]
 
-                run_fn = run_sample_sgm
-                kwargs_run = {
-                    "num_obs": num_obs,
-                    "context": context,
-                    "nsamples": args.nsamples,
-                    "score_network": score_network,
-                    "steps": args.steps,
-                    "theta_train_mean": theta_train_mean,  # for (un)normalization
-                    "theta_train_std": theta_train_std,  # for (un)normalization
-                    "x_train_mean": x_train_mean,  # for (un)normalization
-                    "x_train_std": x_train_std,  # for (un)normalization
-                    "prior": task.prior_dist
-                    if args.task != "slcp"
-                    else task.prior_dist.base_dist,  # for score function
-                    "prior_type": "uniform" if args.task == "slcp" else "gaussian",
-                    "cov_mode": args.cov_mode,
-                    "clip": args.clip,  # for clipping
-                    "langevin": args.langevin,
-                    "log_space": args.task in ["lotka_volterra", "sir"],
-                    "save_path": save_path,
-                }
+            run_fn = run_sample_sgm
+            kwargs_run = {
+                "num_obs": num_obs,
+                "context": context,
+                "nsamples": NUM_SAMPLES,
+                "score_network": score_network,
+                "steps": 1000 if args.cov_mode == "GAUSS" else 400, # corresponds to the equivalent time setting from section 4.1
+                "theta_train_mean": theta_train_mean,  # for (un)normalization
+                "theta_train_std": theta_train_std,  # for (un)normalization
+                "x_train_mean": x_train_mean,  # for (un)normalization
+                "x_train_std": x_train_std,  # for (un)normalization
+                "prior": task.prior(), # for score function
+                "prior_type": "uniform" if args.task in ["slcp", "two_moons", "gaussian_mixture_uniform"] else "gaussian", 
+                "cov_mode": args.cov_mode,
+                "clip": args.clip,  # for clipping
+                "sampler_type": args.sampler,
+                "langevin": args.langevin,
+                "theta_log_space": args.task in ["lotka_volterra", "sir"],
+                "x_log_space": args.task == "lotka_volterra",
+                "clf_free_guidance": args.clf_free_guidance,
+                "save_path": save_path,
+            }
 
         run_fn(**kwargs_run)
 
     if not args.submitit:
         if args.run == "sample_all":
-            # for n_train in N_TRAIN_LIST:
-            for num_obs in NUM_OBSERVATION_LIST:
-                for n_obs in N_OBS_LIST:
-                    run(
-                        # n_train=n_train,
-                        num_obs=num_obs,
-                        n_obs=n_obs,
-                        run_type="sample",
-                    )
+            for n_train in N_TRAIN_LIST:
+                for num_obs in NUM_OBSERVATION_LIST:
+                    for n_obs in N_OBS_LIST:
+                        run(
+                            n_train=n_train,
+                            num_obs=num_obs,
+                            n_obs=n_obs,
+                            run_type="sample",
+                        )
         elif args.run == "train_all":
             for n_train in N_TRAIN_LIST:
                 run(n_train=n_train, run_type="train")
@@ -608,9 +579,7 @@ if __name__ == "__main__":
             return executor
 
         # subit job
-        executor = get_executor_marg(
-            f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}"
-        )
+        executor = get_executor_marg(f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}")
         # launch batches
         with executor.batch():
             print("Submitting jobs...", end="", flush=True)

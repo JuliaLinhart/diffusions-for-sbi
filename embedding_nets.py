@@ -1,9 +1,8 @@
 import torch
-import torch.nn as nn
 from torch import Tensor
 
 
-class PositionalEncodingVector(nn.Module):
+class PositionalEncodingVector(torch.nn.Module):
     def __init__(self, d_model: int, M: int):
         super().__init__()
         div_term = 1 / M ** (2 * torch.arange(0, d_model, 2) / d_model)
@@ -115,9 +114,7 @@ class FNet(torch.nn.Module):
         theta_emb = self.input_layer(theta)
         x_emb = self.cond_layer(x)
         t_emb = self.time_embedding(t)
-        # theta_emb = theta_emb.reshape(-1, theta_emb.shape[-1])
-        # x_emb = x_emb.reshape(-1, x_emb.shape[-1])
-        # t_emb = t_emb.reshape(-1, t_emb.shape[-1])
+
         emb = self.embedding_map(t_emb + x_emb)
         for lr in self.res_layers:
             theta_emb = lr(x=theta_emb, emb=emb)
