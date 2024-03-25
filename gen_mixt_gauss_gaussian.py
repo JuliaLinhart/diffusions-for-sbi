@@ -104,14 +104,6 @@ if __name__ == "__main__":
                     prior.loc.cuda(), prior.covariance_matrix.cuda(), score_net
                 )
 
-                def prior_score(theta, t):
-                    mean_prior_0_t = mean_backward(theta, t, prior_score_fn, score_net)
-                    prec_prior_0_t = prec_matrix_backward(
-                        t, prior.covariance_matrix.cuda(), score_net
-                    ).repeat(theta.shape[0], 1, 1)
-                    prior_score = prior_score_fn(theta, t)
-                    return prior_score, mean_prior_0_t, prec_prior_0_t
-
                 # Sampling
                 for N_OBS in [2, 4, 8, 16, 32, 64, 90][::-1]:
                     # True posterior samples
@@ -166,7 +158,8 @@ if __name__ == "__main__":
                             x=x_obs_100[:N_OBS].cuda(),
                             eta=eta,
                             steps=sampling_steps,
-                            prior_score_fn=prior_score,
+                            prior_score_fn=prior_score_fn,
+                            prior=prior,
                             dist_cov_est=cov_est.cuda(),
                             cov_mode="GAUSS",
                         ).cpu()
@@ -178,7 +171,8 @@ if __name__ == "__main__":
                             x=x_obs_100[:N_OBS].cuda(),
                             eta=eta,
                             steps=sampling_steps,
-                            prior_score_fn=prior_score,
+                            prior_score_fn=prior_score_fn,
+                            prior=prior,
                             cov_mode="JAC",
                         ).cpu()
 
@@ -188,7 +182,7 @@ if __name__ == "__main__":
                             lang_samples = score_net.annealed_langevin_geffner(
                                 shape=(1000,),
                                 x=x_obs_100[:N_OBS].cuda(),
-                                prior_score_fn=prior_score,
+                                prior_score_fn=prior_score_fn,
                                 lsteps=5,
                                 steps=sampling_steps,
                             ).cpu()
