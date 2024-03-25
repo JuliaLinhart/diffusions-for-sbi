@@ -86,10 +86,9 @@ def path_to_results(
 ):
     batch_size = TASKS_DICT[task_name]["bs"][N_TRAIN.index(n_train)]
     lr = TASKS_DICT[task_name]["lr"][N_TRAIN.index(n_train)]
-    path = PATH_EXPERIMENT+ f"{task_name}/"
+    path = PATH_EXPERIMENT+ f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}/"
     if clf_free_guidance:
         path = path + f"clf_free_guidance/"
-    path += f"n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}/"
 
     if langevin:
         path = path + "langevin_steps_400_5_new/"
@@ -151,10 +150,9 @@ def compute_mean_distance(
     prec_ignore_nums=None,
 ):
     # load results if already computed
-    save_path = PATH_EXPERIMENT+ f"{task_name}/"
+    save_path = PATH_EXPERIMENT+ f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
     if clf_free_guidance:
-        save_path = save_path + f"clf_free_guidance/"
-    save_path += f"metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+        save_path = save_path + "clf_free_guidance/"
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
