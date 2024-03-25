@@ -3,7 +3,6 @@ __pycache__/
 *.egg-info/
 .DS_Store
 
-# *.pkl
 *.pdf
 *.png
 /results/jrnnm/4d/*/euler*/*
@@ -28,3 +27,5 @@ __pycache__/
 /test_toy
 *old*
 *dataset*
+sbibm_results_submission*
+sbibm_results_new*
