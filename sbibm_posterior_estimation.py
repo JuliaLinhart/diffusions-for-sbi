@@ -436,12 +436,7 @@ if __name__ == "__main__":
         # Define Experiment Path
         save_path = (
                 task_path
-                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new/"
-            )
-        if args.task == "lotka_volterra":
-            save_path = (
-                task_path
-                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_log/"
+                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
             )
 
         if args.clf_free_guidance:

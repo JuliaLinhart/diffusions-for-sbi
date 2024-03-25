@@ -30,6 +30,7 @@ METHODS_STYLE = {
     # "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
+    "GAUSS_cfg": {"label":"GAUSS (clf guidance)", "color": "#00BBFF", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
 }

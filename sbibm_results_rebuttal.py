@@ -82,19 +82,14 @@ def path_to_results(
     sampler="ddim",
     langevin=False,
     clip=False,
+    clf_free_guidance=False,
 ):
     batch_size = TASKS_DICT[task_name]["bs"][N_TRAIN.index(n_train)]
     lr = TASKS_DICT[task_name]["lr"][N_TRAIN.index(n_train)]
-    if task_name == "lotka_volterra":
-        path = (
-            PATH_EXPERIMENT
-            + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new_log/"
-        )
-    else:
-        path = (
-            PATH_EXPERIMENT
-            + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}_new/"
-        )
+    path = PATH_EXPERIMENT+ f"{task_name}/"
+    if clf_free_guidance:
+        path = path + f"clf_free_guidance/"
+    path += f"n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}/"
 
     if langevin:
         path = path + "langevin_steps_400_5_new/"
@@ -123,6 +118,7 @@ def load_samples(
     sampler="ddim",
     langevin=False,
     clip=False,
+    clf_free_guidance=False,
 ):
     filename = path_to_results(
         task_name,
@@ -134,6 +130,7 @@ def load_samples(
         sampler,
         langevin,
         clip,
+        clf_free_guidance,
     )
     samples = torch.load(filename)
     return samples
@@ -149,14 +146,15 @@ def compute_mean_distance(
     sampler="ddim",
     langevin=False,
     clip=False,
+    clf_free_guidance=False,
     load=False,
     prec_ignore_nums=None,
 ):
     # load results if already computed
-    save_path = (
-        PATH_EXPERIMENT
-        + f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
-    )
+    save_path = PATH_EXPERIMENT+ f"{task_name}/"
+    if clf_free_guidance:
+        save_path = save_path + f"clf_free_guidance/"
+    save_path += f"metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
@@ -208,6 +206,7 @@ def compute_mean_distance(
                     cov_mode=cov_mode,
                     langevin=langevin,
                     clip=clip,
+                    clf_free_guidance=clf_free_guidance,
                     sampler=sampler,
                 )
                 # mmd
@@ -240,6 +239,7 @@ def compute_mean_distance(
                     cov_mode=cov_mode,
                     langevin=langevin,
                     clip=clip,
+                    clf_free_guidance=clf_free_guidance,
                     sampler=sampler,
                 )
                 dist = dist_to_dirac(
@@ -269,6 +269,250 @@ def compute_mean_distance(
     return dist_dict, ignore_nums
 
 
+def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums):
+
+    n_rows = len(task_names)
+    n_cols = len(N_OBS)
+    fig, axs = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
+    )
+    fig.subplots_adjust(
+        right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+    )
+    for i, task_name in enumerate(task_names):
+        for j, n_obs in tqdm(enumerate(N_OBS), desc=f"{task_name}, {metric}"):
+            mean_dist_dict = {method: [] for method in method_names}
+            std_dist_dict = {method: [] for method in method_names}
+            for n_train in N_TRAIN:
+                for method in method_names:
+                    dist, _ = compute_mean_distance(
+                        task_name=task_name,
+                        n_train=n_train,
+                        n_obs=n_obs,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        clip=True if "clip" in method else False,
+                        clf_free_guidance=True if "cfg" in method else False,
+                        metric=metric,
+                        load=True,
+                        prec_ignore_nums=prec_ignore_nums[task_name],
+                    )
+                    mean_dist_dict[method].append(dist["mean"])
+                    std_dist_dict[method].append(dist["std"])
+
+            for k, mean_, std_ in zip(
+                mean_dist_dict.keys(),
+                mean_dist_dict.values(),
+                std_dist_dict.values(),
+            ):
+                mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
+                axs[i, j].fill_between(
+                    N_TRAIN,
+                    mean_ - std_,
+                    mean_ + std_,
+                    alpha=alpha_fill,
+                    color=METHODS_STYLE[k]["color"],
+                )
+                axs[i, j].plot(
+                    N_TRAIN,
+                    mean_,
+                    alpha=alpha,
+                    **METHODS_STYLE[k],
+                )
+
+            # set ax title as N_obs only at the top
+            if i == 0:
+                axs[i, j].set_title(r"$n$" + rf"$={n_obs}$")
+            # label xaxis only at the bottom
+            if i == len(task_names) - 1:
+                axs[i, j].set_xlabel(r"$N_\mathrm{train}$")
+                axs[i, j].set_xscale("log")
+                axs[i, j].set_xticks(N_TRAIN)
+            # label yaxis only at the left
+            if j == 0:
+                axs[i, j].set_ylabel(
+                    TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"]
+                )
+            else:
+                axs[i, j].set_yticklabels([])
+            if metric == "mmd":
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 1.5])
+                elif "sir" in task_name:
+                    axs[i, j].set_ylim([0, 1.0])
+                elif "slcp" in task_name:
+                    axs[i, j].set_ylim([0, 0.6])
+                elif task_name == "two_moons":
+                    axs[i, j].set_ylim([0, 0.15])
+                elif "gaussian_mixture" in task_name:
+                    axs[i, j].set_ylim([0, 2])
+                elif "bernoulli_glm" in task_name:
+                    axs[i, j].set_ylim([0, 2])
+                else:
+                    axs[i, j].set_ylim([0, 1.5])
+
+            elif metric == "swd":
+                if task_name == "gaussian_linear":
+                    axs[i, j].set_ylim([0, 0.8])
+                elif task_name == "gaussian_mixture":
+                    axs[i, j].set_ylim([0, 1])
+                elif task_name == "gaussian_mixture_uniform":
+                    axs[i, j].set_ylim([0, 2])
+                elif "bernoulli_glm" in task_name:
+                    axs[i, j].set_ylim([0, 1])
+                elif task_name == "two_moons":
+                    axs[i, j].set_ylim([0, 0.4])
+                elif task_name == "slcp":
+                    axs[i, j].set_ylim([0, 2])
+                elif task_name == "sir":
+                    axs[i, j].set_ylim([0, 0.01])
+                else:
+                    axs[i, j].set_ylim([0, 1])
+                
+
+            elif metric == "mmd_to_dirac":
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 0.5])
+                if "sir" in task_name:
+                    axs[i, j].set_ylim([0, 0.05])
+                if "slcp" in task_name:
+                    axs[i, j].set_ylim([0, 30])
+            else:
+                axs[i, j].set_ylim([0, 1])
+
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
+
+    plt.savefig(
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train.png"
+    )
+    plt.savefig(
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train.pdf"
+    )
+    plt.clf()
+
+    # plot mean distance as function of n_obs
+    n_rows = len(task_names)
+    n_cols = len(N_TRAIN)
+    fig, axs = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
+    )  # , constrained_layout=True)
+    fig.subplots_adjust(
+        right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+    )
+    for i, task_name in enumerate(task_names):
+        for j, n_train in tqdm(
+            enumerate(N_TRAIN), desc=f"{task_name}, {metric}"
+        ):
+            mean_dist_dict = {method: [] for method in method_names}
+            std_dist_dict = {method: [] for method in method_names}
+            for n_obs in N_OBS:
+                for method in method_names:
+                    dist, _ = compute_mean_distance(
+                        task_name=task_name,
+                        n_train=n_train,
+                        n_obs=n_obs,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        clip=True if "clip" in method else False,
+                        clf_free_guidance=True if "cfg" in method else False,
+                        metric=metric,
+                        load=True,
+                        prec_ignore_nums=prec_ignore_nums[task_name],
+                    )
+                    mean_dist_dict[method].append(dist["mean"])
+                    std_dist_dict[method].append(dist["std"])
+
+            for k, mean_, std_ in zip(
+                mean_dist_dict.keys(),
+                mean_dist_dict.values(),
+                std_dist_dict.values(),
+            ):
+                mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
+                axs[i, j].fill_between(
+                    N_OBS,
+                    mean_ - std_,
+                    mean_ + std_,
+                    alpha=alpha_fill,
+                    color=METHODS_STYLE[k]["color"],
+                )
+                axs[i, j].plot(
+                    N_OBS,
+                    mean_,
+                    alpha=alpha,
+                    **METHODS_STYLE[k],
+                )
+
+            # set ax title as N_train only at the top
+            if i == 0:
+                axs[i, j].set_title(r"$N_\mathrm{train}$" + rf"$={n_train}$")
+            # label xaxis only at the bottom
+            if i == len(task_names) - 1:
+                axs[i, j].set_xlabel(r"$n$")
+                axs[i, j].set_xticks(N_OBS)
+            # label yaxis only at the left
+            if j == 0:
+                axs[i, j].set_ylabel(
+                    TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"]
+                )
+            else:
+                axs[i, j].set_yticklabels([])
+            if metric == "mmd":
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 1.5])
+                elif "sir" in task_name:
+                    axs[i, j].set_ylim([0, 1.0])
+                elif "slcp" in task_name:
+                    axs[i, j].set_ylim([0, 0.6])
+                elif task_name == "two_moons":
+                    axs[i, j].set_ylim([0, 0.15])
+                elif "gaussian_mixture" in task_name:
+                    axs[i, j].set_ylim([0, 2])
+                elif "bernoulli_glm" in task_name:
+                    axs[i, j].set_ylim([0, 2])
+                else:
+                    axs[i, j].set_ylim([0, 1.5])
+
+            elif metric == "swd":
+                if task_name == "gaussian_linear":
+                    axs[i, j].set_ylim([0, 0.8])
+                elif task_name == "gaussian_mixture":
+                    axs[i, j].set_ylim([0, 1])
+                elif task_name == "gaussian_mixture_uniform":
+                    axs[i, j].set_ylim([0, 2])
+                elif "bernoulli_glm" in task_name:
+                    axs[i, j].set_ylim([0, 1])
+                elif task_name == "two_moons":
+                    axs[i, j].set_ylim([0, 0.4])
+                elif task_name == "slcp":
+                    axs[i, j].set_ylim([0, 2])
+                elif task_name == "sir":
+                    axs[i, j].set_ylim([0, 0.01])
+                else:
+                    axs[i, j].set_ylim([0, 1])
+                
+
+            elif metric == "mmd_to_dirac":
+                if "lotka" in task_name:
+                    axs[i, j].set_ylim([0, 0.5])
+                if "sir" in task_name:
+                    axs[i, j].set_ylim([0, 0.05])
+                if "slcp" in task_name:
+                    axs[i, j].set_ylim([0, 30])
+            else:
+                axs[i, j].set_ylim([0, 1])
+    
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
+
+    plt.savefig(
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs.png"
+    )
+    plt.savefig(
+        PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs.pdf"
+    )
+    plt.clf()
+
 if __name__ == "__main__":
     import argparse
 
@@ -282,6 +526,8 @@ if __name__ == "__main__":
     parser.add_argument("--mmd", action="store_true")
     parser.add_argument("--c2st", action="store_true")
     parser.add_argument("--dirac", action="store_true")
+
+    parser.add_argument("--clf_free_guidance", action="store_true")
 
     args = parser.parse_args()
 
@@ -346,8 +592,8 @@ if __name__ == "__main__":
                         axs[i, j].set_ylabel(TASKS[task_name])
                     axs[i, j].set_ylim([0, 0.5])
             axs[i, j].legend()
-            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuutal/losses_bs_{bs}.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuutal/sbibm_losses_bs_{bs}.pdf")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuttal/losses_bs_{bs}.png")
+            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuttal/sbibm_losses_bs_{bs}.pdf")
             plt.clf()
 
         # print losses to select lr and bs
@@ -369,25 +615,23 @@ if __name__ == "__main__":
                     )
 
     if args.compute_dist:
-        IGNORE_NUMS = {
-            "gaussian_linear": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "gaussian_mixture": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "gaussian_mixture_uniform": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "bernoulli_glm": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "bernoulli_glm_raw": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "two_moons": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "slcp": [], #{method: [] for method in METHODS_STYLE.keys()},
-            # "lotka_volterra": [], #{method: [] for method in METHODS_STYLE.keys()},
-            "sir": [], #{method: [] for method in METHODS_STYLE.keys()},
-        }
+
+        if args.clf_free_guidance:
+            task_names = ["slcp", "sir"] #"lotka_volterra",
+            method_names = ["GAUSS_cfg"]
+        else:
+            task_names = TASKS.keys()
+            method_names = METHODS_STYLE.keys()
+
+        IGNORE_NUMS = {task_name: [] for task_name in task_names}
 
         final_ignore_nums = []
-        for metric in METRICS[:-1]:
+        for metric in METRICS:
             print(f"Computing {metric}...")
-            for task_name in TASKS.keys():
+            for task_name in task_names:
                 for n_train in N_TRAIN:
                     for n_obs in N_OBS:
-                        for method in METHODS_STYLE.keys():
+                        for method in method_names:
                             dist, ignore_nums = compute_mean_distance(
                                 task_name=task_name,
                                 n_train=n_train,
@@ -395,14 +639,15 @@ if __name__ == "__main__":
                                 cov_mode=method.split("_")[0],
                                 langevin=True if "LANGEVIN" in method else False,
                                 clip=True if "clip" in method else False,
+                                clf_free_guidance=args.clf_free_guidance,
                                 metric=metric,
-                                load=True,
+                                load=False,
                             )
                             dist_mean = dist["mean"]
                             dist_std = dist["std"]
-                            # print(
-                            #     f"{task_name}, {n_train}, {n_obs}, {method}: {dist_mean}, {dist_std}"
-                            # )
+                            print(
+                                f"{task_name}, {n_train}, {n_obs}, {method}: {dist_mean}, {dist_std}"
+                            )
 
                             if method == "GAUSS":
                                 for num in ignore_nums:
@@ -414,18 +659,20 @@ if __name__ == "__main__":
                                         ):
                                             final_ignore_nums.append(num)
 
-        torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
         print()
         print(f"Ignored observations: {IGNORE_NUMS}")
         print()
 
-        torch.save(
-            final_ignore_nums,
-            PATH_EXPERIMENT + f"ignore_nums_final.pkl",
-        )
         print()
         print(f"Final ignored observations: {final_ignore_nums}")
         print()
+
+        if not args.clf_free_guidance:
+            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
+            torch.save(
+                final_ignore_nums,
+                PATH_EXPERIMENT + f"ignore_nums_final.pkl",
+            )
 
     if args.plot_dist:
         prec_ignore_nums = torch.load(
@@ -446,248 +693,17 @@ if __name__ == "__main__":
                 if args.dirac
                 else "c2st"
             )
-            task_names = TASKS.keys()
-
-            # plot mean distance as function of n_train
-            n_rows = len(task_names)
-            n_cols = len(N_OBS)
-            fig, axs = plt.subplots(
-                n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
-            )
-            fig.subplots_adjust(
-                right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
-            )
-            for i, task_name in enumerate(task_names):
-                for j, n_obs in tqdm(enumerate(N_OBS), desc=f"{task_name}, {metric}"):
-                    mean_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
-                    std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
-                    for n_train in N_TRAIN:
-                        for method in METHODS_STYLE.keys():
-                            dist, _ = compute_mean_distance(
-                                task_name=task_name,
-                                n_train=n_train,
-                                n_obs=n_obs,
-                                cov_mode=method.split("_")[0],
-                                langevin=True if "LANGEVIN" in method else False,
-                                clip=True if "clip" in method else False,
-                                metric=metric,
-                                load=True,
-                                prec_ignore_nums=prec_ignore_nums[task_name],
-                            )
-                            mean_dist_dict[method].append(dist["mean"])
-                            std_dist_dict[method].append(dist["std"])
-
-                    for k, mean_, std_ in zip(
-                        mean_dist_dict.keys(),
-                        mean_dist_dict.values(),
-                        std_dist_dict.values(),
-                    ):
-                        mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
-                        axs[i, j].fill_between(
-                            N_TRAIN,
-                            mean_ - std_,
-                            mean_ + std_,
-                            alpha=alpha_fill,
-                            color=METHODS_STYLE[k]["color"],
-                        )
-                        axs[i, j].plot(
-                            N_TRAIN,
-                            mean_,
-                            alpha=alpha,
-                            **METHODS_STYLE[k],
-                        )
-
-                    # set ax title as N_obs only at the top
-                    if i == 0:
-                        axs[i, j].set_title(r"$n$" + rf"$={n_obs}$")
-                    # label xaxis only at the bottom
-                    if i == len(task_names) - 1:
-                        axs[i, j].set_xlabel(r"$N_\mathrm{train}$")
-                        axs[i, j].set_xscale("log")
-                        axs[i, j].set_xticks(N_TRAIN)
-                    # label yaxis only at the left
-                    if j == 0:
-                        axs[i, j].set_ylabel(
-                            TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"]
-                        )
-                    else:
-                        axs[i, j].set_yticklabels([])
-                    if metric == "mmd":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 1.5])
-                        elif "sir" in task_name:
-                            axs[i, j].set_ylim([0, 1.0])
-                        elif "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 0.6])
-                        elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.15])
-                        elif "gaussian_mixture" in task_name:
-                            axs[i, j].set_ylim([0, 2])
-                        elif "bernoulli_glm" in task_name:
-                            axs[i, j].set_ylim([0, 2])
-                        else:
-                            axs[i, j].set_ylim([0, 1.5])
-
-                    elif metric == "swd":
-                        if task_name == "gaussian_linear":
-                            axs[i, j].set_ylim([0, 0.8])
-                        elif task_name == "gaussian_mixture":
-                            axs[i, j].set_ylim([0, 1])
-                        elif task_name == "gaussian_mixture_uniform":
-                            axs[i, j].set_ylim([0, 2])
-                        elif "bernoulli_glm" in task_name:
-                            axs[i, j].set_ylim([0, 1])
-                        elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.4])
-                        elif task_name == "slcp":
-                            axs[i, j].set_ylim([0, 2])
-                        elif task_name == "sir":
-                            axs[i, j].set_ylim([0, 0.01])
-                        else:
-                            axs[i, j].set_ylim([0, 1])
-                        
-
-                    elif metric == "mmd_to_dirac":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 0.5])
-                        if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.05])
-                        if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 30])
-                    else:
-                        axs[i, j].set_ylim([0, 1])
-
-            handles, labels = axs[0, 0].get_legend_handles_labels()
-            plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
-
-            plt.savefig(
-                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_train.png"
-            )
-            plt.savefig(
-                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_train.pdf"
-            )
-            plt.clf()
-
-            # plot mean distance as function of n_obs
-            n_rows = len(task_names)
-            n_cols = len(N_TRAIN)
-            fig, axs = plt.subplots(
-                n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
-            )  # , constrained_layout=True)
-            fig.subplots_adjust(
-                right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
-            )
-            for i, task_name in enumerate(task_names):
-                for j, n_train in tqdm(
-                    enumerate(N_TRAIN), desc=f"{task_name}, {metric}"
-                ):
-                    mean_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
-                    std_dist_dict = {method: [] for method in METHODS_STYLE.keys()}
-                    for n_obs in N_OBS:
-                        for method in METHODS_STYLE.keys():
-                            dist, ignore_nums = compute_mean_distance(
-                                task_name=task_name,
-                                n_train=n_train,
-                                n_obs=n_obs,
-                                cov_mode=method.split("_")[0],
-                                langevin=True if "LANGEVIN" in method else False,
-                                clip=True if "clip" in method else False,
-                                metric=metric,
-                                load=True,
-                                prec_ignore_nums=prec_ignore_nums[task_name],
-                            )
-                            mean_dist_dict[method].append(dist["mean"])
-                            std_dist_dict[method].append(dist["std"])
-
-                    for k, mean_, std_ in zip(
-                        mean_dist_dict.keys(),
-                        mean_dist_dict.values(),
-                        std_dist_dict.values(),
-                    ):
-                        mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
-                        axs[i, j].fill_between(
-                            N_OBS,
-                            mean_ - std_,
-                            mean_ + std_,
-                            alpha=alpha_fill,
-                            color=METHODS_STYLE[k]["color"],
-                        )
-                        axs[i, j].plot(
-                            N_OBS,
-                            mean_,
-                            alpha=alpha,
-                            **METHODS_STYLE[k],
-                        )
-
-                    # set ax title as N_train only at the top
-                    if i == 0:
-                        axs[i, j].set_title(r"$N_\mathrm{train}$" + rf"$={n_train}$")
-                    # label xaxis only at the bottom
-                    if i == len(task_names) - 1:
-                        axs[i, j].set_xlabel(r"$n$")
-                        axs[i, j].set_xticks(N_OBS)
-                    # label yaxis only at the left
-                    if j == 0:
-                        axs[i, j].set_ylabel(
-                            TASKS[task_name] + "\n" + METRICS_STYLE[metric]["label"]
-                        )
-                    else:
-                        axs[i, j].set_yticklabels([])
-                    if metric == "mmd":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 1.5])
-                        elif "sir" in task_name:
-                            axs[i, j].set_ylim([0, 1.0])
-                        elif "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 0.6])
-                        elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.15])
-                        elif "gaussian_mixture" in task_name:
-                            axs[i, j].set_ylim([0, 2])
-                        elif "bernoulli_glm" in task_name:
-                            axs[i, j].set_ylim([0, 2])
-                        else:
-                            axs[i, j].set_ylim([0, 1.5])
-
-                    elif metric == "swd":
-                        if task_name == "gaussian_linear":
-                            axs[i, j].set_ylim([0, 0.8])
-                        elif task_name == "gaussian_mixture":
-                            axs[i, j].set_ylim([0, 1])
-                        elif task_name == "gaussian_mixture_uniform":
-                            axs[i, j].set_ylim([0, 2])
-                        elif "bernoulli_glm" in task_name:
-                            axs[i, j].set_ylim([0, 1])
-                        elif task_name == "two_moons":
-                            axs[i, j].set_ylim([0, 0.4])
-                        elif task_name == "slcp":
-                            axs[i, j].set_ylim([0, 2])
-                        elif task_name == "sir":
-                            axs[i, j].set_ylim([0, 0.01])
-                        else:
-                            axs[i, j].set_ylim([0, 1])
-                        
-
-                    elif metric == "mmd_to_dirac":
-                        if "lotka" in task_name:
-                            axs[i, j].set_ylim([0, 0.5])
-                        if "sir" in task_name:
-                            axs[i, j].set_ylim([0, 0.05])
-                        if "slcp" in task_name:
-                            axs[i, j].set_ylim([0, 30])
-                    else:
-                        axs[i, j].set_ylim([0, 1])
+            if args.clf_free_guidance:
+                task_names = ["slcp", "sir"] #"lotka_volterra",
+                method_names = ["GAUSS", "GAUSS_cfg"]
+            else:
+                task_names = TASKS.keys()
+                method_names = METHODS_STYLE.keys()
+                # remove cfg 
+                method_names = [method for method in method_names if "cfg" not in method]
+            # plot mean distance as function of n_train, then n_obs
+            plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums)
             
-            handles, labels = axs[0, 0].get_legend_handles_labels()
-            plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
-
-            plt.savefig(
-                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_obs.png"
-            )
-            plt.savefig(
-                PATH_EXPERIMENT + f"_plots_rebuutal/{metric}_n_obs.pdf"
-            )
-            plt.clf()
 
     if args.plot_samples:
         n_train = 30000
