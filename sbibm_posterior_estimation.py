@@ -194,8 +194,6 @@ def run_sample_sgm(
         prior_score_fn_norm = get_vpdiff_gaussian_score(
             loc_norm.to(device), cov_norm.to(device), score_network.to(device)
         )
-    elif clf_free_guidance:
-        prior_type = "clf_free_guidance"
     else:
         raise NotImplementedError
 
@@ -219,7 +217,7 @@ def run_sample_sgm(
             shape=(nsamples,),
             x=context_norm.to(device),
             prior_score_fn=prior_score_fn_norm,
-            prior_type=prior_type,
+            clf_free_guidance=clf_free_guidance,
             steps=400,
             lsteps=5,
             tau=0.5,
@@ -240,7 +238,7 @@ def run_sample_sgm(
             theta_clipping_range = (-3, 3)
             cov_mode_name += "_clip"
 
-        cov_est = None
+        cov_est, cov_est_prior = None, None
         if cov_mode == "GAUSS":
             # estimate cov for GAUSS
             cov_est = vmap(
@@ -248,6 +246,15 @@ def run_sample_sgm(
                 randomness="different",
             )(context_norm.to(device))
             cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
+
+            if clf_free_guidance:
+                x_=torch.zeros_like(context_norm[0][None,:]) #
+                cov_est_prior = vmap(
+                    lambda x: score_network.ddim(shape=(nsamples,), x=x, steps=100, eta=0.5),
+                    randomness="different",
+                )(x_.to(device))
+                cov_est_prior = vmap(lambda x: torch.cov(x.mT))(cov_est_prior)
+                
 
         if sampler_type == "ddim":
             save_path += f"ddim_steps_{steps}/"
@@ -261,7 +268,9 @@ def run_sample_sgm(
                 prior=prior_norm,
                 prior_type=prior_type,
                 prior_score_fn=prior_score_fn_norm,
+                clf_free_guidance=clf_free_guidance,
                 dist_cov_est=cov_est,
+                dist_cov_est_prior=cov_est_prior,
                 cov_mode=cov_mode,
                 verbose=True,
             ).cpu()
