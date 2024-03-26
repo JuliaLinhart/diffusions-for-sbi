@@ -295,9 +295,11 @@ class NSE(nn.Module):
             eps = (
                 r
                 * (self.alpha(t) ** 0.5)
-                * min(self.sigma(t) ** 2, 1 / g.square().mean())
+                * (self.sigma(t) ** 2)
             )
-            theta = theta + eps * g + ((2 * eps) ** 0.5) * z
+            # Tamed ULA (eq3 in https://inria.hal.science/hal-01648667/document)
+            tamed_eps = (eps / (1 + eps * torch.linalg.norm(g, axis=-1)))[..., None]
+            theta = theta + tamed_eps * g + ((2 * eps) ** 0.5) * z
         return theta
 
     def predictor_corrector(
