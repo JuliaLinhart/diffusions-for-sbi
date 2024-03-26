@@ -42,61 +42,6 @@ METRICS_STYLE = {
     "mmd_to_dirac": {"label": "MMD to Dirac"},
 }
 
-def multi_corner_plots(samples_list, legends, colors, title, **kwargs):
-    fig = None
-    for s, l, c in zip(samples_list, legends, colors):
-        fig = corner(s, legend=l, color=c, figure=fig, smooth=2, **kwargs)
-        plt.suptitle(title)
-
-# Plot learned posterior P(theta | x_obs)
-def pairplot_with_groundtruth_2d(
-    samples_list,
-    labels,
-    colors,
-    theta_true=None,
-    prior_bounds=None,
-    param_names=None,
-    plot_bounds=None,
-):
-    columns = [r"$\theta_1$", rf"$\theta_2$"]
-    if param_names is not None:
-        columns = param_names
-
-    dfs = []
-    for samples, label in zip(samples_list, labels):
-        df = pd.DataFrame(samples, columns=columns)
-        df["Distribution"] = label
-        dfs.append(df)
-
-    dfs = pd.concat(dfs, ignore_index=True)
-
-    pg = sns.pairplot(
-        dfs,
-        hue="Distribution",
-        corner=True,
-        palette=dict(zip(labels, colors)),
-    )
-
-    if theta_true is not None:
-        pg.axes.ravel()[0].axvline(x=theta_true[0], ls="--", linewidth=2, c="black")
-        pg.axes.ravel()[3].axvline(x=theta_true[1], ls="--", linewidth=2, c="black")
-        pg.axes.ravel()[2].scatter(
-            theta_true[0], theta_true[1], marker="o", c="black", s=50, edgecolor="white"
-        )
-
-    if prior_bounds is not None:
-        pg.axes.ravel()[0].axvline(x=prior_bounds[0][0], ls="--", linewidth=1, c="red")
-        pg.axes.ravel()[0].axvline(x=prior_bounds[0][1], ls="--", linewidth=1, c="red")
-        pg.axes.ravel()[3].axvline(x=prior_bounds[1][0], ls="--", linewidth=1, c="red")
-        pg.axes.ravel()[3].axvline(x=prior_bounds[1][1], ls="--", linewidth=1, c="red")
-
-    if plot_bounds is not None:
-        pg.axes.ravel()[2].set_xlim(plot_bounds[0])
-        pg.axes.ravel()[3].set_xlim(plot_bounds[1])
-        pg.axes.ravel()[2].set_ylim(plot_bounds[1])
-
-    return pg
-
 # Plot learned posterior P(theta | x_obs)
 def pairplot_with_groundtruth_md(
     samples_list,
@@ -186,7 +131,63 @@ def pairplot_with_groundtruth_md(
 
     return pg
 
+# Plot functions for SBIBM
+def set_axs_lims_sbibm(metric, axs, i, j, task_name):
+    if metric == "mmd":
+            if "lotka" in task_name:
+                axs[i, j].set_ylim([0, 1.5])
+            elif "sir" in task_name:
+                axs[i, j].set_ylim([0, 1.0])
+            elif "slcp" in task_name:
+                axs[i, j].set_ylim([0, 0.6])
+            elif task_name == "two_moons":
+                axs[i, j].set_ylim([0, 0.15])
+            elif "gaussian_mixture" in task_name:
+                axs[i, j].set_ylim([0, 2])
+            elif "bernoulli_glm" in task_name:
+                axs[i, j].set_ylim([0, 2])
+            else:
+                axs[i, j].set_ylim([0, 1.5])
 
+    elif metric == "swd":
+        if task_name == "gaussian_linear":
+            axs[i, j].set_ylim([0, 0.8])
+        elif task_name == "gaussian_mixture":
+            axs[i, j].set_ylim([0, 1])
+        elif task_name == "gaussian_mixture_uniform":
+            axs[i, j].set_ylim([0, 2])
+        elif "bernoulli_glm" in task_name:
+            axs[i, j].set_ylim([0, 1])
+        elif task_name == "two_moons":
+            axs[i, j].set_ylim([0, 0.4])
+        elif task_name == "slcp":
+            axs[i, j].set_ylim([0, 2])
+        elif task_name == "sir":
+            axs[i, j].set_ylim([0, 0.01])
+        elif task_name == "lotka_volterra":
+            axs[i, j].set_ylim([0, 0.05])
+        else:
+            axs[i, j].set_ylim([0, 1])
+        
+    elif metric == "mmd_to_dirac":
+        if "lotka" in task_name:
+            axs[i, j].set_ylim([0, 0.5])
+        if "sir" in task_name:
+            axs[i, j].set_ylim([0, 0.05])
+        if "slcp" in task_name:
+            axs[i, j].set_ylim([0, 30])
+        if "gaussian_mixture" in task_name:
+            axs[i, j].set_ylim([0, 6])
+        if "bernoulli_glm" in task_name:
+            axs[i, j].set_ylim([0, 10])
+        if "two_moons" in task_name:
+            axs[i, j].set_ylim([0, 2])
+        if task_name == "gaussian_linear":
+            axs[i, j].set_ylim([0, 6])
+    else:
+        axs[i, j].set_ylim([0, 1])
+
+# Plot functions for JR-NMM
 def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):
     plt.rcParams["xtick.labelsize"] = 20.0
     plt.rcParams["ytick.labelsize"] = 20.0

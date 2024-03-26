@@ -14,6 +14,7 @@ from plot_utils import (
     set_plotting_style,
     METHODS_STYLE,
     METRICS_STYLE,
+    set_axs_lims_sbibm,
     pairplot_with_groundtruth_md,
 )
 
@@ -186,6 +187,8 @@ def compute_mean_distance(
                     ignore_nums.append(num_obs)
                 if "slcp" in task_name and dist > 2:
                     ignore_nums.append(num_obs)
+                if "lotka" in task_name and dist > 0.05:
+                    ignore_nums.append(num_obs)
                 
 
     else:
@@ -243,7 +246,6 @@ def compute_mean_distance(
                 dist = dist_to_dirac(
                     samples,
                     theta_true,
-                    percentage=0,
                     scaled=True,
                 )["mmd"]
 
@@ -267,8 +269,7 @@ def compute_mean_distance(
     return dist_dict, ignore_nums
 
 
-def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=""):
-
+def plots_dist_n_train(metric, task_names, method_names, prec_ignore_nums, title_ext=""):
     n_rows = len(task_names)
     n_cols = len(N_OBS)
     fig, axs = plt.subplots(
@@ -333,50 +334,8 @@ def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums,
                 )
             else:
                 axs[i, j].set_yticklabels([])
-            if metric == "mmd":
-                if "lotka" in task_name:
-                    axs[i, j].set_ylim([0, 1.5])
-                elif "sir" in task_name:
-                    axs[i, j].set_ylim([0, 1.0])
-                elif "slcp" in task_name:
-                    axs[i, j].set_ylim([0, 0.6])
-                elif task_name == "two_moons":
-                    axs[i, j].set_ylim([0, 0.15])
-                elif "gaussian_mixture" in task_name:
-                    axs[i, j].set_ylim([0, 2])
-                elif "bernoulli_glm" in task_name:
-                    axs[i, j].set_ylim([0, 2])
-                else:
-                    axs[i, j].set_ylim([0, 1.5])
-
-            elif metric == "swd":
-                if task_name == "gaussian_linear":
-                    axs[i, j].set_ylim([0, 0.8])
-                elif task_name == "gaussian_mixture":
-                    axs[i, j].set_ylim([0, 1])
-                elif task_name == "gaussian_mixture_uniform":
-                    axs[i, j].set_ylim([0, 2])
-                elif "bernoulli_glm" in task_name:
-                    axs[i, j].set_ylim([0, 1])
-                elif task_name == "two_moons":
-                    axs[i, j].set_ylim([0, 0.4])
-                elif task_name == "slcp":
-                    axs[i, j].set_ylim([0, 2])
-                elif task_name == "sir":
-                    axs[i, j].set_ylim([0, 0.01])
-                else:
-                    axs[i, j].set_ylim([0, 1])
-                
-
-            elif metric == "mmd_to_dirac":
-                if "lotka" in task_name:
-                    axs[i, j].set_ylim([0, 0.5])
-                if "sir" in task_name:
-                    axs[i, j].set_ylim([0, 0.05])
-                if "slcp" in task_name:
-                    axs[i, j].set_ylim([0, 30])
-            else:
-                axs[i, j].set_ylim([0, 1])
+            
+            set_axs_lims_sbibm(metric, axs, i, j, task_name)
 
     handles, labels = axs[0, 0].get_legend_handles_labels()
     plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
@@ -389,7 +348,7 @@ def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums,
     )
     plt.clf()
 
-    # plot mean distance as function of n_obs
+def plots_dist_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=""):
     n_rows = len(task_names)
     n_cols = len(N_TRAIN)
     fig, axs = plt.subplots(
@@ -455,50 +414,8 @@ def plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums,
                 )
             else:
                 axs[i, j].set_yticklabels([])
-            if metric == "mmd":
-                if "lotka" in task_name:
-                    axs[i, j].set_ylim([0, 1.5])
-                elif "sir" in task_name:
-                    axs[i, j].set_ylim([0, 1.0])
-                elif "slcp" in task_name:
-                    axs[i, j].set_ylim([0, 0.6])
-                elif task_name == "two_moons":
-                    axs[i, j].set_ylim([0, 0.15])
-                elif "gaussian_mixture" in task_name:
-                    axs[i, j].set_ylim([0, 2])
-                elif "bernoulli_glm" in task_name:
-                    axs[i, j].set_ylim([0, 2])
-                else:
-                    axs[i, j].set_ylim([0, 1.5])
-
-            elif metric == "swd":
-                if task_name == "gaussian_linear":
-                    axs[i, j].set_ylim([0, 0.8])
-                elif task_name == "gaussian_mixture":
-                    axs[i, j].set_ylim([0, 1])
-                elif task_name == "gaussian_mixture_uniform":
-                    axs[i, j].set_ylim([0, 2])
-                elif "bernoulli_glm" in task_name:
-                    axs[i, j].set_ylim([0, 1])
-                elif task_name == "two_moons":
-                    axs[i, j].set_ylim([0, 0.4])
-                elif task_name == "slcp":
-                    axs[i, j].set_ylim([0, 2])
-                elif task_name == "sir":
-                    axs[i, j].set_ylim([0, 0.01])
-                else:
-                    axs[i, j].set_ylim([0, 1])
-                
-
-            elif metric == "mmd_to_dirac":
-                if "lotka" in task_name:
-                    axs[i, j].set_ylim([0, 0.5])
-                if "sir" in task_name:
-                    axs[i, j].set_ylim([0, 0.05])
-                if "slcp" in task_name:
-                    axs[i, j].set_ylim([0, 30])
-            else:
-                axs[i, j].set_ylim([0, 1])
+            
+            set_axs_lims_sbibm(metric, axs, i, j, task_name)
     
     handles, labels = axs[0, 0].get_legend_handles_labels()
     plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
@@ -620,6 +537,7 @@ if __name__ == "__main__":
         else:
             task_names = TASKS.keys()
             method_names = METHODS_STYLE.keys()
+            method_names = [method for method in method_names if "cfg" not in method]
 
         IGNORE_NUMS = {task_name: [] for task_name in task_names}
 
@@ -692,18 +610,22 @@ if __name__ == "__main__":
                 else "c2st"
             )
             if args.clf_free_guidance:
-                task_names = ["slcp", "sir"] #"lotka_volterra",
+                task_names = ["lotka_volterra", "slcp", "sir"]
                 method_names = ["GAUSS", "GAUSS_cfg"]
                 title_ext = "_cfg"
             else:
-                task_names = TASKS.keys()
+                task_names = ["lotka_volterra", "slcp", "sir"]
+                # task_names = TASKS.keys()
                 method_names = METHODS_STYLE.keys()
                 # remove cfg 
                 method_names = [method for method in method_names if "cfg" not in method]
-                title_ext = ""
+                title_ext = "_main"
+                # title_ext = "_extra"
             
-            # plot mean distance as function of n_train, then n_obs
-            plots_dist_n_train_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=title_ext)
+            # plot mean distance as function of n_train
+            plots_dist_n_train(metric, task_names, method_names, prec_ignore_nums, title_ext=title_ext)
+            # plot mean distance as function of n_obs
+            plots_dist_n_obs(metric, task_names, method_names, prec_ignore_nums, title_ext=title_ext)
             
 
     if args.plot_samples:
