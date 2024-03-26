@@ -272,3 +272,22 @@ if __name__ == "__main__":
         plt.legend()
         plt.savefig('_checks/slcp_train_theta_check.png')
         plt.clf()
+
+    data_new = slcp.generate_training_data(n_simulations=100, save=False, n_obs=100)
+    x_new = data_new["x"]
+    theta_new = data_new["theta"]
+    print(x_new.shape, theta_new.shape)
+
+    # plot x for one theta
+    import matplotlib.pyplot as plt
+    x = x_new[0]
+    x_2 = slcp.simulator(theta_new[0], n_obs=100, rng_key=rng_key)
+    x_3 = x_new[1]
+    x_4 = slcp.simulator(theta_new[1], n_obs=100, rng_key=rng_key)
+    plt.scatter(x[:,0], x[:,1])
+    plt.scatter(x_2[:,0], x_2[:,1])
+    plt.scatter(x_3[:,0], x_3[:,1])
+    plt.scatter(x_4[:,0], x_4[:,1])
+    plt.savefig('_checks/slcp_big_train_x_check.png')
+
+        

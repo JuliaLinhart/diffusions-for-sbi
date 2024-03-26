@@ -1,10 +1,12 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib
-import matplotlib.pyplot as plt
-from lampe.plots import corner
+import torch
 
+from matplotlib import colormaps as cm
 from tueplots import fonts, axes
+from tqdm import tqdm
 
 def set_plotting_style(size=5):
     style = fonts.neurips2022()
@@ -23,11 +25,12 @@ def set_plotting_style(size=5):
     return alpha, alpha_fill
 
 markersize = plt.rcParams['lines.markersize'] * 1.5
+
 METHODS_STYLE = {
     "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
     "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
-    # "LANGEVIN_ours": {"label":"LANGEVIN (ours)", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
-    # "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "LANGEVIN_ours": {"label":"LANGEVIN (ours)", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
     "GAUSS_cfg": {"label":"GAUSS (clf guidance)", "color": "#00BBFF", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
@@ -40,6 +43,18 @@ METRICS_STYLE = {
     "mmd": {"label": "MMD"},
     "c2st": {"label": "C2ST"},
     "mmd_to_dirac": {"label": "MMD to Dirac"},
+}
+
+CMAPS_METHODS = {
+    "LANGEVIN": "Reds",
+    "LANGEVIN_clip": "Reds",
+    "LANGEVIN_ours": "Purples",
+    "LANGEVIN_ours_clip": "Purples",
+    "GAUSS": "Blues",
+    "GAUSS_clip": "Blues",
+    "GAUSS_cfg": "Blues",
+    "JAC": "Oranges",
+    "JAC_clip": "Oranges",
 }
 
 # Plot learned posterior P(theta | x_obs)
@@ -132,60 +147,291 @@ def pairplot_with_groundtruth_md(
     return pg
 
 # Plot functions for SBIBM
-def set_axs_lims_sbibm(metric, axs, i, j, task_name):
+def set_axs_lims_sbibm(metric, ax, task_name):
     if metric == "mmd":
             if "lotka" in task_name:
-                axs[i, j].set_ylim([0, 1.5])
+                ax.set_ylim([0, 1.5])
             elif "sir" in task_name:
-                axs[i, j].set_ylim([0, 1.0])
+                ax.set_ylim([0, 1.0])
             elif "slcp" in task_name:
-                axs[i, j].set_ylim([0, 0.6])
+                ax.set_ylim([0, 0.6])
             elif task_name == "two_moons":
-                axs[i, j].set_ylim([0, 0.15])
+                ax.set_ylim([0, 0.15])
             elif "gaussian_mixture" in task_name:
-                axs[i, j].set_ylim([0, 2])
+                ax.set_ylim([0, 2])
             elif "bernoulli_glm" in task_name:
-                axs[i, j].set_ylim([0, 2])
+                ax.set_ylim([0, 2])
             else:
-                axs[i, j].set_ylim([0, 1.5])
+                ax.set_ylim([0, 1.5])
 
     elif metric == "swd":
         if task_name == "gaussian_linear":
-            axs[i, j].set_ylim([0, 0.8])
+            ax.set_ylim([0, 0.8])
         elif task_name == "gaussian_mixture":
-            axs[i, j].set_ylim([0, 1])
+            ax.set_ylim([0, 1])
         elif task_name == "gaussian_mixture_uniform":
-            axs[i, j].set_ylim([0, 2])
+            ax.set_ylim([0, 2])
         elif "bernoulli_glm" in task_name:
-            axs[i, j].set_ylim([0, 1])
+            ax.set_ylim([0, 1])
         elif task_name == "two_moons":
-            axs[i, j].set_ylim([0, 0.4])
+            ax.set_ylim([0, 0.4])
         elif task_name == "slcp":
-            axs[i, j].set_ylim([0, 2])
+            ax.set_ylim([0, 2])
         elif task_name == "sir":
-            axs[i, j].set_ylim([0, 0.01])
+            ax.set_ylim([0, 0.01])
         elif task_name == "lotka_volterra":
-            axs[i, j].set_ylim([0, 0.05])
+            ax.set_ylim([0, 0.05])
         else:
-            axs[i, j].set_ylim([0, 1])
+            ax.set_ylim([0, 1])
         
     elif metric == "mmd_to_dirac":
         if "lotka" in task_name:
-            axs[i, j].set_ylim([0, 0.5])
+            ax.set_ylim([0, 0.5])
         if "sir" in task_name:
-            axs[i, j].set_ylim([0, 0.05])
+            ax.set_ylim([0, 0.05])
         if "slcp" in task_name:
-            axs[i, j].set_ylim([0, 30])
+            ax.set_ylim([0, 30])
         if "gaussian_mixture" in task_name:
-            axs[i, j].set_ylim([0, 6])
+            ax.set_ylim([0, 6])
         if "bernoulli_glm" in task_name:
-            axs[i, j].set_ylim([0, 10])
+            ax.set_ylim([0, 10])
         if "two_moons" in task_name:
-            axs[i, j].set_ylim([0, 2])
+            ax.set_ylim([0, 2])
         if task_name == "gaussian_linear":
-            axs[i, j].set_ylim([0, 6])
+            ax.set_ylim([0, 6])
     else:
-        axs[i, j].set_ylim([0, 1])
+        ax.set_ylim([0, 1])
+
+def plots_dist_n_train(metric, tasks_dict, method_names, prec_ignore_nums, n_train_list, n_obs_list, compute_dist_fn, title_ext=""):
+    alpha, alpha_fill = set_plotting_style()
+
+    n_rows = len(tasks_dict.keys())
+    n_cols = len(n_obs_list)
+    fig, axs = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
+    )
+    fig.subplots_adjust(
+        right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+    )
+    for i, task_name in enumerate(tasks_dict.keys()):
+        for j, n_obs in tqdm(enumerate(n_obs_list), desc=f"{task_name}, {metric}"):
+            mean_dist_dict = {method: [] for method in method_names}
+            std_dist_dict = {method: [] for method in method_names}
+            for n_train in n_train_list:
+                for method in method_names:
+                    dist, _ = compute_dist_fn(
+                        task_name=task_name,
+                        n_train=n_train,
+                        n_obs=n_obs,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        ours=True if "ours" in method else False,
+                        clip=True if "clip" in method else False,
+                        clf_free_guidance=True if "cfg" in method else False,
+                        metric=metric,
+                        load=True,
+                        prec_ignore_nums=prec_ignore_nums[task_name],
+                    )
+                    mean_dist_dict[method].append(dist["mean"])
+                    std_dist_dict[method].append(dist["std"])
+
+            for k, mean_, std_ in zip(
+                mean_dist_dict.keys(),
+                mean_dist_dict.values(),
+                std_dist_dict.values(),
+            ):
+                mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
+                axs[i, j].fill_between(
+                    n_train_list,
+                    mean_ - std_,
+                    mean_ + std_,
+                    alpha=alpha_fill,
+                    color=METHODS_STYLE[k]["color"],
+                )
+                axs[i, j].plot(
+                    n_train_list,
+                    mean_,
+                    alpha=alpha,
+                    **METHODS_STYLE[k],
+                )
+
+            # set ax title as N_obs only at the top
+            if i == 0:
+                axs[i, j].set_title(r"$n$" + rf"$={n_obs}$")
+            # label xaxis only at the bottom
+            if i == len(tasks_dict.keys()) - 1:
+                axs[i, j].set_xlabel(r"$N_\mathrm{train}$")
+                axs[i, j].set_xscale("log")
+                axs[i, j].set_xticks(n_train_list)
+            # label yaxis only at the left
+            if j == 0:
+                axs[i, j].set_ylabel(
+                    tasks_dict[task_name] + "\n" + METRICS_STYLE[metric]["label"]
+                )
+            else:
+                axs[i, j].set_yticklabels([])
+            
+            set_axs_lims_sbibm(metric, axs[i, j], task_name)
+
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
+
+    return fig
+
+def plots_dist_n_obs(metric, tasks_dict, method_names, prec_ignore_nums, n_train_list, n_obs_list, compute_dist_fn, title_ext=""):
+    alpha, alpha_fill = set_plotting_style()
+    
+    n_rows = len(tasks_dict.keys())
+    n_cols = len(n_train_list)
+
+    fig, axs = plt.subplots(
+        n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows), sharex=True
+    )  # , constrained_layout=True)
+    fig.subplots_adjust(
+        right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+    )
+    for i, task_name in enumerate(tasks_dict.keys()):
+        for j, n_train in tqdm(
+            enumerate(n_train_list), desc=f"{task_name}, {metric}"
+        ):
+            mean_dist_dict = {method: [] for method in method_names}
+            std_dist_dict = {method: [] for method in method_names}
+            for n_obs in n_obs_list:
+                for method in method_names:
+                    dist, _ = compute_dist_fn(
+                        task_name=task_name,
+                        n_train=n_train,
+                        n_obs=n_obs,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        ours=True if "ours" in method else False,
+                        clip=True if "clip" in method else False,
+                        clf_free_guidance=True if "cfg" in method else False,
+                        metric=metric,
+                        load=True,
+                        prec_ignore_nums=prec_ignore_nums[task_name],
+                    )
+                    mean_dist_dict[method].append(dist["mean"])
+                    std_dist_dict[method].append(dist["std"])
+
+            for k, mean_, std_ in zip(
+                mean_dist_dict.keys(),
+                mean_dist_dict.values(),
+                std_dist_dict.values(),
+            ):
+                mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
+                axs[i, j].fill_between(
+                    n_obs_list,
+                    mean_ - std_,
+                    mean_ + std_,
+                    alpha=alpha_fill,
+                    color=METHODS_STYLE[k]["color"],
+                )
+                axs[i, j].plot(
+                    n_obs_list,
+                    mean_,
+                    alpha=alpha,
+                    **METHODS_STYLE[k],
+                )
+
+            # set ax title as N_train only at the top
+            if i == 0:
+                axs[i, j].set_title(r"$N_\mathrm{train}$" + rf"$={n_train}$")
+            # label xaxis only at the bottom
+            if i == len(tasks_dict.keys()) - 1:
+                axs[i, j].set_xlabel(r"$n$")
+                axs[i, j].set_xticks(n_obs_list)
+            # label yaxis only at the left
+            if j == 0:
+                axs[i, j].set_ylabel(
+                    tasks_dict[task_name] + "\n" + METRICS_STYLE[metric]["label"]
+                )
+            else:
+                axs[i, j].set_yticklabels([])
+            
+            set_axs_lims_sbibm(metric, axs[i, j], task_name)
+    
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    plt.legend(handles, labels, loc="lower right", prop={"family": "monospace"})
+
+    return fig
+
+def plots_dist_n_train_pf_nse(metric, tasks_dict, method_names, prec_ignore_nums, n_train_list, n_max_list, compute_dist_fn, title_ext=""):
+    alpha, alpha_fill = set_plotting_style()
+
+    n_cols = len(tasks_dict.keys())
+    fig, axs = plt.subplots(
+        1, n_cols + 1, figsize=(5 * (n_cols + 1), 5), sharex=True
+    )
+    fig.subplots_adjust(
+        right=0.995, top=0.9, bottom=0.2, hspace=0, wspace=0.3, left=0.1
+    )
+    n_max_list = [1] + n_max_list
+    for i, task_name in enumerate(tasks_dict.keys()):
+        mean_dist_dict = {method: {n_max: [] for n_max in n_max_list} for method in method_names}
+        std_dist_dict = {method: {n_max: [] for n_max in n_max_list} for method in method_names}
+
+        for n_train in tqdm(n_train_list, desc=f"{task_name}, {metric}"):
+            for n_max in n_max_list:
+                for method in method_names:
+                    dist, _ = compute_dist_fn(
+                        task_name=task_name,
+                        n_train=n_train,
+                        n_obs=30,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        ours=True if "ours" in method else False,
+                        clip=True if "clip" in method else False,
+                        clf_free_guidance=True if "cfg" in method else False,
+                        pf_nse=True if n_max > 1 else False,
+                        n_max=n_max,
+                        metric=metric,
+                        load=True,
+                        prec_ignore_nums=prec_ignore_nums[task_name],
+                    )
+                    mean_dist_dict[method][n_max].append(dist["mean"])
+                    std_dist_dict[method][n_max].append(dist["std"])
+
+        for k in mean_dist_dict.keys():
+            colors = cm.get_cmap(CMAPS_METHODS[k])(np.linspace(1, 0.2, len(n_max_list))).tolist()
+            labels = [METHODS_STYLE[k]["label"] + r", $n_\mathrm{max}=$"+rf"${n_max}$" for n_max in mean_dist_dict[k].keys()]
+            for n_max, color, label in zip(mean_dist_dict[k].keys(), colors, labels):
+                mean_, std_ = torch.FloatTensor(mean_dist_dict[k][n_max]), torch.FloatTensor(std_dist_dict[k][n_max])
+                axs[i].fill_between(
+                    n_train_list,
+                    mean_ - std_,
+                    mean_ + std_,
+                    alpha=alpha_fill,
+                    color= color,
+                )
+                METHODS_STYLE[k]["color"] = color
+                METHODS_STYLE[k]["label"] = label
+                axs[i].plot(
+                    n_train_list,
+                    mean_,
+                    alpha=alpha,
+                    **METHODS_STYLE[k],
+                )
+
+        axs[i].set_title(tasks_dict[task_name])
+        # label yaxis only at the left
+        if i == 0:
+            axs[i].set_ylabel(
+                METRICS_STYLE[metric]["label"]
+            )
+        # label xaxis 
+        axs[i].set_xlabel(r"$N_\mathrm{train}$")
+        axs[i].set_xscale("log")
+        axs[i].set_xticks(n_train_list)
+        
+        set_axs_lims_sbibm(metric, axs[i], task_name)
+
+    handles, labels = axs[0].get_legend_handles_labels()
+    # remove axs from last axs
+    axs[-1].axis("off")
+    plt.legend(handles, labels, prop={"family": "monospace"}, bbox_to_anchor=(1.05, 1.1))
+    
+    return fig
 
 # Plot functions for JR-NMM
 def plot_pairgrid_with_groundtruth_jrnnm(samples, theta_gt, labels, colors):

@@ -78,9 +78,9 @@ class MCMCTask(Task):
         samples = torch.from_numpy(np.asarray(samples)).float()
         return samples
     
-    def generate_training_data(self, n_simulations, save=True, **kwargs):
+    def generate_training_data(self, n_simulations, save=True, n_obs=1, **kwargs):
         kwargs["rng_key"] = None
-        return super().generate_training_data(n_simulations, save, **kwargs)
+        return super().generate_training_data(n_simulations=n_simulations, save=save, n_obs=n_obs, **kwargs)
 
 
 def get_predictive_sample(rng_key, model, cond, n_obs, **model_kwargs):

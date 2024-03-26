@@ -96,10 +96,13 @@ The script to reproduce experiments and generate figures are `jrnnm_posterior_es
 - To reproduce the figures run `python jrnnm_results.py` with the argument `--dirac_dist` for the `MMD to Dirac` plots, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
 
 
-### New features:
+### New features: classifier-free guidance and PF-NPSE
 
+Two main features have been added:
 - **Classifier-free guidance:** it is possible to implicitly **learn the prior score** by randomly dropping the context variables during the training of the posterior score. This is useful in cases where the diffused prior score cannot be computed analytically. To do so, specify the "drop rate" in the `classifier_free_guidance` variable of the training function implemented in `sm_utils.py`.
+- **Partially factorized samplers:** `pf_nse.py` implements the `PF_NSE` class. It extends the `NSE` class to allow inputs with sets of context observations `x` with variable size (instead of single context observations). Existing samplers (e.g. `ddim`, `annealed_langevin_geffner`) are modified to split the context observations into sub sets of smaller size `n_max` before passing them to the factorized score methods, resulting in a "partially" factorized tall posterior sampler, such as `PF-NPSE` developped by [Geffner et al., 2023](https://arxiv.org/abs/2209.14249).
 
 These features were integrated into the scripts of the SBI benchmark experiment and results will be added to the Appendix of the paper. 
 
 - To learn the prior score while training the posterior score model and then use it for sampling the tall posterior, run the `sbibm_posterior_estimation.py` script as explained above, and add the `--clf_free_guidance` argument in the command line. To generate results (compute metrics and plot figures) run the `sbibm_results_rebuttal.py`, again with added `--clf_free_guidance` argument.
+- To reproduce the `PF-NSE` experiment, use the `scicm_pf_npse.py` script. Figures are obtained by running the `sbibm_results_rebuttal.py` script as explained above (to compute and plot distances) with additional argument `--pf_nse`.

@@ -236,3 +236,4 @@ if __name__ == "__main__":
         plt.legend()
         plt.savefig('_checks/sir_train_theta_check.png')
         plt.clf()
+

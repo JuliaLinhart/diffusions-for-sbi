@@ -19,22 +19,6 @@ from tall_posterior_sampler import (prec_matrix_backward,
 
 
 class NSE(nn.Module):
-    r"""Creates a neural score estimation (NSE) network.
-
-    Args:
-        theta_dim (int): The dimensionality :math:`m` of the parameter space.
-        x_dim (int): The dimensionality :math:`d` of the observation space.
-        freqs (int): The number of time embedding frequencies.
-        build_net (Callable): The network constructor. It takes the
-            number of input and output features as positional arguments.
-        net_type (str): The type of final score network. Can be 'default' or 'fnet'.
-        embedding_nn_theta (Callable): The embedding network for the parameters :math:`\theta`.
-            Default is the identity function.
-        embedding_nn_x (Callable): The embedding network for the observations :math:`x`.
-            Default is the identity function.
-        kwargs (dict): Keyword arguments passed to the network constructor `build_net`.
-    """
-
     def __init__(
         self,
         theta_dim: int,
@@ -44,8 +28,23 @@ class NSE(nn.Module):
         net_type: str = "default",
         embedding_nn_theta: nn.Module = nn.Identity(),
         embedding_nn_x: nn.Module = nn.Identity(),
-        **kwargs,
+        **kwargs: dict,
     ):
+        r"""Creates a neural score estimation (NSE) network.
+
+        Args:
+            theta_dim (int): The dimensionality :math:`m` of the parameter space.
+            x_dim (int): The dimensionality :math:`d` of the observation space.
+            freqs (int): The number of time embedding frequencies.
+            build_net (Callable): The network constructor. It takes the
+                number of input and output features as positional arguments.
+            net_type (str): The type of final score network. Can be 'default' or 'fnet'.
+            embedding_nn_theta (Callable): The embedding network for the parameters :math:`\theta`.
+                Default is the identity function.
+            embedding_nn_x (Callable): The embedding network for the observations :math:`x`.
+                Default is the identity function.
+            kwargs (dict): Keyword arguments passed to the network constructor `build_net`.
+        """
         super().__init__()
 
         self.embedding_nn_theta = embedding_nn_theta
@@ -54,6 +53,7 @@ class NSE(nn.Module):
             theta_dim, x_dim
         )
         self.net_type = net_type
+        self.n_max = 1 # used in PF_NSE
 
         if net_type == "default":
             self.net = build_net(
@@ -65,6 +65,8 @@ class NSE(nn.Module):
             )
         else:
             raise NotImplementedError("Unknown net_type")
+        
+        self.tweedies_approximator = tweedies_approximation
 
         self.register_buffer("freqs", torch.arange(1, freqs + 1) * math.pi)
         self.register_buffer("zeros", torch.zeros(theta_dim))
@@ -106,7 +108,7 @@ class NSE(nn.Module):
     # The following function define the VP SDE with linear noise schedule beta(t):
     # dtheta = f(t) theta dt + g(t) dW = -0.5 * beta(t) theta dt + sqrt(beta(t)) dW
 
-    def score(self, theta: Tensor, x: Tensor, t: Tensor) -> Tensor:
+    def score(self, theta: Tensor, x: Tensor, t: Tensor, **kwargs) -> Tensor:
         return -self(theta, x, t) / self.sigma(t)
 
     def beta(self, t: Tensor) -> Tensor:
@@ -214,9 +216,8 @@ class NSE(nn.Module):
         Returns:
             (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
         """
-
         if x.shape[0] == shape[0] or len(x.shape) == 1 or x.shape[0] == 1:
-            score_fun = self.score
+            score_fun = partial(self.score, **kwargs)
         else:
             score_fun = partial(self.factorized_score, **kwargs)
 
@@ -334,7 +335,7 @@ class NSE(nn.Module):
         # get simple or tall data score function
 
         if x.shape[0] == shape[0] or len(x.shape) == 1 or x.shape[0] == 1:
-            score_fun = self.score
+            score_fun = partial(self.score, **kwargs)
         else:
             if corrector_type == "langevin":
                 score_fun = partial(self.factorized_score_geffner, **kwargs)
@@ -372,9 +373,6 @@ class NSE(nn.Module):
                 theta = theta.clip(*theta_clipping_range)
         return theta
 
-    # The following functions are samplers for the tall data setting
-    # with n context observations x, based on the factorized posterior.
-
     def annealed_langevin_geffner(
         self,
         shape: Size,
@@ -403,7 +401,7 @@ class NSE(nn.Module):
                 z = torch.randn_like(theta)
 
                 if len(x.shape) == 1 or x.shape[0] == 1:
-                    score = self.score(theta, x, t).detach()
+                    score = self.score(theta, x, t, **kwargs).detach()
                 else:
                     score = self.factorized_score_geffner(
                         theta, x, t, prior_score_fn, prior_type=prior_type, **kwargs
@@ -415,6 +413,10 @@ class NSE(nn.Module):
                 theta = theta.clip(*theta_clipping_range)
 
         return theta
+
+    # The following functions are used for samplers for the tall data setting
+    # with n context observations x: they implement the factorized posterior score.
+
 
     def factorized_score_geffner(
         self, theta, x, t, prior_score_fun, clf_free_guidance=None, **kwargs
@@ -437,11 +439,13 @@ class NSE(nn.Module):
             ) / -self.sigma(t)
             scores = scores.reshape(n_samples, n_observations, -1)
         else:
-            scores = self.score(theta[:,None], x[None, :], t).detach()
+            scores = self.score(theta[:,None], x[None, :], t, **kwargs).detach()
 
         if clf_free_guidance:
-            x_ = torch.zeros_like(x[0]) # replace 1 with n_max for multiple context observations ?
-            prior_score = self.score(theta[:,None], x_[None, :], t).detach()[:,0,:]
+            x_ = torch.zeros_like(x[0]) 
+            if "n" in kwargs:
+                kwargs_score_prior = {"n": torch.zeros_like(kwargs["n"][0][None,:])}
+            prior_score = self.score(theta[:,None], x_[None, :], t, **kwargs_score_prior).detach()[:,0,:]
         else:
             prior_score = prior_score_fun(theta[None], t)[0]
         aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
@@ -457,33 +461,39 @@ class NSE(nn.Module):
         prior,
         dist_cov_est=None,
         dist_cov_est_prior=None,
-        cov_mode="JAC",
+        cov_mode="GAUSS",
         prior_type="gaussian",
         clf_free_guidance=False,
+        **kwargs
     ):
         r"""Factorized score function for the tall data setting with n context observations x.
         Our proposition ("GAUSS" and "JAC").
         """
         # device
         n_obs = x_obs.shape[0]
-        prec_0_t, _, scores = tweedies_approximation(
+        prec_0_t, _, scores = self.tweedies_approximator(
             x=x_obs,
             theta=theta,
             nse=self,
             t=t,
-            score_fn=self.score,
+            score_fn=partial(self.score, **kwargs),
             dist_cov_est=dist_cov_est,
             mode=cov_mode,
         )
 
         if clf_free_guidance:
-            x_=torch.zeros_like(x_obs[0][None,:]) # replace 1 with n_max for multiple context observations ?
-            prec_prior_0_t_cfg, _, prior_score_cfg = tweedies_approximation(
+            x_=torch.zeros_like(x_obs[0][None,:]) 
+            if "n" in kwargs:
+                if kwargs["n"] is not None:
+                    kwargs_score_prior = {"n": torch.zeros_like(kwargs["n"][0][None,:])}
+                else:
+                    kwargs_score_prior = {"n": None}
+            prec_prior_0_t_cfg, _, prior_score_cfg = self.tweedies_approximator(
                 x=x_,
                 theta=theta,
                 nse=self,
                 t=t,
-                score_fn=self.score,
+                score_fn=partial(self.score, **kwargs_score_prior),
                 dist_cov_est=dist_cov_est_prior,
                 mode=cov_mode,
             )

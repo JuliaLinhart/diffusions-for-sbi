@@ -7,7 +7,7 @@ from nse import NSE, NSELoss
 from sm_utils import train_with_validation as train
 from torch.func import vmap
 
-from zuko.nn import MLP
+# from zuko.nn import MLP
 
 from tasks.sbibm import get_task 
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
@@ -63,7 +63,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:3"
 
     # Prepare training data
     # normalize theta
@@ -147,8 +147,9 @@ def run_sample_sgm(
     prior,
     prior_type,
     cov_mode,
-    sampler_type="euler",
+    sampler_type="ddim",
     langevin=False,
+    geffner=True,
     clip=False,
     theta_log_space=False,
     x_log_space=False,
@@ -158,7 +159,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:3"
 
     n_obs = context.shape[0]
 
@@ -205,27 +206,44 @@ def run_sample_sgm(
 
     if langevin:
         print()
-        print(f"Using LANGEVIN sampler, clip = {clip}.")
+        print(f"Using LANGEVIN sampler, clip = {clip}, GEFFNER = {geffner}.")
         print()
+        save_path += f"langevin_steps_400_5/"
+
         ext = ""
         theta_clipping_range = (None, None)
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
 
-        samples = score_network.annealed_langevin_geffner(
-            shape=(nsamples,),
-            x=context_norm.to(device),
-            prior_score_fn=prior_score_fn_norm,
-            clf_free_guidance=clf_free_guidance,
-            steps=400,
-            lsteps=5,
-            tau=0.5,
-            theta_clipping_range=theta_clipping_range,
-            verbose=True,
-        ).cpu()
+        if geffner:
+            samples = score_network.annealed_langevin_geffner(
+                shape=(nsamples,),
+                x=context_norm.to(device),
+                prior_score_fn=prior_score_fn_norm,
+                clf_free_guidance=clf_free_guidance,
+                steps=400,
+                lsteps=5,
+                tau=0.5,
+                theta_clipping_range=theta_clipping_range,
+                verbose=True,
+            ).cpu()
+        else:
+            samples = score_network.predictor_corrector(
+                (nsamples,),
+                x=context_norm.to(device),
+                steps=400,
+                prior_score_fun=prior_score_fn_norm,
+                eta=1,
+                corrector_lda=0,
+                n_steps=5,
+                r=0.5,
+                predictor_type="id",
+                verbose=True,
+                theta_clipping_range=theta_clipping_range,
+            ).cpu()
 
-        save_path += f"langevin_steps_400_5/"
+            save_path = save_path[:-1] + "_ours/"
         samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
     else:
         print()
@@ -402,6 +420,11 @@ if __name__ == "__main__":
         help="whether to use langevin sampler (Geffner et al. 2023)",
     )
     parser.add_argument(
+        "--ours",
+        action="store_true",
+        help="whether to use our langevin sampler our the one from (Geffner et al. 2023)",
+    )
+    parser.add_argument(
         "--clip",
         action="store_true",
         help="whether to clip the samples during sampling",
@@ -530,6 +553,7 @@ if __name__ == "__main__":
                 "clip": args.clip,  # for clipping
                 "sampler_type": args.sampler,
                 "langevin": args.langevin,
+                "geffner": not args.ours,
                 "theta_log_space": args.task in ["lotka_volterra", "sir"],
                 "x_log_space": args.task == "lotka_volterra",
                 "clf_free_guidance": args.clf_free_guidance,

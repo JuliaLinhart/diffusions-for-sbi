@@ -36,8 +36,8 @@ class Task:
             **kwargs,
         )
 
-    def generate_training_data(self, n_simulations, save=True, **kwargs):
-        print("Generating training data")
+    def generate_training_data(self, n_simulations, save=True, n_obs=1, **kwargs):
+        print("Generating training data for", n_simulations, "simulations and", n_obs, "observations.")
         # prior samples
         prior = self.prior()
         theta_train = prior.sample((n_simulations,))
@@ -45,13 +45,17 @@ class Task:
         # simulator samples
         x_train = []
         for theta_i in tqdm(theta_train):
-            x_i = self.simulator(theta=theta_i, n_obs=1, **kwargs)
+            x_i = self.simulator(theta=theta_i, n_obs=n_obs, **kwargs)
             x_train.append(x_i)
-        x_train = torch.stack(x_train)[:, 0, :]
+        x_train = torch.stack(x_train)
+        if n_obs == 1:
+            x_train = x_train[:,0,:]
 
         dataset_train = {"theta": theta_train, "x": x_train}
         if save:
             filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
+            if n_obs > 1:
+                filename = f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
             print("Saving at", filename)
             os.makedirs(self.save_path, exist_ok=True)
             torch.save(dataset_train, filename)
@@ -121,8 +125,10 @@ class Task:
             torch.save(samples, filename)
         return samples
     
-    def get_training_data(self, n_simulations):
+    def get_training_data(self, n_simulations, n_obs=1):
         filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
+        if n_obs > 1:
+            filename = f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
         try:
             print(f"Loading training data from {filename}")
             dataset_train = torch.load(filename)

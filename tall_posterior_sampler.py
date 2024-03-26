@@ -50,6 +50,7 @@ def tweedies_approximation(
     dist_cov_est=None,
     mode="JAC",
     clip_mean_bounds=(None, None),
+    partial_factorization=False,
 ):
     alpha_t = nse.alpha(t)
     sigma_t = nse.sigma(t)
@@ -68,14 +69,19 @@ def tweedies_approximation(
             )(theta)
         else:
             def score_jac(theta, x):
-                score = score_fn(theta=theta, t=t, x=x)
-                return score, score
-
-            jac_score, score = vmap(
-                lambda theta: vmap(jacrev(score_jac, has_aux=True), in_dims=(None, 0))(
+                    score = score_fn(theta=theta, t=t, x=x)
+                    return score, score
+            
+            if not partial_factorization:
+                jac_score, score = vmap(
+                    lambda theta: vmap(jacrev(score_jac, has_aux=True), in_dims=(None, 0))(
+                        theta, x
+                    )
+                )(theta)
+            else:
+                jac_score, score = vmap(jacrev(score_jac, has_aux=True), in_dims=(None, 0))(
                     theta, x
                 )
-            )(theta)
         
         cov = (sigma_t**2 / alpha_t) * (
             torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
@@ -97,12 +103,15 @@ def tweedies_approximation(
             
             score = score_jac(theta, x)[0]
         else:
-            score = vmap(
-                lambda theta: vmap(
-                    partial(score_fn, t=t), in_dims=(None, 0), randomness="different"
-                )(theta, x),
-                randomness="different",
-            )(theta)
+            if not partial_factorization:
+                score = vmap(
+                    lambda theta: vmap(
+                        partial(score_fn, t=t), in_dims=(None, 0), randomness="different"
+                    )(theta, x),
+                    randomness="different",
+                )(theta)
+            else:
+                score = score_fn(theta[:,None], x[None,:], t)
 
         prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
