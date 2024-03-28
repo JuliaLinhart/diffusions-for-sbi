@@ -93,7 +93,7 @@ def run_train_sgm(
         # track_loss=True,
         validation_split=0.2,
         early_stopping=True,
-        min_nb_epochs=n_epochs * 0.8, # 4000
+        min_nb_epochs=n_epochs * 0.8,  # 4000
     )
     score_network = avg_score_net.module
 
@@ -107,7 +107,11 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
+        {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_epoch": best_epoch,
+        },
         save_path + f"train_losses.pkl",
     )
 
@@ -143,9 +147,7 @@ def run_sample_sgm(
     # normalize prior
     low_norm = (prior.low - theta_train_mean) / theta_train_std * 2
     high_norm = (prior.high - theta_train_mean) / theta_train_std * 2
-    prior_norm = torch.distributions.Uniform(
-        low_norm.to(device), high_norm.to(device)
-    )
+    prior_norm = torch.distributions.Uniform(low_norm.to(device), high_norm.to(device))
     prior_score_fn_norm = get_vpdiff_uniform_score(
         low_norm.to(device), high_norm.to(device), score_network.to(device)
     )
@@ -191,16 +193,20 @@ def run_sample_sgm(
         if single_obs is not None:
             save_path += f"single_obs/"
             samples_filename = (
-                save_path + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+                save_path
+                + f"num_{single_obs}_posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
             )
         else:
             samples_filename = (
-                save_path + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
+                save_path
+                + f"posterior_samples_{theta_true.tolist()}_n_obs_{n_obs}{ext}.pkl"
             )
 
     else:
         print()
-        print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
+        print(
+            f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}."
+        )
         print()
 
         cov_mode_name = cov_mode
@@ -224,7 +230,11 @@ def run_sample_sgm(
             samples = score_network.ddim(
                 shape=(nsamples,),
                 x=context_norm.to(device),
-                eta=1 if steps == 1000 else 0.8 if steps == 400 else 0.5, # corresponds to the equivalent time setting from section 4.1
+                eta=1
+                if steps == 1000
+                else 0.8
+                if steps == 400
+                else 0.5,  # corresponds to the equivalent time setting from section 4.1
                 steps=steps,
                 theta_clipping_range=theta_clipping_range,
                 prior=prior_norm,
@@ -240,7 +250,7 @@ def run_sample_sgm(
             score_fn = partial(
                 diffused_tall_posterior_score,
                 prior_type="uniform",
-                prior=None,  
+                prior=None,
                 prior_score_fn=prior_score_fn_norm,  # analytical prior score function
                 x_obs=context_norm.to(device),  # observations
                 nse=score_network,  # trained score network
@@ -286,6 +296,7 @@ def run_sample_sgm(
         exist_ok=True,
     )
     torch.save(samples, samples_filename)
+
 
 if __name__ == "__main__":
     # Define Arguments
@@ -473,7 +484,7 @@ if __name__ == "__main__":
             x_train_std = means_stds_dict["x_train_std"]
 
             if args.single_obs:
-                for i,x_obs in enumerate(x_obs_100[:n_obs]):
+                for i, x_obs in enumerate(x_obs_100[:n_obs]):
                     run_fn = run_sample_sgm
                     kwargs_run = {
                         "theta_true": theta_true,
@@ -502,7 +513,9 @@ if __name__ == "__main__":
                     "context": x_obs_100[:n_obs],
                     "nsamples": args.nsamples,
                     "score_network": score_network,
-                    "steps": 1000 if args.cov_mode == "GAUSS" else 400, # corresponds to the equivalent time setting from section 4.1
+                    "steps": 1000
+                    if args.cov_mode == "GAUSS"
+                    else 400,  # corresponds to the equivalent time setting from section 4.1
                     "theta_train_mean": theta_train_mean,  # for (un)normalization
                     "theta_train_std": theta_train_std,  # for (un)normalization
                     "x_train_mean": x_train_mean,  # for (un)normalization

@@ -104,7 +104,11 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses, "best_epochs": best_epochs},
+        {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_epochs": best_epochs,
+        },
         save_path + f"train_losses.pkl",
     )
 
@@ -352,7 +356,8 @@ if __name__ == "__main__":
 
         # Define Experiment Path
         save_path = (
-            task_path + f"n_train_{args.n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+            task_path
+            + f"n_train_{args.n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
         )
         os.makedirs(save_path, exist_ok=True)
 

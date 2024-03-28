@@ -26,17 +26,17 @@ torch.manual_seed(42)
 
 PATH_EXPERIMENT = "results/sbibm/"
 TASKS_MAIN = {
-    "slcp": "SLCP", 
-    "lotka_volterra": "Lotka-Volterra", 
-    "sir": "SIR", 
+    "slcp": "SLCP",
+    "lotka_volterra": "Lotka-Volterra",
+    "sir": "SIR",
 }
 TASKS_EXTRA = {
     "gaussian_linear": "Gaussian",
-    "gaussian_mixture": "GMM", 
-    "gaussian_mixture_uniform": "GMM (uniform)", 
+    "gaussian_mixture": "GMM",
+    "gaussian_mixture_uniform": "GMM (uniform)",
     "bernoulli_glm": "B-GLM",
-    "bernoulli_glm_raw": "B-GLM (raw)", 
-    "two_moons": "Two Moons", 
+    "bernoulli_glm_raw": "B-GLM (raw)",
+    "two_moons": "Two Moons",
 }
 
 N_TRAIN = [1000, 3000, 10000, 30000]
@@ -48,7 +48,7 @@ TASKS_DICT = {
     "gaussian_linear": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
     "gaussian_mixture": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
     "gaussian_mixture_uniform": {
-        "lr": [1e-4, 1e-4, 1e-4, 1e-4], 
+        "lr": [1e-4, 1e-4, 1e-4, 1e-4],
         "bs": [256, 256, 256, 256],
     },
     "bernoulli_glm": {"lr": [1e-4, 1e-4, 1e-4, 1e-4], "bs": [256, 256, 256, 256]},
@@ -61,7 +61,7 @@ TASKS_DICT = {
 
 N_OBS = [1, 8, 14, 22, 30]
 NUM_OBSERVATION_LIST = list(np.arange(1, 26))
-N_MAX_LIST = [3,6,30] # for pf_nse
+N_MAX_LIST = [3, 6, 30]  # for pf_nse
 
 METRICS = ["mmd", "swd", "mmd_to_dirac"]
 
@@ -95,13 +95,16 @@ def path_to_results(
 ):
     batch_size = TASKS_DICT[task_name]["bs"][N_TRAIN.index(n_train)]
     lr = TASKS_DICT[task_name]["lr"][N_TRAIN.index(n_train)]
-    path = PATH_EXPERIMENT+ f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}/"
-    
+    path = (
+        PATH_EXPERIMENT
+        + f"{task_name}/n_train_{n_train}_bs_{batch_size}_n_epochs_{N_EPOCHS}_lr_{lr}/"
+    )
+
     if pf_nse:
         path = path + f"pf_n_max_{n_max}/"
     if clf_free_guidance:
         path = path + f"clf_free_guidance/"
-    
+
     if langevin:
         path = path + "langevin_steps_400_5/"
         if tammed_ula:
@@ -174,7 +177,10 @@ def compute_mean_distance(
     quantile=0.99,
 ):
     # load results if already computed
-    save_path = PATH_EXPERIMENT+ f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+    save_path = (
+        PATH_EXPERIMENT
+        + f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+    )
     if langevin and tammed_ula:
         save_path = save_path[:-1] + "_ours/"
     if pf_nse:
@@ -198,8 +204,14 @@ def compute_mean_distance(
             if torch.isnan(dist):
                 ignore_nums.append(num_obs)
             # ignore outliers (above quantile)
-            if (metric == "mmd" or metric == "swd") and (n_train > 3000) and (not langevin):
-                dist_list_all_no_nan = torch.tensor(dist_list_all)[~torch.isnan(torch.tensor(dist_list_all))]
+            if (
+                (metric == "mmd" or metric == "swd")
+                and (n_train > 3000)
+                and (not langevin)
+            ):
+                dist_list_all_no_nan = torch.tensor(dist_list_all)[
+                    ~torch.isnan(torch.tensor(dist_list_all))
+                ]
                 threshold = torch.quantile(dist_list_all_no_nan, quantile)
                 # print(f"Upper threshold : quantile {quantile} = {threshold}")
                 if dist > threshold:
@@ -207,7 +219,6 @@ def compute_mean_distance(
             # special case for SIR
             if task_name == "sir":
                 ignore_nums.append(12)
-                
 
     else:
         task = get_task(task_name, save_path="tasks/sbibm/data/")
@@ -216,7 +227,9 @@ def compute_mean_distance(
         ignore_nums = []
         if metric in ["mmd", "swd", "c2st"]:
             for num_obs in NUM_OBSERVATION_LIST:
-                samples_ref = task.get_reference_posterior_samples(num_obs, n_obs, verbose=False)
+                samples_ref = task.get_reference_posterior_samples(
+                    num_obs, n_obs, verbose=False
+                )
                 samples = load_samples(
                     task_name,
                     n_train=n_train,
@@ -308,7 +321,9 @@ if __name__ == "__main__":
     parser.add_argument("--c2st", action="store_true")
     parser.add_argument("--dirac", action="store_true")
 
-    parser.add_argument("--tasks", type=str, default="main", choices=["main", "extra", "all"])
+    parser.add_argument(
+        "--tasks", type=str, default="main", choices=["main", "extra", "all"]
+    )
     parser.add_argument("--clf_free_guidance", action="store_true")
     parser.add_argument("--langevin_comparison", action="store_true")
     parser.add_argument("--pf_nse", action="store_true")
@@ -383,8 +398,13 @@ if __name__ == "__main__":
                         axs[i, j].set_ylabel(TASKS[task_name])
                     axs[i, j].set_ylim([0, 0.5])
             axs[i, j].legend()
-            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuttal/losses_bs_{bs}_{args.tasks}.png")
-            plt.savefig(PATH_EXPERIMENT + f"_plots_rebuttal/sbibm_losses_bs_{bs}_{args.tasks}.pdf")
+            plt.savefig(
+                PATH_EXPERIMENT + f"_plots_rebuttal/losses_bs_{bs}_{args.tasks}.png"
+            )
+            plt.savefig(
+                PATH_EXPERIMENT
+                + f"_plots_rebuttal/sbibm_losses_bs_{bs}_{args.tasks}.pdf"
+            )
             plt.clf()
 
         # print losses to select lr and bs
@@ -415,14 +435,18 @@ if __name__ == "__main__":
             tasks_dict = TASKS_MAIN
             method_names = ["LANGEVIN_tammed", "LANGEVIN_tammed_clip"]
         elif args.pf_nse:
-            tasks_dict = TASKS_MAIN 
-            method_names = ["GAUSS","LANGEVIN"] 
+            tasks_dict = TASKS_MAIN
+            method_names = ["GAUSS", "LANGEVIN"]
             N_OBS = [30]
             n_max_list = N_MAX_LIST
         else:
-            tasks_dict= {**TASKS_MAIN, **TASKS_EXTRA}
+            tasks_dict = {**TASKS_MAIN, **TASKS_EXTRA}
             method_names = METHODS_STYLE.keys()
-            method_names = [method for method in method_names if "cfg" not in method and "tammed" not in method]
+            method_names = [
+                method
+                for method in method_names
+                if "cfg" not in method and "tammed" not in method
+            ]
 
         IGNORE_NUMS = {task_name: [] for task_name in tasks_dict.keys()}
 
@@ -434,7 +458,9 @@ if __name__ == "__main__":
                     for n_obs in N_OBS:
                         for n_max in n_max_list:
                             for method in method_names:
-                                print(f"{task_name}, {n_train}, {n_obs}, {n_max}, {method}")
+                                print(
+                                    f"{task_name}, {n_train}, {n_obs}, {n_max}, {method}"
+                                )
                                 dist, ignore_nums = compute_mean_distance(
                                     task_name=task_name,
                                     n_train=n_train,
@@ -473,7 +499,11 @@ if __name__ == "__main__":
         print(f"Final ignored observations: {final_ignore_nums}")
         print()
 
-        if not args.clf_free_guidance and not args.langevin_comparison and not args.pf_nse:
+        if (
+            not args.clf_free_guidance
+            and not args.langevin_comparison
+            and not args.pf_nse
+        ):
             torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
             torch.save(
                 final_ignore_nums,
@@ -483,7 +513,8 @@ if __name__ == "__main__":
     if args.plot_dist:
         prec_ignore_nums = torch.load(
             # PATH_EXPERIMENT + f"ignore_nums_final.pkl"
-            PATH_EXPERIMENT + f"ignore_nums_per_task.pkl"
+            PATH_EXPERIMENT
+            + f"ignore_nums_per_task.pkl"
         )
         print()
         print(f"Ignored observations: {prec_ignore_nums}")
@@ -505,7 +536,12 @@ if __name__ == "__main__":
                 title_ext = "_cfg"
             elif args.langevin_comparison:
                 tasks_dict = TASKS_MAIN
-                method_names = ["LANGEVIN", "LANGEVIN_clip", "LANGEVIN_tammed", "LANGEVIN_tammed_clip"]
+                method_names = [
+                    "LANGEVIN",
+                    "LANGEVIN_clip",
+                    "LANGEVIN_tammed",
+                    "LANGEVIN_tammed_clip",
+                ]
                 title_ext = "_lgv_comp"
             elif args.pf_nse:
                 tasks_dict = TASKS_MAIN
@@ -514,18 +550,22 @@ if __name__ == "__main__":
                 tasks_dict = TASKS
                 method_names = METHODS_STYLE.keys()
                 # remove cfg and tammed
-                method_names = [method for method in method_names if "cfg" not in method and "tammed" not in method]
+                method_names = [
+                    method
+                    for method in method_names
+                    if "cfg" not in method and "tammed" not in method
+                ]
                 title_ext = f"_{args.tasks}"
-            
+
             if not args.pf_nse:
                 # plot mean distance as function of n_train
                 fig = plots_dist_n_train(
-                    metric, 
-                    tasks_dict, 
-                    method_names, 
-                    prec_ignore_nums, 
-                    N_TRAIN, 
-                    N_OBS, 
+                    metric,
+                    tasks_dict,
+                    method_names,
+                    prec_ignore_nums,
+                    N_TRAIN,
+                    N_OBS,
                     compute_dist_fn=compute_mean_distance,
                     title_ext=title_ext,
                 )
@@ -538,10 +578,10 @@ if __name__ == "__main__":
                 plt.clf()
                 # plot mean distance as function of n_obs
                 fig = plots_dist_n_obs(
-                    metric, 
-                    tasks_dict, 
-                    method_names, 
-                    prec_ignore_nums, 
+                    metric,
+                    tasks_dict,
+                    method_names,
+                    prec_ignore_nums,
                     N_TRAIN,
                     N_OBS,
                     compute_dist_fn=compute_mean_distance,
@@ -556,11 +596,11 @@ if __name__ == "__main__":
                 plt.clf()
             else:
                 fig = plots_dist_n_train_pf_nse(
-                    metric, 
-                    tasks_dict, 
-                    method_names, 
-                    prec_ignore_nums, 
-                    N_TRAIN, 
+                    metric,
+                    tasks_dict,
+                    method_names,
+                    prec_ignore_nums,
+                    N_TRAIN,
                     N_MAX_LIST,
                     compute_dist_fn=compute_mean_distance,
                 )
@@ -571,7 +611,6 @@ if __name__ == "__main__":
                     PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train_pf_nse.pdf"
                 )
                 plt.clf()
-            
 
     if args.plot_samples:
         n_train = 30000
@@ -593,7 +632,9 @@ if __name__ == "__main__":
                 for n_obs in N_OBS:
                     if method == "TRUE":
                         samples.append(
-                            task.get_reference_posterior_samples(num_obs, n_obs, verbose=False)
+                            task.get_reference_posterior_samples(
+                                num_obs, n_obs, verbose=False
+                            )
                         )
                     else:
                         samples.append(
@@ -624,15 +665,12 @@ if __name__ == "__main__":
                     else "TRUE",
                 )
                 plt.savefig(
-                    save_path
-                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png"
+                    save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.png"
                 )
                 plt.savefig(
-                    save_path
-                    + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf"
+                    save_path + f"num_{num_obs}_{method}_pairplot_n_train_{n_train}.pdf"
                 )
                 plt.clf()
-
 
     # # Analytical vs. GAUSS first dims
     # task_name = "two_moons"

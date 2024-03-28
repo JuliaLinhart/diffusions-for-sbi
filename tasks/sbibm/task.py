@@ -37,7 +37,13 @@ class Task:
         )
 
     def generate_training_data(self, n_simulations, save=True, n_obs=1, **kwargs):
-        print("Generating training data for", n_simulations, "simulations and", n_obs, "observations.")
+        print(
+            "Generating training data for",
+            n_simulations,
+            "simulations and",
+            n_obs,
+            "observations.",
+        )
         # prior samples
         prior = self.prior()
         theta_train = prior.sample((n_simulations,))
@@ -49,13 +55,15 @@ class Task:
             x_train.append(x_i)
         x_train = torch.stack(x_train)
         if n_obs == 1:
-            x_train = x_train[:,0,:]
+            x_train = x_train[:, 0, :]
 
         dataset_train = {"theta": theta_train, "x": x_train}
         if save:
             filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
             if n_obs > 1:
-                filename = f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
+                filename = (
+                    f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
+                )
             print("Saving at", filename)
             os.makedirs(self.save_path, exist_ok=True)
             torch.save(dataset_train, filename)
@@ -108,7 +116,7 @@ class Task:
         # reference data for num_obs
         theta_star = self.get_reference_parameters(verbose=False)[num_obs - 1]
         x_star = self.get_reference_observation(num_obs=num_obs, verbose=False)
-    
+
         # sample from the posterior
         samples = self.sample_reference_posterior(
             x_star=x_star,
@@ -124,20 +132,22 @@ class Task:
             print("Saving at", filename)
             torch.save(samples, filename)
         return samples
-    
+
     def get_training_data(self, n_simulations, n_obs=1):
         filename = f"{self.save_path}dataset_n_train_{n_simulations}.pkl"
         if n_obs > 1:
-            filename = f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
+            filename = (
+                f"{self.save_path}dataset_n_train_{n_simulations}_n_obs_{n_obs}.pkl"
+            )
         try:
             print(f"Loading training data from {filename}")
             dataset_train = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            f"Training data not found {self.save_path}. Please run `generate_training_data` first."
-        )
+                f"Training data not found {self.save_path}. Please run `generate_training_data` first."
+            )
         return dataset_train
-    
+
     def get_reference_parameters(self, verbose=True):
         filename = f"{self.save_path}theta_true_list.pkl"
         try:
@@ -146,8 +156,8 @@ class Task:
             theta_star = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            f"Reference parameters not found at {self.save_path}. Please run `generate_reference_data` first."
-        )
+                f"Reference parameters not found at {self.save_path}. Please run `generate_reference_data` first."
+            )
         return theta_star
 
     def get_reference_observation(self, num_obs, n_repeat=100, verbose=True):
@@ -160,8 +170,8 @@ class Task:
             x_star = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            f"Reference observations not found at {self.save_path}. Please run `generate_reference_data` first."
-        )
+                f"Reference observations not found at {self.save_path}. Please run `generate_reference_data` first."
+            )
         return x_star
 
     def get_reference_posterior_samples(self, num_obs, n_obs, verbose=True):
@@ -172,8 +182,6 @@ class Task:
             samples = torch.load(filename)
         except FileNotFoundError:
             raise FileNotFoundError(
-            f"Reference posterior samples not found at {self.save_path}. Please run `generate_reference_posterior_samples` first."
-        )
+                f"Reference posterior samples not found at {self.save_path}. Please run `generate_reference_posterior_samples` first."
+            )
         return samples
-        
-   

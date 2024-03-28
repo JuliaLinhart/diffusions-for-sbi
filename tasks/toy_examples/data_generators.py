@@ -131,7 +131,8 @@ class Gaussian_MixtGaussian_mD:
             .log_prob(x_obs)
             .sum(dim=-1),
             torch.distributions.Normal(
-                loc=torch.zeros_like(x_obs), scale=(1 / 3) * self.simulator_base_std + 1,
+                loc=torch.zeros_like(x_obs),
+                scale=(1 / 3) * self.simulator_base_std + 1,
                 validate_args=False,
             )
             .log_prob(x_obs)
@@ -258,15 +259,16 @@ class SBIGaussian2d:
         )
 
         return posterior
-    
 
-class Conjugate_GammaPrior():
+
+class Conjugate_GammaPrior:
     """Conjugate prior for the Gaussian likelihood with known mean.
 
     - The simulator is a Gaussian distribution with known mean and unknown variance.
     - The prior is a Gamma distribution.
     - The task is to infer the precision (inverse variance) from the observed data.
     """
+
     def __init__(self, alpha, beta, mu=0) -> None:
         self.alpha = alpha
         self.beta = beta
@@ -274,10 +276,9 @@ class Conjugate_GammaPrior():
 
         self.prior = torch.distributions.Gamma(alpha, beta)
 
-
     def simulator(self, theta):
         return torch.distributions.Normal(loc=self.mu, scale=1 / theta.sqrt()).sample()
-    
+
     def true_posterior(self, x_obs):
         """Gets posterior for the case with multiple observations
 

@@ -33,15 +33,10 @@ class MCMCTask(Task):
         theta = jnp.array(theta)
 
         if rng_key is None:
-            rng_key = random.PRNGKey(np.random.randint(0, 2 ** 32))
+            rng_key = random.PRNGKey(np.random.randint(0, 2**32))
 
         # simulate with numpyro model
-        x = self._simulate_one(
-            rng_key=rng_key,
-            theta=theta,
-            n_obs=n_obs,
-            **kwargs
-        )
+        x = self._simulate_one(rng_key=rng_key, theta=theta, n_obs=n_obs, **kwargs)
 
         # convert x to torch
         x = torch.from_numpy(np.asarray(x)).float()
@@ -77,10 +72,12 @@ class MCMCTask(Task):
         # convert samples to torch
         samples = torch.from_numpy(np.asarray(samples)).float()
         return samples
-    
+
     def generate_training_data(self, n_simulations, save=True, n_obs=1, **kwargs):
         kwargs["rng_key"] = None
-        return super().generate_training_data(n_simulations=n_simulations, save=save, n_obs=n_obs, **kwargs)
+        return super().generate_training_data(
+            n_simulations=n_simulations, save=save, n_obs=n_obs, **kwargs
+        )
 
 
 def get_predictive_sample(rng_key, model, cond, n_obs, **model_kwargs):

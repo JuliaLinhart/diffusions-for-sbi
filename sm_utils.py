@@ -5,11 +5,20 @@ from tqdm import tqdm
 
 
 def train(
-    model, dataset, loss_fn, n_epochs=5000, lr=3e-4, batch_size=32, classifier_free_guidance=0., track_loss=False, validation_split=0,
+    model,
+    dataset,
+    loss_fn,
+    n_epochs=5000,
+    lr=3e-4,
+    batch_size=32,
+    classifier_free_guidance=0.0,
+    track_loss=False,
+    validation_split=0,
 ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    ema_model = torch.optim.swa_utils.AveragedModel(model,
-                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+    ema_model = torch.optim.swa_utils.AveragedModel(
+        model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999)
+    )
     # get train and validation loaders
     train_loader, val_loader = get_dataloaders(
         dataset, batch_size=batch_size, validation_split=validation_split
@@ -47,14 +56,16 @@ def train(
                     for data in val_loader:
                         # get batch data
                         if len(data) > 1:
-                            theta, x, kwargs_sn = get_batch_data(data, classifier_free_guidance)
+                            theta, x, kwargs_sn = get_batch_data(
+                                data, classifier_free_guidance
+                            )
                             kwargs_sn["x"] = x
                         else:
                             theta = data[0]
                             kwargs_sn = {}
                         # validation step
                         loss = loss_fn(theta, **kwargs_sn)
-                        
+
                         # update loss
                         val_loss += (
                             loss.detach().item() * theta.shape[0]
@@ -70,6 +81,7 @@ def train(
         return ema_model, train_losses, val_losses
     else:
         return ema_model
+
 
 # Training with validation and early stopping as in
 # https://github.com/smsharma/mining-for-substructure-lens/blob/master/inference/trainer.py
@@ -97,9 +109,9 @@ def train_with_validation(
 
     # set up optimizer
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    ema_model = torch.optim.swa_utils.AveragedModel(model,
-                                                    multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
-    
+    ema_model = torch.optim.swa_utils.AveragedModel(
+        model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999)
+    )
 
     # start training
     train_losses, val_losses = [], []
@@ -142,7 +154,9 @@ def train_with_validation(
                     for data in val_loader:
                         # get batch data
                         if len(data) > 1:
-                            theta, x, kwargs_sn = get_batch_data(data, classifier_free_guidance)
+                            theta, x, kwargs_sn = get_batch_data(
+                                data, classifier_free_guidance
+                            )
                             kwargs_sn["x"] = x
                         else:
                             theta = data[0]
@@ -222,7 +236,7 @@ def get_batch_data(data, clf_free_guidance):
         n = data[2]
         kwargs_sn = {"n": n}
 
-    # to learn the diffused prior score via classifier free guidance: 
+    # to learn the diffused prior score via classifier free guidance:
     # set context to zero 20% of the time
     if random.random() < clf_free_guidance:
         x = torch.zeros_like(x)  # zero context

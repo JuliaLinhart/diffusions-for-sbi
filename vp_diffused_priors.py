@@ -146,18 +146,21 @@ def half_gaussian_moments(mu, sigma, m):
             m - 1
         ) * half_gaussian_moments(mu, sigma, m - 2)
 
+
 def grad_half_gaussian_moments(grad_mu, mu, sigma, m):
     # m must be integer
     assert m % 1 == 0
     if m == 0:
-        return grad_mu * torch.exp(-(mu**2) / (2 * sigma**2)) 
+        return grad_mu * torch.exp(-(mu**2) / (2 * sigma**2))
     elif m == 1:
-        return grad_mu * half_gaussian_moments(mu, sigma, 0) 
+        return grad_mu * half_gaussian_moments(mu, sigma, 0)
     else:
         return (
             grad_mu * half_gaussian_moments(mu, sigma, m - 1)
             + mu * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 1)
-            + (sigma**2) * (m - 1) * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 2)
+            + (sigma**2)
+            * (m - 1)
+            * grad_half_gaussian_moments(grad_mu, mu, sigma, m - 2)
         )
 
 

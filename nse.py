@@ -13,9 +13,11 @@ from zuko.transforms import FreeFormJacobianTransform
 from zuko.utils import broadcast
 
 from embedding_nets import FNet
-from tall_posterior_sampler import (prec_matrix_backward,
-                                    tweedies_approximation,
-                                    tweedies_approximation_prior)
+from tall_posterior_sampler import (
+    prec_matrix_backward,
+    tweedies_approximation,
+    tweedies_approximation_prior,
+)
 
 
 class NSE(nn.Module):
@@ -29,21 +31,48 @@ class NSE(nn.Module):
         embedding_nn_theta: nn.Module = nn.Identity(),
         embedding_nn_x: nn.Module = nn.Identity(),
         **kwargs: dict,
-    ):
+    ) -> None:
         r"""Creates a neural score estimation (NSE) network.
+        This class implements the neural score estimation (NSE) network parametrized
+        by the VP SDE and a linear noise schedule [1]. It takes as input the parameters
+        `theta`, observations `x`, and the time variable `t`, and outputs the estimated
+        noise `epsilon(theta, x, t)`, that is related to the score function via
+        `score(theta, x, t) = -sigma(t) * epsilon(theta, x, t)`, where `sigma(t)` is the
+        standard deviation of the transition kernel of the VP SDE.
 
+        The network consists of two optional embedding networks for the parameters `theta` and
+        observations `x`, respectively, and a positional encoding of the time variable `t`.
+        The embeddings are concatenated with the positional encoding and passed through a
+        final score network that outputs the estimated noise.
+
+        `NSE` also implements different sampling algorithms to infer the posterior distribution
+        in the classical and in the tall data setting (for multiple context observations `x`):
+        - Denoising Diffusion Implicit Models (DDIM) sampler [2],
+        - Annealed Langevin dynamics as implemented in [3],
+        - Predictor-Corrector (PC) sampler (generalization of DDIM and Langevin dynamics [1]
+            with tammed ULA [4] for the langevin corrector step),
+
+        References:
+            [1] Song et al. (2020). Score-Based Generative Modeling through SDEs,
+                https://arxiv.org/abs/2011.13456.
+            [2] Song et al. (2021). Denoising Diffusion Implicit Models,
+                https://arxiv.org/abs/2010.02502.
+            [3] Geffner et al. (2023). Compositional Score Modeling for Simulation-Based Inference,
+                https://arxiv.org/abs/2209.14249.
+            [4] Brosse et al. (2017). The Tamed Unadjusted Langevin Algorithm,
+                https://inria.hal.science/hal-01648667/document.
         Args:
-            theta_dim (int): The dimensionality :math:`m` of the parameter space.
-            x_dim (int): The dimensionality :math:`d` of the observation space.
-            freqs (int): The number of time embedding frequencies.
-            build_net (Callable): The network constructor. It takes the
-                number of input and output features as positional arguments.
-            net_type (str): The type of final score network. Can be 'default' or 'fnet'.
-            embedding_nn_theta (Callable): The embedding network for the parameters :math:`\theta`.
+            theta_dim: The dimensionality `m` of the parameter space.
+            x_dim: The dimensionality `d` of the observation space.
+            freqs: The number of time embedding frequencies, default is 3.
+            build_net: The network constructor. It takes the number of input and
+            output features as positional arguments. Default is a simple MLP.
+            net_type: The type of final score network. Can be 'default' or 'fnet'.
+            embedding_nn_theta: The embedding network for the parameters `theta`.
                 Default is the identity function.
-            embedding_nn_x (Callable): The embedding network for the observations :math:`x`.
+            embedding_nn_x: The embedding network for the observations `x`.
                 Default is the identity function.
-            kwargs (dict): Keyword arguments passed to the network constructor `build_net`.
+            kwargs: Keyword arguments passed to the network constructor `build_net`.
         """
         super().__init__()
 
@@ -53,7 +82,7 @@ class NSE(nn.Module):
             theta_dim, x_dim
         )
         self.net_type = net_type
-        self.n_max = 1 # used in PF_NSE
+        self.n_max = 1  # used in PF_NSE
 
         if net_type == "default":
             self.net = build_net(
@@ -65,7 +94,7 @@ class NSE(nn.Module):
             )
         else:
             raise NotImplementedError("Unknown net_type")
-        
+
         self.tweedies_approximator = tweedies_approximation
 
         self.register_buffer("freqs", torch.arange(1, freqs + 1) * math.pi)
@@ -73,7 +102,7 @@ class NSE(nn.Module):
         self.register_buffer("ones", torch.ones(theta_dim))
 
     def get_theta_x_embedding_dim(self, theta_dim: int, x_dim: int) -> int:
-        r"""Returns the dimensionality of the embeddings for :math:`\theta` and :math:`x`."""
+        r"""Returns the dimensionality of the embeddings for `\theta` and `x`."""
         theta, x = torch.ones((1, theta_dim)), torch.ones((1, x_dim))
         return (
             self.embedding_nn_theta(theta).shape[-1],
@@ -83,23 +112,27 @@ class NSE(nn.Module):
     def forward(self, theta: Tensor, x: Tensor, t: Tensor) -> Tensor:
         r"""
         Args:
-            theta (torch.Tensor): The parameters :math:`\theta`, with shape :math:`(*, m)`.
-            x (torch.Tensor): The observation :math:`x`, with shape :math:`(*, d)`.
-            t (torch.Tensor): The time :math:`t`, with shape :math:`(*,).`
+            theta: The parameters `\theta`, of shape `(*, m)`.
+            x: The observation `x`, of shape `(*, d)`.
+            t: The time `t`, of shape `(*,).`
 
         Returns:
-            (torch.Tensor): The estimated noise :math:`\epsilon_\phi(\theta, x, t)`, with shape :math:`(*, m)`.
+           : The estimated noise `epsilon(theta, x, t)`, of shape `(*, m)`.
         """
 
         if self.net_type == "default":
+            # compute positional encoding for `t`
             t = self.freqs * t[..., None]
             t = torch.cat((t.cos(), t.sin()), dim=-1)
 
+            # compute embeddings for `theta` and `x`
             theta = self.embedding_nn_theta(theta)
             x = self.embedding_nn_x(x)
 
+            # broadcast `theta`, `x`, and `t` to the same shape
             theta, x, t = broadcast(theta, x, t, ignore=1)
 
+            # concatenate variables and output the estimated noise
             return self.net(torch.cat((theta, x, t), dim=-1))
 
         if self.net_type == "fnet":
@@ -112,33 +145,27 @@ class NSE(nn.Module):
         return -self(theta, x, t) / self.sigma(t)
 
     def beta(self, t: Tensor) -> Tensor:
-        r"""Linear noise schedule of the VP SDE:
-        .. math:: \beta(t) = 32 t .
-        """
+        r"""Linear noise schedule of the VP SDE: `beta(t) = 32*t`."""
         return 32 * t
 
     def f(self, t: Tensor) -> Tensor:
-        """Drift of the VP SDE:
-        .. math:: f(t) = -0.5 * \beta(t) .
-        """
+        """Drift of the VP SDE: `f(t) = -0.5 * beta(t)`."""
         return -0.5 * self.beta(t)
 
     def g(self, t: Tensor) -> Tensor:
-        """
-        .. math:: g(t) = \sqrt{\beta(t)} .
-        """
+        """`g(t) = sqrt(beta(t))`."""
         return torch.sqrt(self.beta(t))
 
     def alpha(self, t: Tensor) -> Tensor:
         r"""Mean of the transition kernel of the VP SDE:
-        .. math: `alpha(t) = \exp ( -0.5 \int_0^t \beta(s)ds)`.
+        `alpha(t) = \exp ( -0.5 \int_0^t beta(s)ds)`.
         """
         return torch.exp(-16 * t**2)
 
     def sigma(self, t: Tensor) -> Tensor:
         r"""Standard deviation of the transition kernel of the VP SDE:
-        .. math:: \sigma^2(t) = 1 - \exp( - \int_0^t \beta(s)ds) + C
-        where C is such that :math: `\sigma^2(1) = 1, \sigma^2(0)  = \epsilon \approx 1e-4`.
+        `sigma^2(t) = 1 - \exp( - \int_0^t beta(s)ds) + C,
+        where C is such that  `sigma^2(1) = 1, sigma^2(0)  = epsilon \approx 1e-4`.
         """
         return torch.sqrt(1 - self.alpha(t) + math.exp(-16))
 
@@ -151,12 +178,12 @@ class NSE(nn.Module):
     def flow(self, x: Tensor, **kwargs) -> Distribution:
         r"""
         Args:
-            x (torch.Tensor): observation :math:`x`, with shape :math:`(*, d)`.
-            kwargs (dict): additional args for the forward method.
+            x: observation `x`, of shape `(*, d)`.
+            kwargs: additional args for the forward method.
 
         Returns:
             (zuko.distributions.Distribution): The normalizing flow
-                :math:`p_\phi(\theta | x)` induced by the probability flow ODE.
+                `p_\phi(\theta | x)` induced by the probability flow ODE.
         """
 
         return NormalizingFlow(
@@ -197,24 +224,31 @@ class NSE(nn.Module):
         self,
         shape: Size,
         x: Tensor,
-        steps: int = 64,
+        steps: int = 1000,
         eta: float = 1.0,
         verbose: bool = False,
         theta_clipping_range=(None, None),
         **kwargs,
     ) -> Tensor:
-        r"""Sampler from Denoising Diffusion Implicit Models (DDIM, Song et al., 2021),
-            but adapted to the tall data setting with `n` context observations `x`.
+        r"""Sampler from Denoising Diffusion Implicit Models [1],  but adapted to
+        the tall data setting with `n` context observations `x`.
+
+        References:
+            [1] Song et al. (2021). Denoising Diffusion Implicit Models,
+                https://arxiv.org/abs/2010.02502.
 
         Args:
             shape (torch.Size): The shape of the samples.
-            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
-            steps (int): The number of steps in the diffusion process.
-            eta (float): The noise level for the bridge process.
-            verbose (bool): If True, displays a progress bar.
+            x: The conditioning variable for the score network, of shape `(n, m)`.
+            steps: The number of steps in the diffusion process, default is 1000.
+            eta: The noise level for the bridge process, default is 1.0.
+            verbose (bool): If True, displays a progress bar, default is False.
+            theta_clipping_range (Tuple[float, float]): The range for clipping the samples.
+                Default is `(None, None)`.
+            kwargs: Additional args for the score function.
 
         Returns:
-            (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
+           : The samples from the diffusion process, of shape `(shape[0], m)`.
         """
         if x.shape[0] == shape[0] or len(x.shape) == 1 or x.shape[0] == 1:
             score_fun = partial(self.score, **kwargs)
@@ -275,17 +309,22 @@ class NSE(nn.Module):
         **kwargs,
     ) -> Tensor:
         r"""Langevin corrector for the Predictor-Corrector (PC) sampler.
+        It implements one step of the tamed ULA algorithm [1].
+
+        References:
+            [1] Brosse et al. (2017). The Tamed Unadjusted Langevin Algorithm,
+                https://inria.hal.science/hal-01648667/document.
 
         Args:
-            theta (torch.Tensor): The current state of the diffusion process, with shape :math:`(n, m)`.
-            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
-            t (torch.Tensor): The time :math:`t`, with shape :math:`(n,)`.
-            score_fun (Callable): The score function.
-            lsteps (int): The number of Langevin steps.
-            r (float): The step size (or signal-to-noise ratio) for the Langevin dynamics.
+            theta: The current state of the diffusion process, of shape `(n, m)`.
+            x: The conditioning variable for the score network, of shape `(n, m)`.
+            t: The time `t`, of shape `(*,)`.
+            score_fun: The score function.
+            lsteps: The number of Langevin steps.
+            r: The step size (or signal-to-noise ratio) for the Langevin dynamics.
 
         Returns:
-            (torch.Tensor): The corrected sampple state of the diffusion process, with shape :math:`(n, m)`.
+           : The corrected sampple state of the diffusion process, of shape `(n, m)`.
         """
 
         for _ in range(lsteps):
@@ -293,12 +332,7 @@ class NSE(nn.Module):
             g = score_fun(theta, x, t).detach()
             # Step size as defined in [Song et al, 2021]
             # (Alg 5 in https://arxiv.org/pdf/2011.13456.pdf with sigma^2 replacing 1/ ||g||^2)
-            eps = (
-                r
-                * (self.alpha(t) ** 0.5)
-                * (self.sigma(t) ** 2)
-            )
-            # Tamed ULA (eq3 in https://inria.hal.science/hal-01648667/document)
+            eps = r * (self.alpha(t) ** 0.5) * (self.sigma(t) ** 2)
             tamed_eps = (eps / (1 + eps * torch.linalg.norm(g, axis=-1)))[..., None]
             theta = theta + tamed_eps * g + ((2 * eps) ** 0.5) * z
         return theta
@@ -307,32 +341,37 @@ class NSE(nn.Module):
         self,
         shape: Size,
         x: Tensor,
-        steps: int = 64,
+        steps: int = 1000,
         verbose: bool = False,
         predictor_type="ddim",
         corrector_type="langevin",
         theta_clipping_range=(None, None),
         **kwargs,
     ) -> Tensor:
-        r"""Predictor-Corrector (PC) sampling algorithm (Song et al., 2021),
-        but adapted to the tall data setting with `n` context observations `x`.
+        r"""Predictor-Corrector (PC) sampling algorithm [1], but adapted to
+        the tall data setting with `n` context observations `x`.
 
         The PC sampler is a generalization of the
         - Langevin Dynamics: predictor_type = 'id', corrector_type = 'langevin'
         - DDIM sampler: predictor_type = 'ddim', corrector_type = 'id'
 
+        References:
+            [1] Song et al. (2020). Score-Based Generative Modeling through SDEs,
+                https://arxiv.org/abs/2011.13456.
+
         Args:
             shape (torch.Size): The shape of the samples.
-            x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
-            steps (int): The number of steps in the diffusion process.
-            verbose (bool): If True, displays a progress bar.
-            predictor_type (str): The type of predictor. Can be 'ddim' or 'id'.
-            corrector_type (str): The type of corrector. Can be 'langevin' or 'id'.
+            x: The conditioning variable for the score network, of shape `(n, m)`.
+            steps: The number of steps in the diffusion process, default is 1000.
+            verbose (bool): If True, displays a progress bar, default is False.
+            predictor_type: The type of predictor. Can be 'ddim' or 'id', default is 'ddim'.
+            corrector_type: The type of corrector. Can be 'langevin' or 'id', default is 'langevin'.
             theta_clipping_range (Tuple[float, float]): The range for clipping the samples.
-            kwargs (dict): Additional args for the score function, the predictor and corrector.
+                Default is `(None, None)`.
+            kwargs: Additional args for the score function, the predictor and corrector.
 
         Returns:
-            (torch.Tensor): The samples from the diffusion process, with shape :math:`(shape[0], m)`.
+           : The samples from the diffusion process, of shape `(shape[0], m)`.
         """
 
         # get simple or tall data score function
@@ -389,6 +428,25 @@ class NSE(nn.Module):
         verbose: bool = False,
         **kwargs,
     ):
+        """Annealed Langevin dynamics with optional use of the factorized posterior score
+        from [1] for tall data setting.
+
+        References:
+            [1] Geffner et al. (2023). Compositional Score Modeling for Simulation-Based Inference,
+                https://arxiv.org/abs/2209.14249.
+
+        Args:
+            shape: The shape of the samples.
+            x: The conditioning variable for the score network, of shape `(n, m)`.
+            prior_score_fn: The prior score function.
+            prior_type: The type of prior for the factorized score, default is None.
+            steps: The number of steps in the diffusion process, default is 400.
+            lsteps: The number of Langevin steps, default is 5.
+            tau: Scale of the langevin step size, default is 0.5.
+            theta_clipping_range: The range for clipping the samples, default is `(None, None)`.
+            verbose: If True, displays a progress bar, default is False.
+            kwargs: Additional args for the score function.
+        """
         time = torch.linspace(1, 0, steps + 1).to(x)
 
         theta = DiagNormal(self.zeros, self.ones).sample(shape)
@@ -398,7 +456,7 @@ class NSE(nn.Module):
                 gamma_t = self.alpha(t) / self.alpha(t - time[-2])
             else:
                 gamma_t = self.alpha(t)
-            
+
             delta = tau * (1 - gamma_t) / (gamma_t**0.5)
             for _ in range(lsteps):
                 z = torch.randn_like(theta)
@@ -411,7 +469,7 @@ class NSE(nn.Module):
                     ).detach()
 
                 theta = theta + delta * score + ((2 * delta) ** 0.5) * z
-            
+
             if theta_clipping_range[0] is not None:
                 theta = theta.clip(*theta_clipping_range)
 
@@ -420,12 +478,36 @@ class NSE(nn.Module):
     # The following functions are used for samplers for the tall data setting
     # with n context observations x: they implement the factorized posterior score.
 
-
     def factorized_score_geffner(
-        self, theta, x, t, prior_score_fun, clf_free_guidance=None, **kwargs
+        self,
+        theta: Tensor,
+        x: Tensor,
+        t: Tensor,
+        prior_score_fun: Callable[[Tensor, Tensor], Tensor] = None,
+        clf_free_guidance: bool = False,
+        **kwargs,
     ):
         r"""Factorized score function for the tall data setting with n context observations x.
-        From Geffner et al. (2023).
+        Corresponds to the `F-NPSE` method from Geffner et al. (2023) [1]. Optionally, it can
+        use the prior score learned via the classifier-free guidance approach [2].
+
+        References:
+            [1] Geffner et al. (2023). Compositional Score Modeling for Simulation-Based Inference,
+                https://arxiv.org/abs/2209.14249.
+            [2] Ho et al. (2022). Classifier-Free Diffusion Guidance,
+                https://arxiv.org/abs/2207.12598.
+
+        Args:
+            theta: The posterior samples `theta`, of shape `(n, m)`.
+            x: The observation `x`, of shape `(n, d)`.
+            t: The time `t`, of shape `(*,)`.
+            prior_score_fun: The analytical prior score function.
+            clf_free_guidance: If True, we use the prior score learned via the classifier-free guidance
+            approach [1], default is False.
+            kwargs: Additional args for the score function.
+
+        Returns:
+            : The factorized score, of shape `(n, m)`.
         """
         # Defining variables
         n_observations = x.shape[0] if len(x.shape) > 1 else 1
@@ -435,20 +517,26 @@ class NSE(nn.Module):
         # Calculating m, Sigma and scores for the posteriors
         if self.net_type == "fnet":
             scores = self(
-                theta[:, None, :].repeat(1, n_observations, 1).reshape(n_observations * n_samples, -1),
-                x[None, :, :].repeat(n_samples, 1, 1).reshape(n_observations * n_samples, -1),
+                theta[:, None, :]
+                .repeat(1, n_observations, 1)
+                .reshape(n_observations * n_samples, -1),
+                x[None, :, :]
+                .repeat(n_samples, 1, 1)
+                .reshape(n_observations * n_samples, -1),
                 t[None, None].repeat(n_samples * n_observations, 1),
                 **kwargs,
             ) / -self.sigma(t)
             scores = scores.reshape(n_samples, n_observations, -1)
         else:
-            scores = self.score(theta[:,None], x[None, :], t, **kwargs).detach()
+            scores = self.score(theta[:, None], x[None, :], t, **kwargs).detach()
 
         if clf_free_guidance:
-            x_ = torch.zeros_like(x[0]) 
+            x_ = torch.zeros_like(x[0])
             if "n" in kwargs:
-                kwargs_score_prior = {"n": torch.zeros_like(kwargs["n"][0][None,:])}
-            prior_score = self.score(theta[:,None], x_[None, :], t, **kwargs_score_prior).detach()[:,0,:]
+                kwargs_score_prior = {"n": torch.zeros_like(kwargs["n"][0][None, :])}
+            prior_score = self.score(
+                theta[:, None], x_[None, :], t, **kwargs_score_prior
+            ).detach()[:, 0, :]
         else:
             prior_score = prior_score_fun(theta[None], t)[0]
         aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
@@ -467,10 +555,35 @@ class NSE(nn.Module):
         cov_mode="GAUSS",
         prior_type="gaussian",
         clf_free_guidance=False,
-        **kwargs
+        **kwargs,
     ):
         r"""Factorized score function for the tall data setting with n context observations x.
-        Our proposition ("GAUSS" and "JAC").
+        Corresponds to our proposition ("GAUSS" and "JAC"). Optionally, it can use the prior score
+        learned via the classifier-free guidance approach [1].
+
+        References:
+            [1] Ho et al. (2022). Classifier-Free Diffusion Guidance,
+                https://arxiv.org/abs/2207.12598.
+
+        Args:
+            theta: The posterior samples `theta`, of shape `(n, m)`.
+            x_obs: The observation `x`, of shape `(n, d)`.
+            t: The time `t`, of shape `(*,)`.
+            prior_score_fn: The analytical prior score function.
+            prior: The prior distribution.
+            dist_cov_est: The "backward covariance matrix" of the posterior scores,
+                used for tweedies approximation, default is None.
+            dist_cov_est_prior: The "bakckward covariance matrix" of the prior scores
+                used for tweedies approximation, default is None.
+            cov_mode: The mode for the covariance estimation, can be 'GAUSS' or 'JAC',
+                default is 'GAUSS'.
+            prior_type: The type of prior for the factorized score, default is 'gaussian'.
+            clf_free_guidance: If True, we use the prior score learned via the classifier-free guidance
+            approach [1], default is False.
+            kwargs: Additional args for the score function.
+
+        Returns:
+            : The factorized score, of shape `(n, m)`.
         """
         # device
         n_obs = x_obs.shape[0]
@@ -485,10 +598,12 @@ class NSE(nn.Module):
         )
 
         if clf_free_guidance:
-            x_=torch.zeros_like(x_obs[0][None,:]) 
+            x_ = torch.zeros_like(x_obs[0][None, :])
             if "n" in kwargs:
                 if kwargs["n"] is not None:
-                    kwargs_score_prior = {"n": torch.zeros_like(kwargs["n"][0][None,:])}
+                    kwargs_score_prior = {
+                        "n": torch.zeros_like(kwargs["n"][0][None, :])
+                    }
                 else:
                     kwargs_score_prior = {"n": None}
             prec_prior_0_t_cfg, _, prior_score_cfg = self.tweedies_approximator(
@@ -500,15 +615,17 @@ class NSE(nn.Module):
                 dist_cov_est=dist_cov_est_prior,
                 mode=cov_mode,
             )
-            prec_score_prior_cfg = (prec_prior_0_t_cfg @ prior_score_cfg[..., None])[..., 0][:,0,:]
+            prec_score_prior_cfg = (prec_prior_0_t_cfg @ prior_score_cfg[..., None])[
+                ..., 0
+            ][:, 0, :]
             prec_score_post = (prec_0_t @ scores[..., None])[..., 0]
-            lda_cfg = prec_prior_0_t_cfg[:,0,:] * (1 - n_obs) + prec_0_t.sum(dim=1)
+            lda_cfg = prec_prior_0_t_cfg[:, 0, :] * (1 - n_obs) + prec_0_t.sum(dim=1)
             weighted_scores_cfg = prec_score_prior_cfg + (
                 prec_score_post - prec_score_prior_cfg[:, None]
             ).sum(dim=1)
 
             total_score = torch.linalg.solve(A=lda_cfg, B=weighted_scores_cfg)
-        
+
         else:
             if prior_type == "gaussian":
                 prior_score = prior_score_fn(theta, t)
@@ -540,75 +657,23 @@ class NSE(nn.Module):
 
         return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
 
-    # The following functions are the original samplers for the single observation setting.
-
-    def annealed_langevin(
-        self,
-        shape: Size,
-        x: Tensor,
-        steps: int = 64,
-        lsteps: int = 1000,
-        tau: float = 1,
-        verbose: bool = False,
-        **kwargs,
-    ):
-        time = torch.linspace(1, 0, steps + 1).to(x)
-
-        theta = DiagNormal(self.zeros, self.ones).sample(shape)
-
-        for t in tqdm(time[:-1], disable=not verbose):
-            for _ in range(lsteps):
-                z = torch.randn_like(theta)
-                score = self(theta, x, t, **kwargs) / -self.sigma(t)
-                # delta = tau * self.alpha(t) / score.square().mean()
-                delta = (
-                    tau
-                    * (self.alpha(t) ** 0.5)
-                    * min(self.sigma(t) ** 2, 1 / score.square().mean())
-                )
-                theta = theta + delta * score + torch.sqrt(2 * delta) * z
-
-        return theta
-
-    def euler(
-        self, shape: Size, x: Tensor, steps: int = 64, verbose: bool = False, **kwargs
-    ):
-        time = torch.linspace(1, 0, steps + 1).to(x)
-        dt = 1 / steps
-
-        theta = DiagNormal(self.zeros, self.ones).sample(shape)
-
-        for t in tqdm(time[:-1], disable=not verbose):
-            z = torch.randn_like(theta)
-
-            score = self(theta, x, t, **kwargs) / (-self.sigma(t))
-
-            drift = self.f(t) * theta - self.g(t) ** 2 * score
-            diffusion = self.g(t)
-
-            theta = theta + drift * (-dt) + diffusion * z * dt**0.5
-
-        return theta
-
 
 class NSELoss(nn.Module):
     r"""Calculates the *noise parametrized* denoising score matching (DSM) loss for NSE.
-    Minimizing this loss estimates the noise :math: `\eplison_phi`, from which the score function
+    Minimizing this loss estimates the noise  `eplison`, from which the score function
     can be calculated as
 
-        .. math: `s_\phi(\theta, x, t) = - \sigma(t) * \epsilon_\phi(\theta, x, t)`.
+        `score(\theta, x, t) = - \sigma(t) * epsilon(\theta, x, t)`.
 
-    Given a batch of :math:`N` pairs :math:`(\theta_i, x_i)`, the module returns
+    Given a batch of `N` pairs `(theta_i, x_i)`, the module returns `
+        mean(
+            ||epsilon(alpha(t_i) theta_i + sigma(t_i) epsilon_i, x_i, t_i)- \epsilon_i||^2
+        )
 
-    .. math:: l = \frac{1}{N} \sum_{i = 1}^N\|
-            \epsilon_\phi(\alpha(t_i) \theta_i + \sigma(t_i) \epsilon_i, x_i, t_i)
-            - \epsilon_i
-        \|_2^2
-
-    where :math:`t_i \sim \mathcal{U}(0, 1)` and :math:`\epsilon_i \sim \mathcal{N}(0, I)`.
+    where `t_i ~ U(0, 1)` and `epsilon_i ~ N(0, I)`.
 
     Args:
-        estimator (NSE): A regression network :math:`\epsilon_\phi(\theta, x, t)`.
+        estimator (NSE): A regression network `epsilon(\theta, x, t)`.
     """
 
     def __init__(self, estimator: NSE):
@@ -619,12 +684,12 @@ class NSELoss(nn.Module):
     def forward(self, theta: Tensor, x: Tensor, **kwargs) -> Tensor:
         r"""
         Args:
-            theta (torch.Tensor): The parameters :math:`\theta`, with shape :math:`(N, D)`.
-            x (torch.Tensor): The observation :math:`x`, with shape :math:`(N, L)`.
-            kwargs (dict): Additional args for the forward method of the estimator.
+            theta: The parameters `theta`, of shape `(N, m)`.
+            x: The observation `x`, of shape `(N, d)`.
+            kwargs: Additional args for the forward method of the estimator.
 
         Returns:
-            (torch.Tensor): The noise parametrized scalar DSM loss :math:`l`.
+           : The noise parametrized scalar DSM loss `l`.
         """
 
         t = torch.rand(theta.shape[0], dtype=theta.dtype, device=theta.device)

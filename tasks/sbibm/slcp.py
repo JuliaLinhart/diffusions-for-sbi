@@ -169,9 +169,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
-    parser.add_argument(
-        "--check_sim", action="store_true", help="Check the simulator"
-    )
+    parser.add_argument("--check_sim", action="store_true", help="Check the simulator")
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
@@ -212,6 +210,7 @@ if __name__ == "__main__":
 
         # simulator distribution check
         import sbibm
+
         slcp_sbibm = sbibm.get_task("slcp")
         theta = slcp.prior().sample((1,))
         x_sbibm = [slcp_sbibm.get_simulator()(theta) for _ in range(1000)]
@@ -220,15 +219,17 @@ if __name__ == "__main__":
         print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
-        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+
+        plt.scatter(x_sbibm[:, 0], x_sbibm[:, 1], label="sbibm")
+        plt.scatter(x_jl[:, 0], x_jl[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/slcp_sim_check.png')
+        plt.savefig("_checks/slcp_sim_check.png")
         plt.clf()
 
     if args.check_post:
         # reference posterior check
         import sbibm
+
         slcp_sbibm = sbibm.get_task("slcp")
         x_star = slcp_sbibm.get_observation(1)
         theta_star = slcp_sbibm.get_true_parameters(1)
@@ -238,39 +239,49 @@ if __name__ == "__main__":
             x_star = x_star[None, :]
         if theta_star.ndim > 1:
             theta_star = theta_star[0]
-        samples_jl = slcp.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        samples_jl = slcp.sample_reference_posterior(
+            rng_key=rng_key,
+            x_star=x_star,
+            theta_star=theta_star,
+            n_obs=1,
+            num_samples=1000,
+        )
         # samples_jl_30 = slcp.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
         print(samples_sbibm.shape, samples_jl.shape)
         import matplotlib.pyplot as plt
-        plt.scatter(samples_sbibm[:,1], samples_sbibm[:,2], label='sbibm')
-        plt.scatter(samples_jl[:,1], samples_jl[:,2], label='jl')
+
+        plt.scatter(samples_sbibm[:, 1], samples_sbibm[:, 2], label="sbibm")
+        plt.scatter(samples_jl[:, 1], samples_jl[:, 2], label="jl")
         # plt.scatter(samples_jl_30[:,1], samples_jl_30[:,2], label='jl_30')
-        plt.scatter(theta_star[1], theta_star[2], label='theta_star')
+        plt.scatter(theta_star[1], theta_star[2], label="theta_star")
         plt.legend()
-        plt.savefig('_checks/slcp_post_check.png')
+        plt.savefig("_checks/slcp_post_check.png")
         plt.clf()
 
     if args.check_train:
         import matplotlib.pyplot as plt
-        data = torch.load("/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/slcp_good/dataset_n_train_50000.pkl")
+
+        data = torch.load(
+            "/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/slcp_good/dataset_n_train_50000.pkl"
+        )
         theta = data["theta"][:1000]
         x = data["x"][:1000]
-        
+
         data_new = slcp.generate_training_data(n_simulations=1000, save=False)
         x_new = data_new["x"]
         theta_new = data_new["theta"]
 
-        plt.scatter(x[:,0], x[:,1], label='sbibm')
-        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.scatter(x[:, 0], x[:, 1], label="sbibm")
+        plt.scatter(x_new[:, 0], x_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/slcp_train_x_check.png')
+        plt.savefig("_checks/slcp_train_x_check.png")
         plt.clf()
 
-        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
-        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.scatter(theta[:, 0], theta[:, 1], label="sbibm")
+        plt.scatter(theta_new[:, 0], theta_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/slcp_train_theta_check.png')
+        plt.savefig("_checks/slcp_train_theta_check.png")
         plt.clf()
 
     data_new = slcp.generate_training_data(n_simulations=100, save=False, n_obs=100)
@@ -280,14 +291,13 @@ if __name__ == "__main__":
 
     # plot x for one theta
     import matplotlib.pyplot as plt
+
     x = x_new[0]
     x_2 = slcp.simulator(theta_new[0], n_obs=100, rng_key=rng_key)
     x_3 = x_new[1]
     x_4 = slcp.simulator(theta_new[1], n_obs=100, rng_key=rng_key)
-    plt.scatter(x[:,0], x[:,1])
-    plt.scatter(x_2[:,0], x_2[:,1])
-    plt.scatter(x_3[:,0], x_3[:,1])
-    plt.scatter(x_4[:,0], x_4[:,1])
-    plt.savefig('_checks/slcp_big_train_x_check.png')
-
-        
+    plt.scatter(x[:, 0], x[:, 1])
+    plt.scatter(x_2[:, 0], x_2[:, 1])
+    plt.scatter(x_3[:, 0], x_3[:, 1])
+    plt.scatter(x_4[:, 0], x_4[:, 1])
+    plt.savefig("_checks/slcp_big_train_x_check.png")
