@@ -9,11 +9,11 @@ from tasks.sbibm.task_mcmc import MCMCTask, get_mcmc_samples, get_predictive_sam
 
 
 def model(
-        prior_params={"bound": 1.},
-        x_obs=None,
-        n_obs=1,
-        predictive=False,
-):  
+    prior_params={"bound": 1.0},
+    x_obs=None,
+    n_obs=1,
+    predictive=False,
+):
     theta = numpyro.sample(
         "theta",
         dist.Uniform(
@@ -48,7 +48,7 @@ def model(
             z0 = c * theta[0] - s * theta[1]
             z1 = s * theta[0] + c * theta[1]
 
-            transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1,-1)
+            transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1, -1)
             mvn = dist.MultivariateNormal(
                 loc=transformed_value,
                 covariance_matrix=jnp.eye(2) * 0.0001,
@@ -73,7 +73,7 @@ def model(
             z0 = c * theta[0] - s * theta[1]
             z1 = s * theta[0] + c * theta[1]
 
-            transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1,-1)
+            transformed_value = p + jnp.array([-jnp.abs(z0), z1]).reshape(1, -1)
             mvn = dist.MultivariateNormal(
                 loc=transformed_value,
                 covariance_matrix=jnp.eye(2) * 1e-6,
@@ -81,19 +81,25 @@ def model(
             delta = dist.Delta(transformed_value)
             sample_dist = delta if predictive else mvn
             numpyro.sample(f"obs_{i}", sample_dist, obs=x_obs[f"obs_{i}"])
-    
+
 
 class TwoMoons(MCMCTask):
     def __init__(
         self,
-        prior_params={"bound":1.},
+        prior_params={"bound": 1.0},
         num_samples_per_case=500,
         **kwargs,
     ):
-        super().__init__(name="two_moons", prior_params=prior_params, model=model, **kwargs)
+        super().__init__(
+            name="two_moons", prior_params=prior_params, model=model, **kwargs
+        )
 
-        self.prior_params["low"] = torch.tensor([-self.prior_params["bound"] for _ in range(2)]).float()
-        self.prior_params["high"] = torch.tensor([self.prior_params["bound"] for _ in range(2)]).float()
+        self.prior_params["low"] = torch.tensor(
+            [-self.prior_params["bound"] for _ in range(2)]
+        ).float()
+        self.prior_params["high"] = torch.tensor(
+            [self.prior_params["bound"] for _ in range(2)]
+        ).float()
 
         self.num_samples_per_case = num_samples_per_case
 
@@ -105,7 +111,7 @@ class TwoMoons(MCMCTask):
             low=self.prior_params["low"],
             high=self.prior_params["high"],
         )
-    
+
     def _simulate_one(self, rng_key, theta, n_obs):
         if len(theta.shape) > 1:
             theta = theta[0]
@@ -119,8 +125,10 @@ class TwoMoons(MCMCTask):
             predictive=True,
         )
         return x  # shape (n_obs, dim_x=2)
-    
-    def _posterior_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples, **kwargs):
+
+    def _posterior_sampler(
+        self, rng_key, x_star, theta_star, n_obs, num_samples, **kwargs
+    ):
         # prepare the data object for numpyro
         data = {}
         for i in range(n_obs):
@@ -135,11 +143,11 @@ class TwoMoons(MCMCTask):
 
         # p = self.simulator(rng_key, torch.zeros(1,2))
         # p = jnp.array(p.numpy())
-        q_0 = - x_star[0, 0]
+        q_0 = -x_star[0, 0]
         q_1 = x_star[0, 1]
 
-        init_1 = jnp.array([c * q_0 - s * q_1, s * q_0 + c * q_1])[:,0]
-        init_2 = jnp.array([-c * q_0 - s * q_1, -s * q_0 + c * q_1])[:,0]
+        init_1 = jnp.array([c * q_0 - s * q_1, s * q_0 + c * q_1])[:, 0]
+        init_2 = jnp.array([-c * q_0 - s * q_1, -s * q_0 + c * q_1])[:, 0]
 
         init_values_per_case = {
             "case_1": {"theta": init_1},
@@ -171,7 +179,7 @@ class TwoMoons(MCMCTask):
         samples = samples[:num_samples]
 
         return samples
-    
+
 
 if __name__ == "__main__":
     import argparse
@@ -194,9 +202,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
-    parser.add_argument(
-        "--check_sim", action="store_true", help="Check the simulator"
-    )
+    parser.add_argument("--check_sim", action="store_true", help="Check the simulator")
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
@@ -237,6 +243,7 @@ if __name__ == "__main__":
 
         # simulator distribution check
         import sbibm
+
         tm_sbibm = sbibm.get_task("two_moons")
         theta = two_moons.prior().sample((1,))
         x_sbibm = [tm_sbibm.get_simulator()(theta) for _ in range(1000)]
@@ -245,54 +252,66 @@ if __name__ == "__main__":
         print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
-        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+
+        plt.scatter(x_sbibm[:, 0], x_sbibm[:, 1], label="sbibm")
+        plt.scatter(x_jl[:, 0], x_jl[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/two_moons_sim_check.png')
+        plt.savefig("_checks/two_moons_sim_check.png")
         plt.clf()
 
     if args.check_post:
         # reference posterior check
         import sbibm
+
         tm_sbibm = sbibm.get_task("two_moons")
 
         x_star = two_moons.get_reference_observation(num_obs=2)
         theta_star = two_moons.get_reference_parameters()[1]
-        samples_sbibm = tm_sbibm._sample_reference_posterior(num_samples=1000, observation=x_star, num_observation=2)
-        samples_jl = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        samples_sbibm = tm_sbibm._sample_reference_posterior(
+            num_samples=1000, observation=x_star, num_observation=2
+        )
+        samples_jl = two_moons.sample_reference_posterior(
+            rng_key=rng_key,
+            x_star=x_star,
+            theta_star=theta_star,
+            n_obs=1,
+            num_samples=1000,
+        )
         # samples_jl_30 = two_moons.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
         print(samples_sbibm.shape, samples_jl.shape)
         import matplotlib.pyplot as plt
-        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+
+        plt.scatter(samples_sbibm[:, 0], samples_sbibm[:, 1], label="sbibm")
+        plt.scatter(samples_jl[:, 0], samples_jl[:, 1], label="jl")
         # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
-        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
-        plt.scatter(x_star[0,0], x_star[0,1], label='x_star')
+        plt.scatter(theta_star[0], theta_star[1], label="theta_star")
+        plt.scatter(x_star[0, 0], x_star[0, 1], label="x_star")
         plt.legend()
-        plt.savefig('_checks/two_moons_post_check.png')
+        plt.savefig("_checks/two_moons_post_check.png")
         plt.clf()
 
     if args.check_train:
         import sbibm
         import matplotlib.pyplot as plt
+
         tm_sbibm = sbibm.get_task("two_moons")
         theta = tm_sbibm.get_prior()(1000)
         x = [tm_sbibm.get_simulator()(theta_) for theta_ in theta]
         x = torch.cat(x, axis=0)
-        
+
         data = two_moons.generate_training_data(n_simulations=1000, save=False)
         x_new = data["x"]
         theta_new = data["theta"]
 
-        plt.scatter(x[:,0], x[:,1], label='sbibm')
-        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.scatter(x[:, 0], x[:, 1], label="sbibm")
+        plt.scatter(x_new[:, 0], x_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/two_moons_train_x_check.png')
+        plt.savefig("_checks/two_moons_train_x_check.png")
         plt.clf()
 
-        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
-        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.scatter(theta[:, 0], theta[:, 1], label="sbibm")
+        plt.scatter(theta_new[:, 0], theta_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/two_moons_train_theta_check.png')
+        plt.savefig("_checks/two_moons_train_theta_check.png")
         plt.clf()

@@ -9,6 +9,7 @@ import jax.lax as lax
 
 from tasks.sbibm.task_mcmc import MCMCTask, get_mcmc_samples, get_predictive_sample
 
+
 def summary_statistics(y, stimulus_I, torch_version=False):
     if not torch_version:
         if not isinstance(y, jnp.ndarray):
@@ -32,7 +33,7 @@ def summary_statistics(y, stimulus_I, torch_version=False):
             y = torch.tensor(np.array(y)).float()
         if not isinstance(stimulus_I, torch.Tensor):
             stimulus_I = torch.tensor(np.array(stimulus_I)).float()
-        
+
         num_spikes = torch.sum(y).unsqueeze(0)
         sta = torch.nn.functional.conv1d(
             y.reshape(1, 1, -1), stimulus_I.reshape(1, 1, -1), padding=8
@@ -61,8 +62,8 @@ def model(
 
     if len(theta.shape) == 1:
         theta = theta[None, :]
-        
-    psi = jnp.matmul(design_matrix, theta[0,:])
+
+    psi = jnp.matmul(design_matrix, theta[0, :])
     z = 1 / (1 + jnp.exp(-psi))
 
     for i in range(n_obs):
@@ -70,16 +71,12 @@ def model(
             numpyro.sample(f"obs_{i}", dist.Bernoulli(probs=z))
         else:
             numpyro.sample(f"obs_{i}", dist.Bernoulli(probs=z), obs=x_obs[i])
-    
+
 
 class BernoulliGLM(MCMCTask):
     def __init__(
-            self, 
-            prior_params=None,
-            summary="sufficient", # or "raw"
-            dim=10,
-            **kwargs):
-        
+        self, prior_params=None, summary="sufficient", dim=10, **kwargs  # or "raw"
+    ):
         self.summary = summary
         self.dim_theta = dim
         if summary == "sufficient":
@@ -91,10 +88,8 @@ class BernoulliGLM(MCMCTask):
         else:
             raise NotImplementedError
 
-        super().__init__(
-            name=name, prior_params=prior_params, model=model, **kwargs
-        )
-    
+        super().__init__(name=name, prior_params=prior_params, model=model, **kwargs)
+
         self.stimulus = {
             "dt": 1,  # timestep
             "duration": 100,  # duration of input stimulus
@@ -114,7 +109,7 @@ class BernoulliGLM(MCMCTask):
 
     def prior(self):
         return torch.distributions.MultivariateNormal(**self.prior_params)
-    
+
     def _simulate_one(self, rng_key, theta, n_obs, raw=False):
         stimulus_I = torch.load(f"{self.save_path}files/stimulus_I.pt")
         design_matrix = torch.load(f"{self.save_path}files/design_matrix.pt")
@@ -135,7 +130,7 @@ class BernoulliGLM(MCMCTask):
                 sta.append(summary_statistics(x[i], stimulus_I))
             sta = jnp.stack(sta)
             return sta
-        return x # shape(n_obs, dim_x)
+        return x  # shape(n_obs, dim_x)
 
     def _posterior_sampler(self, rng_key, x_star, theta_star, n_obs, num_samples):
         design_matrix = torch.load(f"{self.save_path}files/design_matrix.pt")
@@ -152,25 +147,28 @@ class BernoulliGLM(MCMCTask):
             design_matrix=design_matrix,
         )["theta"]
         return samples
-    
-    
-    def generate_reference_data(self, nb_obs=25, n_repeat=100, save=True, load_theta=False, **kwargs):
+
+    def generate_reference_data(
+        self, nb_obs=25, n_repeat=100, save=True, load_theta=False, **kwargs
+    ):
         kwargs["raw"] = True
-        return super().generate_reference_data(nb_obs, n_repeat, save, load_theta, **kwargs)
-    
+        return super().generate_reference_data(
+            nb_obs, n_repeat, save, load_theta, **kwargs
+        )
+
     def compute_summary_statistics(self, x):
         stimulus_I = torch.load(f"{self.save_path}files/stimulus_I.pt")
-        
+
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
-        
+
         sta = []
         for i in range(x.shape[0]):
             sta.append(summary_statistics(x[i], stimulus_I, torch_version=True))
         sta = torch.stack(sta)
 
         return sta
-    
+
     def generate_stimulus(self):
         path = f"{self.save_path}files/"
         path_2 = f"{self.save_path[:-1]}_raw/files/"
@@ -205,6 +203,7 @@ class BernoulliGLM(MCMCTask):
 
         return stimulus_I, design_matrix
 
+
 if __name__ == "__main__":
     import argparse
     import os
@@ -227,14 +226,15 @@ if __name__ == "__main__":
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
     parser.add_argument(
-        "--summary", type=str, default="sufficient", help="Whether to use sufficient summary statistics"
+        "--summary",
+        type=str,
+        default="sufficient",
+        help="Whether to use sufficient summary statistics",
     )
     parser.add_argument(
         "--generate_stimulus", action="store_true", help="Generate stimulus"
     )
-    parser.add_argument(
-        "--check_sim", action="store_true", help="Check the simulator"
-    )
+    parser.add_argument("--check_sim", action="store_true", help="Check the simulator")
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
@@ -277,9 +277,10 @@ if __name__ == "__main__":
         # theta = bglm.prior().sample((1,))
         # x = bglm.simulator(rng_key, theta, n_obs=1)
         # print(x.shape, theta.shape)
-                    
+
         # simulator distribution check
         import sbibm
+
         name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
         bglm_sbibm = sbibm.get_task(name)
         theta = bglm.prior().sample((1,))
@@ -289,17 +290,19 @@ if __name__ == "__main__":
         print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
-        plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+
+        plt.scatter(x_sbibm[:, 0], x_sbibm[:, 1], label="sbibm")
+        plt.scatter(x_jl[:, 0], x_jl[:, 1], label="jl")
         plt.legend()
-        plt.savefig(f'_checks/{name}_sim_check.png')
+        plt.savefig(f"_checks/{name}_sim_check.png")
         plt.clf()
 
     if args.check_post:
         # reference posterior check
         os.makedirs("_checks", exist_ok=True)
-        
+
         import sbibm
+
         name = "bernoulli_glm" if args.summary == "sufficient" else "bernoulli_glm_raw"
         bglm_sbibm = sbibm.get_task("bernoulli_glm_raw")
         x_star = bglm_sbibm.get_observation(1)
@@ -310,16 +313,23 @@ if __name__ == "__main__":
             x_star = x_star[None, :]
         if theta_star.ndim > 1:
             theta_star = theta_star[0]
-        
-        samples_jl = bglm.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+
+        samples_jl = bglm.sample_reference_posterior(
+            rng_key=rng_key,
+            x_star=x_star,
+            theta_star=theta_star,
+            n_obs=1,
+            num_samples=1000,
+        )
 
         print(samples_sbibm.shape, samples_jl.shape)
         import matplotlib.pyplot as plt
-        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
-        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+
+        plt.scatter(samples_sbibm[:, 0], samples_sbibm[:, 1], label="sbibm")
+        plt.scatter(samples_jl[:, 0], samples_jl[:, 1], label="jl")
+        plt.scatter(theta_star[0], theta_star[1], label="theta_star")
         plt.legend()
-        plt.savefig(f'_checks/{name}_post_check.png')
+        plt.savefig(f"_checks/{name}_post_check.png")
         plt.clf()
 
     if args.check_train:
@@ -332,19 +342,19 @@ if __name__ == "__main__":
         theta = bglm_sbibm.get_prior()(1000)
         x = [bglm_sbibm.get_simulator()(theta_) for theta_ in theta]
         x = torch.cat(x, axis=0)
-        
+
         data = bglm.generate_training_data(n_simulations=1000, save=False)
         x_new = data["x"]
         theta_new = data["theta"]
 
-        plt.scatter(x[:,0], x[:,1], label='sbibm')
-        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.scatter(x[:, 0], x[:, 1], label="sbibm")
+        plt.scatter(x_new[:, 0], x_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig(f'_checks/{name}_train_x_check.png')
+        plt.savefig(f"_checks/{name}_train_x_check.png")
         plt.clf()
 
-        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
-        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.scatter(theta[:, 0], theta[:, 1], label="sbibm")
+        plt.scatter(theta_new[:, 0], theta_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig(f'_checks/{name}_train_theta_check.png')
+        plt.savefig(f"_checks/{name}_train_theta_check.png")
         plt.clf()

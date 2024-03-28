@@ -7,16 +7,16 @@ from nse import NSE, NSELoss
 from sm_utils import train_with_validation as train
 from torch.func import vmap
 
-from zuko.nn import MLP
+# from zuko.nn import MLP
 
-from tasks.sbibm import get_task 
+from tasks.sbibm import get_task
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler
 from vp_diffused_priors import get_vpdiff_gaussian_score, get_vpdiff_uniform_score
 
 PATH_EXPERIMENT = "results/sbibm/"
-NUM_OBSERVATION_LIST = list(np.arange(1,26))
+NUM_OBSERVATION_LIST = list(np.arange(1, 26))
 
-N_TRAIN_LIST = [1000, 3000, 10000, 30000] #, 50000]
+N_TRAIN_LIST = [1000, 3000, 10000, 30000]  # , 50000]
 MAX_N_TRAIN = 50_000
 N_OBS_LIST = [1, 8, 14, 22, 30]
 MAX_N_OBS = 100
@@ -24,32 +24,39 @@ NUM_SAMPLES = 1000
 
 COV_MODES = ["GAUSS", "JAC"]
 
-def setup(task, all=True, train_data=False, reference_data=False, reference_posterior=False):
-        kwargs = {}
-        if task.name != "gaussian_linear":
-            from jax import random
-            rng_key = random.PRNGKey(1)
-            kwargs = {"rng_key": rng_key}
-        if all:
-            train_data = True
-            reference_data = True
-            reference_posterior = True
-        if train_data:
-            data = task.generate_training_data(n_simulations=MAX_N_TRAIN)
-            print("Training data:", data["x"].shape, data["theta"].shape)
-        if reference_data:
-            data = task.generate_reference_data(nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs)
-            print("Reference data:", data[0].shape, data[1][1].shape)
-        if reference_posterior:
-            num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
-            n_obs_list = N_OBS_LIST
-            for num_obs in num_obs_list:
-                for n_obs in n_obs_list:
-                    data = task.generate_reference_posterior_samples(
-                        num_obs=num_obs, n_obs=n_obs, num_samples=NUM_SAMPLES, **kwargs
-                    )
-            print("Posterior samples:", data.shape)
-        return
+
+def setup(
+    task, all=True, train_data=False, reference_data=False, reference_posterior=False
+):
+    kwargs = {}
+    if task.name != "gaussian_linear":
+        from jax import random
+
+        rng_key = random.PRNGKey(1)
+        kwargs = {"rng_key": rng_key}
+    if all:
+        train_data = True
+        reference_data = True
+        reference_posterior = True
+    if train_data:
+        data = task.generate_training_data(n_simulations=MAX_N_TRAIN)
+        print("Training data:", data["x"].shape, data["theta"].shape)
+    if reference_data:
+        data = task.generate_reference_data(
+            nb_obs=len(NUM_OBSERVATION_LIST), n_repeat=MAX_N_OBS, **kwargs
+        )
+        print("Reference data:", data[0].shape, data[1][1].shape)
+    if reference_posterior:
+        num_obs_list = range(1, len(NUM_OBSERVATION_LIST) + 1)
+        n_obs_list = N_OBS_LIST
+        for num_obs in num_obs_list:
+            for n_obs in n_obs_list:
+                data = task.generate_reference_posterior_samples(
+                    num_obs=num_obs, n_obs=n_obs, num_samples=NUM_SAMPLES, **kwargs
+                )
+        print("Posterior samples:", data.shape)
+    return
+
 
 def run_train_sgm(
     theta_train,
@@ -63,7 +70,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:2"
 
     # Prepare training data
     # normalize theta
@@ -103,7 +110,7 @@ def run_train_sgm(
         min_nb_epochs = 2000
     else:
         min_nb_epochs = 100
-    
+
     # Train Score Network
     avg_score_net, train_losses, val_losses, best_epoch = train(
         score_network,
@@ -115,7 +122,7 @@ def run_train_sgm(
         validation_split=0.2,
         early_stopping=True,
         min_nb_epochs=min_nb_epochs,
-        classifier_free_guidance=0.2 if clf_free_guidance else 0.,
+        classifier_free_guidance=0.2 if clf_free_guidance else 0.0,
     )
     score_network = avg_score_net.module
 
@@ -129,7 +136,11 @@ def run_train_sgm(
         save_path + f"score_network.pkl",
     )
     torch.save(
-        {"train_losses": train_losses, "val_losses": val_losses, "best_epoch": best_epoch},
+        {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "best_epoch": best_epoch,
+        },
         save_path + f"train_losses.pkl",
     )
 
@@ -147,8 +158,8 @@ def run_sample_sgm(
     prior,
     prior_type,
     cov_mode,
-    sampler_type="euler",
-    langevin=False,
+    sampler_type="ddim",
+    langevin="geffner",
     clip=False,
     theta_log_space=False,
     x_log_space=False,
@@ -158,7 +169,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda:2"
 
     n_obs = context.shape[0]
 
@@ -187,7 +198,9 @@ def run_sample_sgm(
             loc = prior.loc
             cov = prior.covariance_matrix
         loc_norm = (loc - theta_train_mean) / theta_train_std
-        cov_norm = torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
+        cov_norm = (
+            torch.diag(1 / theta_train_std) @ cov @ torch.diag(1 / theta_train_std)
+        )
         prior_norm = torch.distributions.MultivariateNormal(
             loc_norm.to(device), cov_norm.to(device)
         )
@@ -205,31 +218,52 @@ def run_sample_sgm(
 
     if langevin:
         print()
-        print(f"Using LANGEVIN sampler, clip = {clip}.")
+        print(f"Using LANGEVIN sampler ({langevin.upper()}), clip = {clip}.")
         print()
+        save_path += f"langevin_steps_400_5/"
+
         ext = ""
         theta_clipping_range = (None, None)
         if clip:
             theta_clipping_range = (-3, 3)
             ext = "_clip"
 
-        samples = score_network.annealed_langevin_geffner(
-            shape=(nsamples,),
-            x=context_norm.to(device),
-            prior_score_fn=prior_score_fn_norm,
-            clf_free_guidance=clf_free_guidance,
-            steps=400,
-            lsteps=5,
-            tau=0.5,
-            theta_clipping_range=theta_clipping_range,
-            verbose=True,
-        ).cpu()
+        if langevin == "geffner":
+            samples = score_network.annealed_langevin_geffner(
+                shape=(nsamples,),
+                x=context_norm.to(device),
+                prior_score_fn=prior_score_fn_norm,
+                clf_free_guidance=clf_free_guidance,
+                steps=400,
+                lsteps=5,
+                tau=0.5,
+                theta_clipping_range=theta_clipping_range,
+                verbose=True,
+            ).cpu()
+        elif langevin == "tammed":
+            samples = score_network.predictor_corrector(
+                (nsamples,),
+                x=context_norm.to(device),
+                steps=400,
+                prior_score_fun=prior_score_fn_norm,
+                lsteps=5,
+                r=0.5,
+                predictor_type="id",
+                verbose=True,
+                theta_clipping_range=theta_clipping_range,
+            ).cpu()
 
-        save_path += f"langevin_steps_400_5_new/"
-        samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
+            save_path = save_path[:-1] + "_ours/"
+        else:
+            raise NotImplementedError
+        samples_filename = (
+            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
+        )
     else:
         print()
-        print(f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}.")
+        print(
+            f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}."
+        )
         print()
 
         cov_mode_name = cov_mode
@@ -242,19 +276,22 @@ def run_sample_sgm(
         if cov_mode == "GAUSS":
             # estimate cov for GAUSS
             cov_est = vmap(
-                lambda x: score_network.ddim(shape=(nsamples,), x=x, steps=100, eta=0.5),
+                lambda x: score_network.ddim(
+                    shape=(nsamples,), x=x, steps=100, eta=0.5
+                ),
                 randomness="different",
             )(context_norm.to(device))
             cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
 
             if clf_free_guidance:
-                x_=torch.zeros_like(context_norm[0][None,:]) #
+                x_ = torch.zeros_like(context_norm[0][None, :])  #
                 cov_est_prior = vmap(
-                    lambda x: score_network.ddim(shape=(nsamples,), x=x, steps=100, eta=0.5),
+                    lambda x: score_network.ddim(
+                        shape=(nsamples,), x=x, steps=100, eta=0.5
+                    ),
                     randomness="different",
                 )(x_.to(device))
                 cov_est_prior = vmap(lambda x: torch.cov(x.mT))(cov_est_prior)
-                
 
         if sampler_type == "ddim":
             save_path += f"ddim_steps_{steps}/"
@@ -262,7 +299,11 @@ def run_sample_sgm(
             samples = score_network.ddim(
                 shape=(nsamples,),
                 x=context_norm.to(device),
-                eta=1 if steps == 1000 else 0.8 if steps == 400 else 0.5, # corresponds to the equivalent time setting from section 4.1
+                eta=1
+                if steps == 1000
+                else 0.8
+                if steps == 400
+                else 0.5,  # corresponds to the equivalent time setting from section 4.1
                 steps=steps,
                 theta_clipping_range=theta_clipping_range,
                 prior=prior_norm,
@@ -288,7 +329,7 @@ def run_sample_sgm(
                 dist_cov_est=cov_est,
                 cov_mode=cov_mode,
             )
-        
+
             # sample from tall posterior
             (
                 samples,
@@ -303,11 +344,13 @@ def run_sample_sgm(
                 theta_clipping_range=theta_clipping_range,
             )
 
-
-        assert torch.isnan(samples).sum() == 0, f"NaN in samples: {torch.isnan(samples).sum()}"
+        assert (
+            torch.isnan(samples).sum() == 0
+        ), f"NaN in samples: {torch.isnan(samples).sum()}"
 
         samples_filename = (
-            save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
+            save_path
+            + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
         )
 
     # unnormalize
@@ -326,7 +369,7 @@ def run_sample_sgm(
 
 if __name__ == "__main__":
     import argparse
-    
+
     # Define Arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -345,7 +388,17 @@ if __name__ == "__main__":
         "--task",
         type=str,
         required=True,
-        choices=["slcp", "lotka_volterra", "sir", "gaussian_linear", "gaussian_mixture", "gaussian_mixture_uniform", "two_moons", "bernoulli_glm", "bernoulli_glm_raw"],
+        choices=[
+            "slcp",
+            "lotka_volterra",
+            "sir",
+            "gaussian_linear",
+            "gaussian_mixture",
+            "gaussian_mixture_uniform",
+            "two_moons",
+            "bernoulli_glm",
+            "bernoulli_glm_raw",
+        ],
         help="task name",
     )
     parser.add_argument(
@@ -398,8 +451,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--langevin",
-        action="store_true",
-        help="whether to use langevin sampler (Geffner et al. 2023)",
+        type=str,
+        default="",
+        choices=["geffner", "tammed"],
+        help="whether to use langevin sampler (Geffner et al. 2023) or our tammed ULA (Brosse et al. 2017)",
     )
     parser.add_argument(
         "--clip",
@@ -424,7 +479,13 @@ if __name__ == "__main__":
     # Setup task data
     if args.setup is not None:
         print("Setting up task data.")
-        setup(task, all=args.setup == "all", train_data=args.setup == "train_data", reference_data=args.setup == "reference_data", reference_posterior=args.setup == "reference_posterior")
+        setup(
+            task,
+            all=args.setup == "all",
+            train_data=args.setup == "train_data",
+            reference_data=args.setup == "reference_data",
+            reference_posterior=args.setup == "reference_posterior",
+        )
         exit()
 
     # Define task path
@@ -435,14 +496,9 @@ if __name__ == "__main__":
     ):
         # Define Experiment Path
         save_path = (
-                task_path
-                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new/"
-            )
-        if args.task == "lotka_volterra":
-            save_path = (
-                task_path
-                + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}_new_log/"
-            )
+            task_path
+            + f"n_train_{n_train}_bs_{args.batch_size}_n_epochs_{args.n_epochs}_lr_{args.lr}/"
+        )
 
         if args.clf_free_guidance:
             save_path += "clf_free_guidance/"
@@ -455,7 +511,6 @@ if __name__ == "__main__":
         print()
 
         if run_type == "train":
-
             # get training data
             dataset_train = task.get_training_data(n_simulations=MAX_N_TRAIN)
             theta_train = dataset_train["theta"].float()
@@ -472,9 +527,9 @@ if __name__ == "__main__":
                     x_train = torch.log(x_train)
 
             # compute mean and std of training data
-            theta_train_mean, theta_train_std = theta_train.mean(dim=0), theta_train.std(
+            theta_train_mean, theta_train_std = theta_train.mean(
                 dim=0
-            )
+            ), theta_train.std(dim=0)
             x_train_mean, x_train_std = x_train.mean(dim=0), x_train.std(dim=0)
             means_stds_dict = {
                 "theta_train_mean": theta_train_mean,
@@ -524,13 +579,17 @@ if __name__ == "__main__":
                 "context": context,
                 "nsamples": NUM_SAMPLES,
                 "score_network": score_network,
-                "steps": 1000 if args.cov_mode == "GAUSS" else 400, # corresponds to the equivalent time setting from section 4.1
+                "steps": 1000
+                if args.cov_mode == "GAUSS"
+                else 400,  # corresponds to the equivalent time setting from section 4.1
                 "theta_train_mean": theta_train_mean,  # for (un)normalization
                 "theta_train_std": theta_train_std,  # for (un)normalization
                 "x_train_mean": x_train_mean,  # for (un)normalization
                 "x_train_std": x_train_std,  # for (un)normalization
-                "prior": task.prior(), # for score function
-                "prior_type": "uniform" if args.task in ["slcp", "two_moons", "gaussian_mixture_uniform"] else "gaussian", 
+                "prior": task.prior(),  # for score function
+                "prior_type": "uniform"
+                if args.task in ["slcp", "two_moons", "gaussian_mixture_uniform"]
+                else "gaussian",
                 "cov_mode": args.cov_mode,
                 "clip": args.clip,  # for clipping
                 "sampler_type": args.sampler,
@@ -579,7 +638,9 @@ if __name__ == "__main__":
             return executor
 
         # subit job
-        executor = get_executor_marg(f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}")
+        executor = get_executor_marg(
+            f"_{args.task}_{args.run}_{args.cov_mode}_clip_{args.clip}"
+        )
         # launch batches
         with executor.batch():
             print("Submitting jobs...", end="", flush=True)

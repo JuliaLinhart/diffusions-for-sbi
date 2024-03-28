@@ -133,9 +133,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_path", type=str, default="data/", help="Path to save the data"
     )
-    parser.add_argument(
-        "--check_sim", action="store_true", help="Check the simulator"
-    )
+    parser.add_argument("--check_sim", action="store_true", help="Check the simulator")
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
@@ -184,15 +182,17 @@ if __name__ == "__main__":
         # print(x_sbibm.shape, x_jl.shape)
 
         import matplotlib.pyplot as plt
+
         # plt.scatter(x_sbibm[:,0], x_sbibm[:,1], label='sbibm')
-        plt.scatter(x_jl[:,0], x_jl[:,1], label='jl')
+        plt.scatter(x_jl[:, 0], x_jl[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/sir_sim_check.png')
+        plt.savefig("_checks/sir_sim_check.png")
         plt.clf()
 
     if args.check_post:
         # reference posterior check
         import sbibm
+
         sir_sbibm = sbibm.get_task("sir")
         x_star = sir_sbibm.get_observation(1)
         theta_star = sir_sbibm.get_true_parameters(1)
@@ -202,37 +202,47 @@ if __name__ == "__main__":
             x_star = x_star[None, :]
         if theta_star.ndim > 1:
             theta_star = theta_star[0]
-        samples_jl = sir.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=1, num_samples=1000)
+        samples_jl = sir.sample_reference_posterior(
+            rng_key=rng_key,
+            x_star=x_star,
+            theta_star=theta_star,
+            n_obs=1,
+            num_samples=1000,
+        )
         # samples_jl_30 = sir.sample_reference_posterior(rng_key=rng_key, x_star=x_star, theta_star=theta_star, n_obs=30, num_samples=1000)
 
         print(samples_sbibm.shape, samples_jl.shape)
         import matplotlib.pyplot as plt
-        plt.scatter(samples_sbibm[:,0], samples_sbibm[:,1], label='sbibm')
-        plt.scatter(samples_jl[:,0], samples_jl[:,1], label='jl')
+
+        plt.scatter(samples_sbibm[:, 0], samples_sbibm[:, 1], label="sbibm")
+        plt.scatter(samples_jl[:, 0], samples_jl[:, 1], label="jl")
         # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
-        plt.scatter(theta_star[0], theta_star[1], label='theta_star')
+        plt.scatter(theta_star[0], theta_star[1], label="theta_star")
         plt.legend()
-        plt.savefig('_checks/sir_post_check.png')
+        plt.savefig("_checks/sir_post_check.png")
         plt.clf()
 
     if args.check_train:
         import matplotlib.pyplot as plt
-        data = torch.load("/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/sir_good/dataset_n_train_50000.pkl")
+
+        data = torch.load(
+            "/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/sir_good/dataset_n_train_50000.pkl"
+        )
         theta = data["theta"][:1000]
         x = data["x"][:1000]
-        
+
         data_new = sir.generate_training_data(n_simulations=1000, save=False)
         x_new = data_new["x"]
         theta_new = data_new["theta"]
 
-        plt.scatter(x[:,0], x[:,1], label='sbibm')
-        plt.scatter(x_new[:,0], x_new[:,1], label='jl')
+        plt.scatter(x[:, 0], x[:, 1], label="sbibm")
+        plt.scatter(x_new[:, 0], x_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/sir_train_x_check.png')
+        plt.savefig("_checks/sir_train_x_check.png")
         plt.clf()
 
-        plt.scatter(theta[:,0], theta[:,1], label='sbibm')
-        plt.scatter(theta_new[:,0], theta_new[:,1], label='jl')
+        plt.scatter(theta[:, 0], theta[:, 1], label="sbibm")
+        plt.scatter(theta_new[:, 0], theta_new[:, 1], label="jl")
         plt.legend()
-        plt.savefig('_checks/sir_train_theta_check.png')
+        plt.savefig("_checks/sir_train_theta_check.png")
         plt.clf()

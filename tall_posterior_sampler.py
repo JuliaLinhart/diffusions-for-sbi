@@ -38,7 +38,9 @@ def prec_matrix_backward(t, dist_cov, nse):
     eye = torch.eye(dist_cov.shape[-1]).to(alpha_t.device)
     # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)
     # return torch.linalg.inv(dist_cov * alpha_t + (sigma_t**2) * eye)
-    return torch.linalg.inv(dist_cov.to(alpha_t.device)) + (alpha_t / sigma_t**2) * eye
+    return (
+        torch.linalg.inv(dist_cov.to(alpha_t.device)) + (alpha_t / sigma_t**2) * eye
+    )
 
 
 def tweedies_approximation(
@@ -50,59 +52,75 @@ def tweedies_approximation(
     dist_cov_est=None,
     mode="JAC",
     clip_mean_bounds=(None, None),
+    partial_factorization=False,
 ):
     alpha_t = nse.alpha(t)
     sigma_t = nse.sigma(t)
-    
-    if mode == "JAC":
 
+    if mode == "JAC":
         if nse.net_type == "fnet":
+
             def score_jac(theta, x):
-                score = score_fn(theta=theta[None, :], t=t[None, None], x=x[None, ...])[0]
+                score = score_fn(theta=theta[None, :], t=t[None, None], x=x[None, ...])[
+                    0
+                ]
                 return score, score
-            
+
             jac_score, score = vmap(
                 lambda theta: vmap(jacrev(score_jac, has_aux=True))(
                     theta[None].repeat(x.shape[0], 1), x
                 )
             )(theta)
         else:
+
             def score_jac(theta, x):
                 score = score_fn(theta=theta, t=t, x=x)
                 return score, score
 
-            jac_score, score = vmap(
-                lambda theta: vmap(jacrev(score_jac, has_aux=True), in_dims=(None, 0))(
-                    theta, x
-                )
-            )(theta)
-        
+            if not partial_factorization:
+                jac_score, score = vmap(
+                    lambda theta: vmap(
+                        jacrev(score_jac, has_aux=True), in_dims=(None, 0)
+                    )(theta, x)
+                )(theta)
+            else:
+                jac_score, score = vmap(
+                    jacrev(score_jac, has_aux=True), in_dims=(None, 0)
+                )(theta, x)
+
         cov = (sigma_t**2 / alpha_t) * (
             torch.eye(theta.shape[-1], device=theta.device) + (sigma_t**2) * jac_score
         )
         prec = torch.linalg.inv(cov)
     elif mode == "GAUSS":
-
         if nse.net_type == "fnet":
+
             def score_jac(theta, x):
                 n_theta = theta.shape[0]
                 n_x = x.shape[0]
                 score = score_fn(
-                    theta=theta[:, None, :].repeat(1, n_x, 1).reshape(n_theta * n_x, -1),
+                    theta=theta[:, None, :]
+                    .repeat(1, n_x, 1)
+                    .reshape(n_theta * n_x, -1),
                     t=t[None, None].repeat(n_theta * n_x, 1),
                     x=x[None, ...].repeat(n_theta, 1, 1).reshape(n_theta * n_x, -1),
                 )
                 score = score.reshape(n_theta, n_x, -1)
                 return score, score
-            
+
             score = score_jac(theta, x)[0]
         else:
-            score = vmap(
-                lambda theta: vmap(
-                    partial(score_fn, t=t), in_dims=(None, 0), randomness="different"
-                )(theta, x),
-                randomness="different",
-            )(theta)
+            if not partial_factorization:
+                score = vmap(
+                    lambda theta: vmap(
+                        partial(score_fn, t=t),
+                        in_dims=(None, 0),
+                        randomness="different",
+                    )(theta, x),
+                    randomness="different",
+                )(theta)
+            else:
+                score = score_fn(theta[:, None], x[None, :], t)
 
         prec = prec_matrix_backward(t=t, dist_cov=dist_cov_est, nse=nse)
         # # Same as the other but using woodberry. (eq 53 or https://arxiv.org/pdf/2310.06721.pdf)

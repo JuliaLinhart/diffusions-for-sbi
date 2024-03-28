@@ -114,7 +114,6 @@ if __name__ == "__main__":
                     for sampling_steps, eta in zip(
                         [50, 150, 400, 1000], [0.2, 0.5, 0.8, 1]
                     ):
-
                         tstart_gauss = time.time()
                         # Estimate Gaussian covariance
                         samples_ddim = (

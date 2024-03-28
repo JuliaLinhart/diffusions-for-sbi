@@ -14,27 +14,29 @@ from sbibm.metrics import mmd
 
 PATH_EXPERIMENT = "results/gaussian/"
 N_OBS = [1, 8, 14, 22, 30]
-N_TRAIN = 30000 #10000
-N_EPOCHS = 5000 #10000
+N_TRAIN = 30000  # 10000
+N_EPOCHS = 5000  # 10000
 BATCH_SIZE = 256
-DIM_LR_DICT = {
-    2: 1e-4, 
-    4: 1e-4, 
-    8: 1e-4, 
-    16: 1e-4, 
-    32: 1e-4} # 32: 1e-3}
+DIM_LR_DICT = {2: 1e-4, 4: 1e-4, 8: 1e-4, 16: 1e-4, 32: 1e-4}  # 32: 1e-3}
 
 METRICS = ["swd", "mmd", "mmd_to_dirac"]
 
+
 def load_losses(task_name, n_train, lr, path):
     # losses = torch.load(path + f'{task_name}/n_train_{n_train}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
-    losses = torch.load(path + f'{task_name}/n_train_{n_train}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl')
+    losses = torch.load(
+        path
+        + f"{task_name}/n_train_{n_train}_bs_{BATCH_SIZE}_n_epochs_{N_EPOCHS}_lr_{lr}/train_losses.pkl"
+    )
     train_losses = losses["train_losses"]
     val_losses = losses["val_losses"]
     best_epoch = losses["best_epochs"]
     return train_losses, val_losses, best_epoch
 
-def path_to_results(dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=False, clip=False):
+
+def path_to_results(
+    dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=False, clip=False
+):
     path = PATH_EXPERIMENT + f"{dim}d"
     if random_prior:
         path += "random_prior"
@@ -52,10 +54,18 @@ def path_to_results(dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=
         samples_path = samples_path[:-4] + "_clip.pkl"
     return samples_path, theta_true_path, runtimes_path
 
-def load_runtimes(dim, n_train, lr, cov_mode=None, random_prior=False, langevin=False, clip=False):
-    return torch.load(path_to_results(dim, n_train, lr, cov_mode, random_prior, langevin, clip)[-1])
 
-def load_samples(dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=False, clip=False):
+def load_runtimes(
+    dim, n_train, lr, cov_mode=None, random_prior=False, langevin=False, clip=False
+):
+    return torch.load(
+        path_to_results(dim, n_train, lr, cov_mode, random_prior, langevin, clip)[-1]
+    )
+
+
+def load_samples(
+    dim, n_obs, lr, cov_mode=None, random_prior=False, langevin=False, clip=False
+):
     path = path_to_results(dim, n_obs, lr, cov_mode, random_prior, langevin, clip)
     return torch.load(path[0]), torch.load(path[1])
 
@@ -76,7 +86,9 @@ if __name__ == "__main__":
     if args.losses:
         # plot losses
         lr_list = [1e-4, 1e-3]
-        fig, axs = plt.subplots(1, 5, figsize=(25, 5), constrained_layout=True, sharey=True)
+        fig, axs = plt.subplots(
+            1, 5, figsize=(25, 5), constrained_layout=True, sharey=True
+        )
         for i, dim in enumerate(DIM_LR_DICT.keys()):
             best_val_loss = {}
             for lr_, c in zip(lr_list, ["blue", "orange"]):
@@ -90,7 +102,7 @@ if __name__ == "__main__":
                 axs[i].axvline(best_epoch, color=c, linestyle="--", linewidth=3)
             # get lr for min best val loss
             best_lr = min(best_val_loss, key=best_val_loss.get)
-            axs[i].set_title(fr"${dim}$D" + f" \n best_lr={best_lr}")
+            axs[i].set_title(rf"${dim}$D" + f" \n best_lr={best_lr}")
             axs[i].set_xlabel("epochs")
             axs[i].set_ylabel("loss")
             axs[i].legend()
@@ -99,7 +111,7 @@ if __name__ == "__main__":
         plt.clf()
 
     if args.runtimes:
-        #plot runtimes for every dim as a function of dim, then as a function of n_obs
+        # plot runtimes for every dim as a function of dim, then as a function of n_obs
         fig, axs = plt.subplots(1, 5, figsize=(25, 5), constrained_layout=True)
         for j, n_obs in enumerate(N_OBS):
             runtimes_dict = {method: [] for method in METHODS_STYLE.keys()}
@@ -107,17 +119,32 @@ if __name__ == "__main__":
                 for method in METHODS_STYLE.keys():
                     clip = True if "clip" in method else False
                     langevin = True if "LANGEVIN" in method else False
-                    runtimes_dict[method].append(load_runtimes(dim, n_obs, lr, cov_mode=method.split("_")[0], langevin=langevin, clip=clip))
+                    runtimes_dict[method].append(
+                        load_runtimes(
+                            dim,
+                            n_obs,
+                            lr,
+                            cov_mode=method.split("_")[0],
+                            langevin=langevin,
+                            clip=clip,
+                        )
+                    )
 
             for k, v in runtimes_dict.items():
-                axs[j].plot(list(DIM_LR_DICT.keys()), v, linewidth=3, alpha=0.7, **METHODS_STYLE[k])
+                axs[j].plot(
+                    list(DIM_LR_DICT.keys()),
+                    v,
+                    linewidth=3,
+                    alpha=0.7,
+                    **METHODS_STYLE[k],
+                )
                 axs[j].set_title(rf"$n={n_obs}$")
                 axs[j].set_xlabel(r"Dimenson ($m$)")
                 axs[j].set_xscale("log", base=2)
                 axs[j].set_xticks(list(DIM_LR_DICT.keys()))
                 axs[j].set_ylabel("runtimes (s)")
                 # axs[0, j].set_ylim(0, 1)
-        
+
         # for j, (dim, lr) in enumerate(DIM_LR_DICT.items()):
         #     runtimes_dict = {method: [] for method in METHODS_STYLE.keys()}
         #     for n_obs in N_OBS:
@@ -134,12 +161,10 @@ if __name__ == "__main__":
         #         axs[1, j].set_ylabel("runtimes (s)")
         #         # axs[1, j].set_ylim(0, 1)
         # axs[1, 4].legend()
-                
 
         plt.savefig(PATH_EXPERIMENT + f"runtimes.png")
         plt.savefig(PATH_EXPERIMENT + f"runtimes.pdf")
         plt.clf()
-
 
     if args.w_dist:
         fig, axs = plt.subplots(3, 5, figsize=(25, 15), constrained_layout=True)
@@ -156,17 +181,36 @@ if __name__ == "__main__":
                 for method in METHODS_STYLE.keys():
                     clip = True if "clip" in method else False
                     langevin = True if "LANGEVIN" in method else False
-                    samples, theta_true = load_samples(dim, n_obs, lr, cov_mode=method.split("_")[0], langevin=langevin, clip=clip)
-                    wdist_dict[method].append(sliced_wasserstein_distance(samples_analytic, samples, n_projections=100))
+                    samples, theta_true = load_samples(
+                        dim,
+                        n_obs,
+                        lr,
+                        cov_mode=method.split("_")[0],
+                        langevin=langevin,
+                        clip=clip,
+                    )
+                    wdist_dict[method].append(
+                        sliced_wasserstein_distance(
+                            samples_analytic, samples, n_projections=100
+                        )
+                    )
                     mmd_dict[method].append(mmd(samples_analytic, samples))
-                    mmd_to_dirac_dict[method].append(dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"])
+                    mmd_to_dirac_dict[method].append(
+                        dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"]
+                    )
 
             for k, v in wdist_dict.items():
-                axs[0, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
+                axs[0, j].plot(
+                    list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k]
+                )
             for k, v in mmd_dict.items():
-                axs[1, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
+                axs[1, j].plot(
+                    list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k]
+                )
             for k, v in mmd_to_dirac_dict.items():
-                axs[2, j].plot(list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k])
+                axs[2, j].plot(
+                    list(DIM_LR_DICT.keys()), v, alpha=0.7, **METHODS_STYLE[k]
+                )
             for i, metric in enumerate(["swd", "mmd", "mmd_to_dirac"]):
                 axs[i, j].set_title(rf"$n={n_obs}$")
                 axs[i, j].set_xlabel(r"Dimenson ($m$)")
@@ -175,15 +219,13 @@ if __name__ == "__main__":
                 axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
                 axs[i, j].set_ylim(0, 0.8)
         axs[i, j].legend()
-        
 
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_n_obs.png")
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_n_obs.pdf")
         plt.clf()
 
-
         # same but with one subfigure per dim and plots as function of n_obs
-        fig, axs = plt.subplots(3, 5, figsize=(25,15), constrained_layout=True)
+        fig, axs = plt.subplots(3, 5, figsize=(25, 15), constrained_layout=True)
         for j, (dim, lr) in enumerate(DIM_LR_DICT.items()):
             wdist_dict = {method: [] for method in METHODS_STYLE.keys()}
             mmd_dict = {method: [] for method in METHODS_STYLE.keys()}
@@ -197,10 +239,23 @@ if __name__ == "__main__":
                 for method in METHODS_STYLE.keys():
                     clip = True if "clip" in method else False
                     langevin = True if "LANGEVIN" in method else False
-                    samples, theta_true = load_samples(dim, n_obs, lr, cov_mode=method.split("_")[0], langevin=langevin, clip=clip)
-                    wdist_dict[method].append(sliced_wasserstein_distance(samples_analytic, samples, n_projections=100))
+                    samples, theta_true = load_samples(
+                        dim,
+                        n_obs,
+                        lr,
+                        cov_mode=method.split("_")[0],
+                        langevin=langevin,
+                        clip=clip,
+                    )
+                    wdist_dict[method].append(
+                        sliced_wasserstein_distance(
+                            samples_analytic, samples, n_projections=100
+                        )
+                    )
                     mmd_dict[method].append(mmd(samples_analytic, samples))
-                    mmd_to_dirac_dict[method].append(dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"])
+                    mmd_to_dirac_dict[method].append(
+                        dist_to_dirac(samples, theta_true, metrics=["mmd"])["mmd"]
+                    )
 
             for k, v in wdist_dict.items():
                 axs[0, j].plot(N_OBS, v, alpha=0.7, **METHODS_STYLE[k])
@@ -209,7 +264,7 @@ if __name__ == "__main__":
             for k, v in mmd_to_dirac_dict.items():
                 axs[2, j].plot(N_OBS, v, alpha=0.7, **METHODS_STYLE[k])
             for i, metric in enumerate(["swd", "mmd", "mmd_to_dirac"]):
-                axs[i, j].set_title(fr"${dim}$D")
+                axs[i, j].set_title(rf"${dim}$D")
                 axs[i, j].set_xlabel(r"$n$")
                 axs[i, j].set_ylabel(METRICS_STYLE[metric]["label"])
                 axs[i, j].set_ylim(0, 0.8)
@@ -218,8 +273,6 @@ if __name__ == "__main__":
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_per_dim.png")
         plt.savefig(PATH_EXPERIMENT + f"wasserstein_per_dim.pdf")
         plt.clf()
-            
-
 
     dim = 2
     task = Gaussian_Gaussian_mD(dim=dim)
@@ -233,7 +286,9 @@ if __name__ == "__main__":
         # samples_jac, _ = load_samples(dim, n_obs, cov_mode="JAC")
         # samples_jac_clip, _ = load_samples(dim, n_obs, cov_mode="JAC_clip")
         # samples, _ = load_samples(dim, n_obs, langevin=True)
-        samples_gauss, theta_true = load_samples(dim, n_obs, lr=DIM_LR_DICT[dim], cov_mode="GAUSS") #, clip=True)
+        samples_gauss, theta_true = load_samples(
+            dim, n_obs, lr=DIM_LR_DICT[dim], cov_mode="GAUSS"
+        )  # , clip=True)
 
         axs[i].scatter(samples_analytic[:, 0], samples_analytic[:, 1], label="Analytic")
         axs[i].scatter(samples_gauss[:, 0], samples_gauss[:, 1], label="GAUSS")
