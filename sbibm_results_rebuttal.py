@@ -87,7 +87,7 @@ def path_to_results(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    ours=False,
+    tammed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -104,7 +104,7 @@ def path_to_results(
     
     if langevin:
         path = path + "langevin_steps_400_5/"
-        if ours:
+        if tammed_ula:
             path = path[:-1] + "_ours/"
     else:
         path = (
@@ -130,7 +130,7 @@ def load_samples(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    ours=False,
+    tammed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -145,7 +145,7 @@ def load_samples(
         cov_mode,
         sampler,
         langevin,
-        ours,
+        tammed_ula,
         clip,
         clf_free_guidance,
         pf_nse,
@@ -164,17 +164,18 @@ def compute_mean_distance(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    ours=False,
+    tammed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
     n_max=1,
     load=False,
     prec_ignore_nums=None,
+    quantile=0.99,
 ):
     # load results if already computed
     save_path = PATH_EXPERIMENT+ f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
-    if ours:
+    if langevin and tammed_ula:
         save_path = save_path[:-1] + "_ours/"
     if pf_nse:
         save_path = save_path + f"pf_n_max_{n_max}/"
@@ -193,28 +194,19 @@ def compute_mean_distance(
             dist = dist_list_all[num_obs - 1]
             if num_obs not in prec_ignore_nums:
                 dist_list.append(dist)
+            # ignore Nans
             if torch.isnan(dist):
                 ignore_nums.append(num_obs)
-            if metric == "mmd" and n_train > 3000:
-                if task_name == "two_moons" and dist > 0.2:
+            # ignore outliers (above quantile)
+            if (metric == "mmd" or metric == "swd") and (n_train > 3000) and (not langevin):
+                dist_list_all_no_nan = torch.tensor(dist_list_all)[~torch.isnan(torch.tensor(dist_list_all))]
+                threshold = torch.quantile(dist_list_all_no_nan, quantile)
+                # print(f"Upper threshold : quantile {quantile} = {threshold}")
+                if dist > threshold:
                     ignore_nums.append(num_obs)
-            if metric == "swd" and n_train > 3000:
-                if task_name == "gaussian_linear" and dist > 0.8:
-                    ignore_nums.append(num_obs)
-                if task_name == "gaussian_mixture" and dist > 1:
-                    ignore_nums.append(num_obs)
-                if task_name == "gaussian_mixture_uniform" and dist > 2:
-                    ignore_nums.append(num_obs)
-                if task_name == "two_moons" and dist > 0.4:
-                    ignore_nums.append(num_obs)
-                if "bernoulli_glm" in task_name and dist > 1:
-                    ignore_nums.append(num_obs)
-                if "sir" in task_name and dist > 0.02:
-                    ignore_nums.append(num_obs)
-                if "slcp" in task_name and dist > 2:
-                    ignore_nums.append(num_obs)
-                if "lotka" in task_name and dist > 0.05:
-                    ignore_nums.append(num_obs)
+            # special case for SIR
+            if task_name == "sir":
+                ignore_nums.append(12)
                 
 
     else:
@@ -232,7 +224,7 @@ def compute_mean_distance(
                     n_obs=n_obs,
                     cov_mode=cov_mode,
                     langevin=langevin,
-                    ours=ours,
+                    tammed_ula=tammed_ula,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -268,7 +260,7 @@ def compute_mean_distance(
                     n_obs=n_obs,
                     cov_mode=cov_mode,
                     langevin=langevin,
-                    ours=ours,
+                    tammed_ula=tammed_ula,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -291,11 +283,12 @@ def compute_mean_distance(
     if not load:
         print()
         print(f"Computed {metric} for {len(dist_list)} observations.")
-        print(f"NaNs in {len(ignore_nums)} observations: {ignore_nums}.")
+        print(f"NaNs or Outliers in {len(ignore_nums)} observations: {ignore_nums}.")
 
+    dist_list = torch.tensor(dist_list).float()
     dist_dict = {
-        "mean": torch.tensor(dist_list).mean(),
-        "std": torch.tensor(dist_list).std(),
+        "mean": dist_list.mean(),
+        "std": dist_list.std(),
     }
 
     return dist_dict, ignore_nums
@@ -420,18 +413,16 @@ if __name__ == "__main__":
             method_names = ["GAUSS_cfg"]
         elif args.langevin_comparison:
             tasks_dict = TASKS_MAIN
-            method_names = ["LANGEVIN", "LANGEVIN_clip"]
+            method_names = ["LANGEVIN_tammed", "LANGEVIN_tammed_clip"]
         elif args.pf_nse:
-            # no sir
             tasks_dict = TASKS_MAIN 
-            del tasks_dict["sir"]
-            method_names = ["LANGEVIN"] #, "LANGEVIN_clip"] #"GAUSS_clip", "GAUSS", 
+            method_names = ["GAUSS","LANGEVIN"] 
             N_OBS = [30]
             n_max_list = N_MAX_LIST
         else:
             tasks_dict= {**TASKS_MAIN, **TASKS_EXTRA}
             method_names = METHODS_STYLE.keys()
-            method_names = [method for method in method_names if "cfg" not in method and "ours" not in method]
+            method_names = [method for method in method_names if "cfg" not in method and "tammed" not in method]
 
         IGNORE_NUMS = {task_name: [] for task_name in tasks_dict.keys()}
 
@@ -443,19 +434,20 @@ if __name__ == "__main__":
                     for n_obs in N_OBS:
                         for n_max in n_max_list:
                             for method in method_names:
+                                print(f"{task_name}, {n_train}, {n_obs}, {n_max}, {method}")
                                 dist, ignore_nums = compute_mean_distance(
                                     task_name=task_name,
                                     n_train=n_train,
                                     n_obs=n_obs,
                                     cov_mode=method.split("_")[0],
                                     langevin=True if "LANGEVIN" in method else False,
-                                    ours=True if "ours" in method else False,
+                                    tammed_ula=True if "tammed" in method else False,
                                     clip=True if "clip" in method else False,
                                     clf_free_guidance=args.clf_free_guidance,
                                     pf_nse=args.pf_nse,
                                     n_max=n_max,
                                     metric=metric,
-                                    load=False,
+                                    load=True,
                                 )
                                 dist_mean = dist["mean"]
                                 dist_std = dist["std"]
@@ -513,17 +505,16 @@ if __name__ == "__main__":
                 title_ext = "_cfg"
             elif args.langevin_comparison:
                 tasks_dict = TASKS_MAIN
-                method_names = ["LANGEVIN", "LANGEVIN_clip", "LANGEVIN_ours", "LANGEVIN_ours_clip"]
+                method_names = ["LANGEVIN", "LANGEVIN_clip", "LANGEVIN_tammed", "LANGEVIN_tammed_clip"]
                 title_ext = "_lgv_comp"
             elif args.pf_nse:
                 tasks_dict = TASKS_MAIN
-                del tasks_dict["sir"]
                 method_names = ["GAUSS", "LANGEVIN"]
             else:
                 tasks_dict = TASKS
                 method_names = METHODS_STYLE.keys()
-                # remove cfg 
-                method_names = [method for method in method_names if "cfg" not in method and "ours" not in method]
+                # remove cfg and tammed
+                method_names = [method for method in method_names if "cfg" not in method and "tammed" not in method]
                 title_ext = f"_{args.tasks}"
             
             if not args.pf_nse:

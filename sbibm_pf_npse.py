@@ -156,8 +156,7 @@ def run_sample_sgm(
     prior,
     prior_type,
     cov_mode,
-    langevin=False,
-    geffner=True,
+    langevin="geffner",
     clip=False,
     theta_log_space=False,
     x_log_space=False,
@@ -221,7 +220,7 @@ def run_sample_sgm(
 
     if langevin:
         print()
-        print(f"Using LANGEVIN sampler, clip = {clip}, GEFFNER = {geffner}.")
+        print(f"Using LANGEVIN sampler ({langevin.upper()}), clip = {clip}.")
         print()
 
         save_path += f"langevin_steps_400_5/"
@@ -232,7 +231,7 @@ def run_sample_sgm(
             theta_clipping_range = (-3, 3)
             ext = "_clip"
 
-        if geffner:
+        if langevin == "geffner":
             samples = score_network.annealed_langevin_geffner(
                 shape=(nsamples,),
                 x=context_norm.to(device),
@@ -244,15 +243,13 @@ def run_sample_sgm(
                 theta_clipping_range=theta_clipping_range,
                 verbose=True,
             ).cpu()
-        else:
+        elif langevin == "tammed":
             samples = score_network.predictor_corrector(
                 (nsamples,),
                 x=context_norm.to(device),
                 steps=400,
                 prior_score_fun=prior_score_fn_norm,
-                eta=1,
-                corrector_lda=0,
-                n_steps=5,
+                lsteps=5,
                 r=0.5,
                 predictor_type="id",
                 verbose=True,
@@ -260,6 +257,8 @@ def run_sample_sgm(
             ).cpu()
 
             save_path = save_path[:-1] + "_ours/"
+        else:
+            raise NotImplementedError
 
         samples_filename = save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
     else:
@@ -399,13 +398,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--langevin",
-        action="store_true",
-        help="whether to use langevin sampler (Geffner et al. 2023)",
-    )
-    parser.add_argument(
-        "--ours",
-        action="store_true",
-        help="whether to use our langevin sampler our the one from (Geffner et al. 2023)",
+        type=str,
+        default="",
+        choices=["geffner", "tammed"],
+        help="whether to use langevin sampler (Geffner et al. 2023) or our tammed ULA (Brosse et al. 2017)",
     )
     parser.add_argument(
         "--clip",
@@ -543,7 +539,6 @@ if __name__ == "__main__":
                 "cov_mode": args.cov_mode,
                 "clip": args.clip,  # for clipping
                 "langevin": args.langevin,
-                "geffner": not args.ours,
                 "theta_log_space": args.task in ["lotka_volterra", "sir"],
                 "x_log_space": args.task == "lotka_volterra",
                 "clf_free_guidance": args.clf_free_guidance,

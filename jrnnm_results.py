@@ -12,6 +12,8 @@ METRICS = ["mmd_to_dirac"]
 N_EPOCHS = 5000
 LR = 1e-4
 
+method_names = ["GAUSS", "GAUSS_clip", "LANGEVIN", "LANGEVIN_clip", "JAC", "JAC_clip"]
+
 def load_losses(dim, lr=LR, n_epochs=N_EPOCHS):
     filename = PATH_EXPERIMENT + f"{dim}d/n_train_50000_n_epochs_{n_epochs}_lr_{lr}/train_losses.pkl"
     losses = torch.load(filename)
@@ -27,7 +29,7 @@ def load_results(dim, result_name, n_obs, lr=LR, n_epochs=N_EPOCHS, gain=0.0, co
         theta_true = theta_true[:3]
     path = PATH_EXPERIMENT + f"{dim}d/n_train_50000_n_epochs_{n_epochs}_lr_{lr}/"
     if langevin:
-        path = path + "langevin_steps_400_5_new/" 
+        path = path + "langevin_steps_400_5/" 
     else:
         path = path + f"{sampler}_steps_1000/" if sampler == "euler" or cov_mode == "GAUSS" else path + f"{sampler}_steps_400/"
     if single_obs is not None:
@@ -97,7 +99,7 @@ if __name__ == "__main__":
             axs[i].set_xlabel("epochs")
         # axs[i].set_ylabel("loss")
         axs[i].legend()
-        plt.savefig(PATH_EXPERIMENT + "losses.png")
+        plt.savefig(PATH_EXPERIMENT + "jrnnm_losses.png")
         plt.savefig(PATH_EXPERIMENT + "jrnnm_losses.pdf")
         plt.clf()
 
@@ -109,7 +111,7 @@ if __name__ == "__main__":
             for i, dim in enumerate(DIMS):
                 fig, axs = plt.subplots(1, 1, figsize=(5, 5))
                 fig.subplots_adjust(right=.995, top=.92, bottom=.2, hspace=0, wspace=0, left=.25)
-                for method in METHODS_STYLE.keys():
+                for method in method_names:
                     if method == "JAC":
                         continue
                     else:
@@ -124,7 +126,7 @@ if __name__ == "__main__":
                 axs.set_xlabel(r"$n$")
                 axs.set_ylabel(f"{METRICS_STYLE[metric]['label']}")
                 if dim == 4:
-                    axs.set_ylim([0, 800])
+                    axs.set_ylim([0, 600])
                 # axs.legend()
                 # axs.set_title(rf"${dim}$D")
 

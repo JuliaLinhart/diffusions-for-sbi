@@ -40,7 +40,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
@@ -133,7 +133,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:3"
+        device = "cuda:0"
 
     n_obs = context.shape[0]
 
@@ -169,9 +169,7 @@ def run_sample_sgm(
         #     x=context_norm.to(device),
         #     steps=400,
         #     prior_score_fun=prior_score_fn_norm,
-        #     eta=1,
-        #     corrector_lda=0,
-        #     n_steps=5,
+        #     lsteps=5,
         #     r=0.5,
         #     predictor_type="id",
         #     verbose=True,
@@ -189,7 +187,7 @@ def run_sample_sgm(
         ).cpu()
 
         # save  path
-        save_path += f"langevin_steps_400_5_new/"
+        save_path += f"langevin_steps_400_5/"
         if single_obs is not None:
             save_path += f"single_obs/"
             samples_filename = (

@@ -270,7 +270,7 @@ class NSE(nn.Module):
         x: Tensor,
         t: Tensor,
         score_fun: Callable[[Tensor, Tensor, Tensor], Tensor],
-        n_steps: int,
+        lsteps: int,
         r: float,
         **kwargs,
     ) -> Tensor:
@@ -281,17 +281,18 @@ class NSE(nn.Module):
             x (torch.Tensor): The conditioning variable for the score network, with shape :math:`(n, m)`.
             t (torch.Tensor): The time :math:`t`, with shape :math:`(n,)`.
             score_fun (Callable): The score function.
-            n_steps (int): The number of Langevin steps.
+            lsteps (int): The number of Langevin steps.
             r (float): The step size (or signal-to-noise ratio) for the Langevin dynamics.
 
         Returns:
             (torch.Tensor): The corrected sampple state of the diffusion process, with shape :math:`(n, m)`.
         """
 
-        for _ in range(n_steps):
+        for _ in range(lsteps):
             z = torch.randn_like(theta)
             g = score_fun(theta, x, t).detach()
-            # eps = 2*alpha_t*(r*torch.linalg.norm(z, axis=-1).mean(axis=0)/torch.linalg.norm(g, axis=-1).mean(axis=0))**2
+            # Step size as defined in [Song et al, 2021]
+            # (Alg 5 in https://arxiv.org/pdf/2011.13456.pdf with sigma^2 replacing 1/ ||g||^2)
             eps = (
                 r
                 * (self.alpha(t) ** 0.5)
@@ -649,8 +650,7 @@ if __name__ == "__main__":
         steps=2,
         prior_score_fun=lambda theta, t: torch.ones_like(theta),
         eta=0.01,
-        corrector_lda=0.1,
-        n_steps=2,
+        lsteps=2,
         r=0.5,
         predictor_type="ddim",
         verbose=True,

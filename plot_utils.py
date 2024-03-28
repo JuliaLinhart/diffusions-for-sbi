@@ -29,11 +29,11 @@ markersize = plt.rcParams['lines.markersize'] * 1.5
 METHODS_STYLE = {
     "LANGEVIN": {"label":"LANGEVIN", "color": "#92374D", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize}, 
     "LANGEVIN_clip": {"label":"LANGEVIN (clip)", "color": "#92374D", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
-    "LANGEVIN_ours": {"label":"LANGEVIN (ours)", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
-    "LANGEVIN_ours_clip": {"label":"LANGEVIN (ours, clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
+    "LANGEVIN_tammed": {"label":"tammed ULA", "color": "#E5A4CB", "marker": "o", "linestyle": "-", "linewidth":3, "markersize": markersize},
+    "LANGEVIN_tammed_clip": {"label":"tammed ULA (clip)", "color": "#E5A4CB", "marker": "o", "linestyle": "--", "linewidth":4, "markersize": markersize},
     "GAUSS": {"label":"GAUSS", "color": "blue", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     "GAUSS_clip": {"label":"GAUSS (clip)", "color": "blue", "marker": "*", "linestyle": "--", "linewidth":4, "markersize": markersize + 10},
-    "GAUSS_cfg": {"label":"GAUSS (clf guidance)", "color": "#00BBFF", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
+    "GAUSS_cfg": {"label":"GAUSS (CFG)", "color": "#00BBFF", "marker": "*", "linestyle": "-", "linewidth":3, "markersize": markersize + 10},
     # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
     "JAC_clip": {"label":"JAC (clip)", "color": "orange", "marker": "^", "linestyle": "--", "linewidth":4, "markersize": markersize + 2},
 }
@@ -48,8 +48,8 @@ METRICS_STYLE = {
 CMAPS_METHODS = {
     "LANGEVIN": "Reds",
     "LANGEVIN_clip": "Reds",
-    "LANGEVIN_ours": "Purples",
-    "LANGEVIN_ours_clip": "Purples",
+    "LANGEVIN_tammed": "Purples",
+    "LANGEVIN_tammed_clip": "Purples",
     "GAUSS": "Blues",
     "GAUSS_clip": "Blues",
     "GAUSS_cfg": "Blues",
@@ -156,7 +156,7 @@ def set_axs_lims_sbibm(metric, ax, task_name):
             elif "slcp" in task_name:
                 ax.set_ylim([0, 0.6])
             elif task_name == "two_moons":
-                ax.set_ylim([0, 0.15])
+                ax.set_ylim([0, 0.3])
             elif "gaussian_mixture" in task_name:
                 ax.set_ylim([0, 2])
             elif "bernoulli_glm" in task_name:
@@ -225,7 +225,7 @@ def plots_dist_n_train(metric, tasks_dict, method_names, prec_ignore_nums, n_tra
                         n_obs=n_obs,
                         cov_mode=method.split("_")[0],
                         langevin=True if "LANGEVIN" in method else False,
-                        ours=True if "ours" in method else False,
+                        tammed_ula=True if "tammed" in method else False,
                         clip=True if "clip" in method else False,
                         clf_free_guidance=True if "cfg" in method else False,
                         metric=metric,
@@ -304,7 +304,7 @@ def plots_dist_n_obs(metric, tasks_dict, method_names, prec_ignore_nums, n_train
                         n_obs=n_obs,
                         cov_mode=method.split("_")[0],
                         langevin=True if "LANGEVIN" in method else False,
-                        ours=True if "ours" in method else False,
+                        tammed_ula=True if "tammed" in method else False,
                         clip=True if "clip" in method else False,
                         clf_free_guidance=True if "cfg" in method else False,
                         metric=metric,
@@ -380,7 +380,7 @@ def plots_dist_n_train_pf_nse(metric, tasks_dict, method_names, prec_ignore_nums
                         n_obs=30,
                         cov_mode=method.split("_")[0],
                         langevin=True if "LANGEVIN" in method else False,
-                        ours=True if "ours" in method else False,
+                        tammed_ula=True if "tammed" in method else False,
                         clip=True if "clip" in method else False,
                         clf_free_guidance=True if "cfg" in method else False,
                         pf_nse=True if n_max > 1 else False,
@@ -394,6 +394,7 @@ def plots_dist_n_train_pf_nse(metric, tasks_dict, method_names, prec_ignore_nums
 
         for k in mean_dist_dict.keys():
             colors = cm.get_cmap(CMAPS_METHODS[k])(np.linspace(1, 0.2, len(n_max_list))).tolist()
+            colors[0] = METHODS_STYLE[k]["color"]
             labels = [METHODS_STYLE[k]["label"] + r", $n_\mathrm{max}=$"+rf"${n_max}$" for n_max in mean_dist_dict[k].keys()]
             for n_max, color, label in zip(mean_dist_dict[k].keys(), colors, labels):
                 mean_, std_ = torch.FloatTensor(mean_dist_dict[k][n_max]), torch.FloatTensor(std_dist_dict[k][n_max])
@@ -404,13 +405,14 @@ def plots_dist_n_train_pf_nse(metric, tasks_dict, method_names, prec_ignore_nums
                     alpha=alpha_fill,
                     color= color,
                 )
-                METHODS_STYLE[k]["color"] = color
-                METHODS_STYLE[k]["label"] = label
+                methods_style = METHODS_STYLE[k].copy()
+                methods_style["color"] = color
+                methods_style["label"] = label
                 axs[i].plot(
                     n_train_list,
                     mean_,
                     alpha=alpha,
-                    **METHODS_STYLE[k],
+                    **methods_style,
                 )
 
         axs[i].set_title(tasks_dict[task_name])

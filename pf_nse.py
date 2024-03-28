@@ -221,6 +221,33 @@ class PF_NSE(NSE):
             **kwargs,
         )
     
+    def predictor_corrector(
+        self,
+        shape: Size,
+        x: Tensor,
+        steps: int = 64,
+        verbose: bool = False,
+        predictor_type="ddim",
+        corrector_type="langevin",
+        theta_clipping_range=(None, None),
+        **kwargs,
+    ) -> Tensor:
+        
+        xs, ns = self._create_pf_data(x)
+        print("Reshaped context sets: ", f"x: {xs.shape}, n: {ns.shape}")
+
+        return super().predictor_corrector(
+            shape=shape,
+            x=xs,
+            steps=steps,
+            verbose=verbose,
+            predictor_type=predictor_type,
+            corrector_type=corrector_type,
+            theta_clipping_range=theta_clipping_range,
+            n=ns,
+            **kwargs,
+        )
+        
     def annealed_langevin_geffner(
         self,
         shape: Size,
@@ -252,41 +279,6 @@ class PF_NSE(NSE):
             **kwargs,
         )
     
-    def test(
-        self,
-        theta,
-        x,
-        t,
-        eta,
-        **kwargs,
-    ):
-        score_g = self.score(theta[:,None], x[None,:], t, **kwargs) + eta
-
-        score_fun = partial(self.score, **kwargs)
-
-        def score_jac(theta, x):
-            score = score_fun(theta=theta, t=t, x=x, **kwargs)
-            return score, score
-        
-        jac_score, score_jac = vmap(jacrev(score_jac, has_aux=True), in_dims=(0, None))(
-            theta, x
-        )
-
-        cov = (
-            torch.eye(theta.shape[-1], device=theta.device) + jac_score
-        )
-        return score_g, score_jac, cov
-    
-    def test_super(
-        self,
-        shape,
-        x,
-        **kwargs,
-    ):
-        theta = DiagNormal(self.zeros, self.ones).sample(shape)
-        t = torch.tensor(0.1)
-        return self.test(theta, x, t, **kwargs)
-
 
 if __name__ == "__main__":
 
@@ -300,14 +292,6 @@ if __name__ == "__main__":
     x = torch.randn((107, x_dim))
     xs, ns = pf_nse._create_pf_data(x)
     print(xs.shape, ns.shape)
-
-    # gauss_geffner, jac, cov = pf_nse.test_super(shape=(1000,), x=xs, n=ns, eta=0.1)
-    # print(gauss_geffner.shape, jac.shape, cov.shape)
-
-    samples_geffner = pf_nse.annealed_langevin_geffner(
-        shape=(1000,), x=x, prior_score_fn=None, clf_free_guidance=True, verbose=True
-    )
-    print(samples_geffner.shape)
 
     cov_est = vmap(
         lambda x: pf_nse.ddim(shape=(1000,), x=x, steps=100, eta=0.5),
@@ -339,3 +323,23 @@ if __name__ == "__main__":
         verbose=True
     )
     print(samples_gauss.shape)
+
+    samples_pc = pf_nse.predictor_corrector(
+        shape=(1000,), 
+        x=x, 
+        steps=400, 
+        verbose=True,
+        prior_score_fun=None,
+        eta=1,
+        lsteps=5,
+        theta_clipping_range=(None, None),
+        clf_free_guidance=True,
+        r=0.5,
+        predictor_type="id"
+    )
+    print(samples_pc.shape)
+
+    samples_geffner = pf_nse.annealed_langevin_geffner(
+        shape=(1000,), x=x, prior_score_fn=None, clf_free_guidance=True, verbose=True
+    )
+    print(samples_geffner.shape)
