@@ -3,8 +3,6 @@ __pycache__/
 *.egg-info/
 .DS_Store
 
-*.pdf
-*.png
 /results/jrnnm/4d/*/euler*/*
 /results/jrnnm/4d/*/langevin*/*
 /results/jrnnm/4d/*/ddim*/*
@@ -23,6 +21,12 @@ __pycache__/
 /results/sbibm/*/*metrics*/
 /results/sbibm/*good/
 /results/*/_*/
+/results/*/*.png
+/results/*/*.pdf
+/results/*/*/*/*.png
+/results/*/*/*/*.pdf
+
+/tasks/sbibm/_*
 
 /notebooks
 /test_toy
