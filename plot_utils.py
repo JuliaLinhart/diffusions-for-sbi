@@ -85,7 +85,7 @@ METHODS_STYLE = {
         "linewidth": 3,
         "markersize": markersize + 10,
     },
-    # "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
+    "JAC": {"label":"JAC", "color": "orange", "marker": "^", "linestyle": "-", "linewidth":3, "markersize": markersize + 2},
     "JAC_clip": {
         "label": "JAC (clip)",
         "color": "orange",

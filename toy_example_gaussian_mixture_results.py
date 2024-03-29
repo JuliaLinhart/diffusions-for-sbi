@@ -98,7 +98,7 @@ if __name__ == "__main__":
         # ax.set_ylabel('Sliced Wasserstein')
         # ax.set_xlabel('Number of Observations')
         ax.set_xlim(1.5, 110)
-    axes_all[-1, -1].legend()
+    axes_all[-1, -1].legend(prop={"family": "monospace"})
     # axes[0].set_xlim(1.5, 100.5)
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
@@ -138,7 +138,7 @@ if __name__ == "__main__":
         print(alg)
         # ax.fill_between(n_obs, -np.array(yerr_ref), yerr_ref, color='red', alpha=.5)
         for i, (eps, dt) in enumerate(alg_data.groupby(["eps"])):
-            label = eps[0]
+            label = rf"$\epsilon = {eps[0]}$"
             c = cm.get_cmap("coolwarm")(-math.log10(eps[0] + 1e-5) / 5)
             # c = cm.get_cmap('coolwarm')(i / len(alg_data['eps'].unique()))
             plot_kwars = METHODS_STYLE[alg]

@@ -150,7 +150,7 @@ if __name__ == "__main__":
             # ax.set_ylabel('Sliced Wasserstein')
             # ax.set_xlabel('Number of Observations')
             ax.set_xlim(1.5, 110)
-    axes_all[-1, -1].legend()
+    axes_all[-1, -1].legend(prop={"family": "monospace"})
     # axes[0].set_xlim(1.5, 100.5)
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
@@ -221,7 +221,7 @@ if __name__ == "__main__":
         ax.set_ylim([-1e-1, 1e0])
         ax.set_xscale("log")
         ax.set_xlim(1.5, 110)
-    axes[-1, -1].legend()
+    axes[-1, -1].legend(prop={"family": "monospace"})
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.pdf")
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.png")
     fig.show()
@@ -254,7 +254,7 @@ if __name__ == "__main__":
             alg = "LANGEVIN"
         # ax.fill_between(n_obs, -np.array(yerr_ref), yerr_ref, color='red', alpha=.5)
         for i, (eps, dt) in enumerate(alg_data.groupby(["eps"])):
-            label = eps[0]
+            label = rf"$\epsilon = {eps[0]}$"
             c = cm.get_cmap("coolwarm")(-math.log10(eps[0] + 1e-5) / 5)
             # c = cm.get_cmap('coolwarm')(i / len(alg_data['eps'].unique()))
             plot_kwars = METHODS_STYLE[alg]
@@ -292,7 +292,7 @@ if __name__ == "__main__":
         # set title for first row
         if alg == "GAUSS":
             ax.set_title(rf"$m = {dim}$")
-    axes[-1, -1].legend()
+    axes[-1, -1].legend(prop={"family": "monospace"})
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.pdf")
     fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.png")
     # fig.show()

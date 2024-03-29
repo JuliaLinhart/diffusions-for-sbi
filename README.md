@@ -2,6 +2,8 @@
 
 Offical Code for the paper "Diffusion posterior sampling for simulation-based inference in tall data settings".
 
+An updated version of the paper is available at `paper_post_rebuttal.pdf`.
+
 The figures from the paper can be found in the `figures/` folder. It contains folders corresponding to each experiments that respectively provide resutls for the Gaussian Toy examples (`toy_models/`), the SBI benchmark examples (`sbibm/`) examples and a real simulator from computational neuroscience (`jrnnm/`). 
 
 ## Requirements
