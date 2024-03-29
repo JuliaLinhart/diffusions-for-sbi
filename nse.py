@@ -50,7 +50,7 @@ class NSE(nn.Module):
         - Denoising Diffusion Implicit Models (DDIM) sampler [2],
         - Annealed Langevin dynamics as implemented in [3],
         - Predictor-Corrector (PC) sampler (generalization of DDIM and Langevin dynamics [1]
-            with tammed ULA [4] for the langevin corrector step),
+            with tamed ULA [4] for the langevin corrector step),
 
         References:
             [1] Song et al. (2020). Score-Based Generative Modeling through SDEs,

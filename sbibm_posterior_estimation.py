@@ -240,7 +240,7 @@ def run_sample_sgm(
                 theta_clipping_range=theta_clipping_range,
                 verbose=True,
             ).cpu()
-        elif langevin == "tammed":
+        elif langevin == "tamed":
             samples = score_network.predictor_corrector(
                 (nsamples,),
                 x=context_norm.to(device),
@@ -453,8 +453,8 @@ if __name__ == "__main__":
         "--langevin",
         type=str,
         default="",
-        choices=["geffner", "tammed"],
-        help="whether to use langevin sampler (Geffner et al. 2023) or our tammed ULA (Brosse et al. 2017)",
+        choices=["geffner", "tamed"],
+        help="whether to use langevin sampler (Geffner et al. 2023) or our tamed ULA (Brosse et al. 2017)",
     )
     parser.add_argument(
         "--clip",

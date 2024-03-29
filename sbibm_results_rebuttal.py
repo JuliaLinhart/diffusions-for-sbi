@@ -87,7 +87,7 @@ def path_to_results(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    tammed_ula=False,
+    tamed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -107,7 +107,7 @@ def path_to_results(
 
     if langevin:
         path = path + "langevin_steps_400_5/"
-        if tammed_ula:
+        if tamed_ula:
             path = path[:-1] + "_ours/"
     else:
         path = (
@@ -133,7 +133,7 @@ def load_samples(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    tammed_ula=False,
+    tamed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -148,7 +148,7 @@ def load_samples(
         cov_mode,
         sampler,
         langevin,
-        tammed_ula,
+        tamed_ula,
         clip,
         clf_free_guidance,
         pf_nse,
@@ -167,7 +167,7 @@ def compute_mean_distance(
     cov_mode=None,
     sampler="ddim",
     langevin=False,
-    tammed_ula=False,
+    tamed_ula=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -181,7 +181,7 @@ def compute_mean_distance(
         PATH_EXPERIMENT
         + f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
     )
-    if langevin and tammed_ula:
+    if langevin and tamed_ula:
         save_path = save_path[:-1] + "_ours/"
     if pf_nse:
         save_path = save_path + f"pf_n_max_{n_max}/"
@@ -237,7 +237,7 @@ def compute_mean_distance(
                     n_obs=n_obs,
                     cov_mode=cov_mode,
                     langevin=langevin,
-                    tammed_ula=tammed_ula,
+                    tamed_ula=tamed_ula,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -273,7 +273,7 @@ def compute_mean_distance(
                     n_obs=n_obs,
                     cov_mode=cov_mode,
                     langevin=langevin,
-                    tammed_ula=tammed_ula,
+                    tamed_ula=tamed_ula,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -433,7 +433,7 @@ if __name__ == "__main__":
             method_names = ["GAUSS_cfg"]
         elif args.langevin_comparison:
             tasks_dict = TASKS_MAIN
-            method_names = ["LANGEVIN_tammed", "LANGEVIN_tammed_clip"]
+            method_names = ["LANGEVIN_tamed", "LANGEVIN_tamed_clip"]
         elif args.pf_nse:
             tasks_dict = TASKS_MAIN
             method_names = ["GAUSS", "LANGEVIN"]
@@ -445,7 +445,7 @@ if __name__ == "__main__":
             method_names = [
                 method
                 for method in method_names
-                if "cfg" not in method and "tammed" not in method
+                if "cfg" not in method and "tamed" not in method
             ]
 
         IGNORE_NUMS = {task_name: [] for task_name in tasks_dict.keys()}
@@ -467,7 +467,7 @@ if __name__ == "__main__":
                                     n_obs=n_obs,
                                     cov_mode=method.split("_")[0],
                                     langevin=True if "LANGEVIN" in method else False,
-                                    tammed_ula=True if "tammed" in method else False,
+                                    tamed_ula=True if "tamed" in method else False,
                                     clip=True if "clip" in method else False,
                                     clf_free_guidance=args.clf_free_guidance,
                                     pf_nse=args.pf_nse,
@@ -539,8 +539,8 @@ if __name__ == "__main__":
                 method_names = [
                     "LANGEVIN",
                     "LANGEVIN_clip",
-                    "LANGEVIN_tammed",
-                    "LANGEVIN_tammed_clip",
+                    "LANGEVIN_tamed",
+                    "LANGEVIN_tamed_clip",
                 ]
                 title_ext = "_lgv_comp"
             elif args.pf_nse:
@@ -549,11 +549,11 @@ if __name__ == "__main__":
             else:
                 tasks_dict = TASKS
                 method_names = METHODS_STYLE.keys()
-                # remove cfg and tammed
+                # remove cfg and tamed
                 method_names = [
                     method
                     for method in method_names
-                    if "cfg" not in method and "tammed" not in method
+                    if "cfg" not in method and "tamed" not in method
                 ]
                 title_ext = f"_{args.tasks}"
 
