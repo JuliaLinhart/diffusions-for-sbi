@@ -226,7 +226,7 @@ def compute_mean_distance(
         dist_list = []
         ignore_nums = []
         if metric in ["mmd", "swd", "c2st"]:
-            for num_obs in NUM_OBSERVATION_LIST:
+            for num_obs in tqdm(NUM_OBSERVATION_LIST, desc=f"Computing {metric}..."):
                 samples_ref = task.get_reference_posterior_samples(
                     num_obs, n_obs, verbose=False
                 )
@@ -255,7 +255,9 @@ def compute_mean_distance(
                     dist = torch.tensor(dist)
 
                 if metric == "c2st":
-                    dist = c2st(torch.tensor(np.array(samples_ref)), samples)
+                    # import ipdb; ipdb.set_trace()
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                    dist = c2st(torch.tensor(np.array(samples_ref)).to(device), samples.to(device))
 
                 dist_list.append(dist)
 
@@ -263,7 +265,7 @@ def compute_mean_distance(
                     ignore_nums.append(num_obs)
 
         if metric == "mmd_to_dirac":
-            for num_obs in NUM_OBSERVATION_LIST:
+            for num_obs in tqdm(NUM_OBSERVATION_LIST, desc=f"Computing {metric}..."):
                 # mmd to dirac
                 theta_true = task.get_reference_parameters(verbose=False)[num_obs - 1]
                 samples = load_samples(
@@ -338,6 +340,11 @@ if __name__ == "__main__":
         TASKS = TASKS_EXTRA
     else:
         TASKS = {**TASKS_MAIN, **TASKS_EXTRA}
+    
+    print("=====================================")
+    print(f"Generating results for tasks: {list(TASKS.keys())}")
+    print("=====================================")
+    print()
 
     if args.losses:
         lr_list = [1e-4, 1e-3]
@@ -448,18 +455,27 @@ if __name__ == "__main__":
                 if "cfg" not in method and "tamed" not in method
             ]
 
+        # remove "JAC" from methods
+        method_names = [method for method in method_names if "JAC" not in method]
+
+        metrics = ["mmd"] if args.mmd else []
+        metrics += ["swd"] if args.swd else []
+        metrics += ["mmd_to_dirac"] if args.dirac else []
+        metrics += ["c2st"] if args.c2st else []
+        if len(metrics) == 0:
+            metrics = METRICS
+
         IGNORE_NUMS = {task_name: [] for task_name in tasks_dict.keys()}
 
         final_ignore_nums = []
-        for metric in METRICS:
-            print(f"Computing {metric}...")
+        for metric in metrics:
             for task_name in tasks_dict.keys():
                 for n_train in N_TRAIN:
                     for n_obs in N_OBS:
                         for n_max in n_max_list:
                             for method in method_names:
                                 print(
-                                    f"{task_name}, {n_train}, {n_obs}, {n_max}, {method}"
+                                    f"{task_name}, n_train={n_train}, n_obs={n_obs}, n_max={n_max}, {method} ..."
                                 )
                                 dist, ignore_nums = compute_mean_distance(
                                     task_name=task_name,
@@ -478,7 +494,7 @@ if __name__ == "__main__":
                                 dist_mean = dist["mean"]
                                 dist_std = dist["std"]
                                 print(
-                                    f"{task_name}, {n_train}, {n_obs}, {n_max}, {method}: {dist_mean}, {dist_std}"
+                                    f"{task_name}, n_train={n_train}, n_obs={n_obs}, n_max={n_max}, {method}: {dist_mean}, {dist_std}"
                                 )
 
                                 if method == "GAUSS":
@@ -556,6 +572,9 @@ if __name__ == "__main__":
                     if "cfg" not in method and "tamed" not in method
                 ]
                 title_ext = f"_{args.tasks}"
+
+            # remove "JAC" from methods
+            method_names = [method for method in method_names if "JAC" not in method]
 
             if not args.pf_nse:
                 # plot mean distance as function of n_train
