@@ -190,7 +190,7 @@ def compute_mean_distance(
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
-    if load:
+    if load or os.path.exists(filename):
         dist_list_all = torch.load(filename)
         dist_list = []
 
@@ -198,7 +198,9 @@ def compute_mean_distance(
 
         for num_obs in NUM_OBSERVATION_LIST:
             dist = dist_list_all[num_obs - 1]
-            if num_obs not in prec_ignore_nums:
+            if load and num_obs not in prec_ignore_nums:
+                dist_list.append(dist)
+            else:
                 dist_list.append(dist)
             # ignore Nans
             if torch.isnan(dist):
@@ -217,7 +219,7 @@ def compute_mean_distance(
                 if dist > threshold:
                     ignore_nums.append(num_obs)
             # special case for SIR
-            if task_name == "sir":
+            if task_name == "sir" and 12 not in ignore_nums:
                 ignore_nums.append(12)
 
     else:
@@ -256,8 +258,12 @@ def compute_mean_distance(
 
                 if metric == "c2st":
                     # import ipdb; ipdb.set_trace()
-                    device = "cuda" if torch.cuda.is_available() else "cpu"
-                    dist = c2st(torch.tensor(np.array(samples_ref)).to(device), samples.to(device))
+                    try:
+                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        dist = c2st(torch.tensor(np.array(samples_ref)).to(device), samples.to(device))
+                    except ValueError:
+                        print(f"NaNs for num_obs = {num_obs}")
+                        dist = torch.tensor(float("nan"))
 
                 dist_list.append(dist)
 
@@ -296,7 +302,6 @@ def compute_mean_distance(
         torch.save(dist_list, filename)
 
     if not load:
-        print()
         print(f"Computed {metric} for {len(dist_list)} observations.")
         print(f"NaNs or Outliers in {len(ignore_nums)} observations: {ignore_nums}.")
 
@@ -340,13 +345,14 @@ if __name__ == "__main__":
         TASKS = TASKS_EXTRA
     else:
         TASKS = {**TASKS_MAIN, **TASKS_EXTRA}
-    
-    print("=====================================")
-    print(f"Generating results for tasks: {list(TASKS.keys())}")
-    print("=====================================")
-    print()
 
     if args.losses:
+
+        print("=====================================")
+        print(f"Loss Functions for tasks: {list(TASKS.keys())}")
+        print("=====================================")
+        print()
+
         lr_list = [1e-4, 1e-3]
         bs_list = [256, 64]
 
@@ -447,13 +453,18 @@ if __name__ == "__main__":
             N_OBS = [30]
             n_max_list = N_MAX_LIST
         else:
-            tasks_dict = {**TASKS_MAIN, **TASKS_EXTRA}
+            tasks_dict = TASKS
             method_names = METHODS_STYLE.keys()
             method_names = [
                 method
                 for method in method_names
                 if "cfg" not in method and "tamed" not in method
             ]
+
+        print("=====================================")
+        print(f"Computing Metrics for tasks: {list(tasks_dict.keys())}")
+        print("=====================================")
+        print()
 
         # remove "JAC" from methods
         method_names = [method for method in method_names if "JAC" not in method]
@@ -496,6 +507,7 @@ if __name__ == "__main__":
                                 print(
                                     f"{task_name}, n_train={n_train}, n_obs={n_obs}, n_max={n_max}, {method}: {dist_mean}, {dist_std}"
                                 )
+                                print()
 
                                 if method == "GAUSS":
                                     for num in ignore_nums:
@@ -572,6 +584,11 @@ if __name__ == "__main__":
                     if "cfg" not in method and "tamed" not in method
                 ]
                 title_ext = f"_{args.tasks}"
+
+            print("=====================================")
+            print(f"Generating results for tasks: {list(tasks_dict.keys())}")
+            print("=====================================")
+            print()
 
             # remove "JAC" from methods
             method_names = [method for method in method_names if "JAC" not in method]
