@@ -13,12 +13,11 @@ from plot_utils import (
 PATH_EXPERIMENT = "results/jrnnm/"
 DIMS = [3, 4]
 N_OBS = [1, 8, 14, 22, 30]
-METRICS = ["mmd_to_dirac"]
 N_EPOCHS = 5000
 LR = 1e-4
 
 method_names = ["GAUSS", "GAUSS_clip", "LANGEVIN", "LANGEVIN_clip", "JAC", "JAC_clip"]
-
+gain = 0.0
 
 def load_losses(dim, lr=LR, n_epochs=N_EPOCHS):
     filename = (
@@ -59,7 +58,7 @@ def load_results(
         )
     if single_obs is not None:
         path = (
-            path + f"single_obs/num_{i}_" + result_name + f"_{theta_true}_n_obs_1.pkl"
+            path + f"single_obs/num_{single_obs}_" + result_name + f"_{theta_true}_n_obs_1.pkl"
         )
     else:
         path = path + result_name + f"_{theta_true}_n_obs_{n_obs}.pkl"
@@ -69,6 +68,32 @@ def load_results(
         path = path[:-4] + "_clip.pkl"
     results = torch.load(path)
     return results
+
+def load_lc2st_results(
+    dim,
+    method,
+    n_obs,
+):
+    save_path = (
+        PATH_EXPERIMENT
+        + f"{dim}d/n_train_50000_n_epochs_{N_EPOCHS}_lr_{LR}/"
+    )
+
+    theta_true = [135.0, 220.0, 2000.0, 0.0][:dim]
+
+    if "GAUSS" in method:
+        sampler_path = "ddim_steps_1000/"
+        ext = f"_{method}"
+    elif "JAC" in method:
+        sampler_path = "ddim_steps_400/"
+        ext = f"_{method}"
+    else:
+        sampler_path = "langevin_steps_400_5/"
+        ext = "_clip" if "clip" in method else ""
+    lc2st_path = save_path + sampler_path + f"lc2st_results/"
+    
+    return torch.load(lc2st_path + f"results_ensemble_5_{theta_true}_lc2st_n_cal_10000_n_obs_{n_obs}{ext}.pkl")
+
 
 
 # compute mean distance to true theta over all observations
@@ -101,8 +126,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--losses", action="store_true")
     parser.add_argument("--dirac_dist", action="store_true")
+    parser.add_argument("--lc2st", action="store_true")
     parser.add_argument("--pairplot", action="store_true")
     parser.add_argument("--single_multi_obs", action="store_true")
+    parser.add_argument("--dim", type=int, default=3)
 
     args = parser.parse_args()
 
@@ -153,48 +180,82 @@ if __name__ == "__main__":
         plt.clf()
 
     if args.dirac_dist:
-        gain = 0.0
 
         # plot mean distance to true theta as function of n_obs
-        for metric in METRICS:
-            for i, dim in enumerate(DIMS):
-                fig, axs = plt.subplots(1, 1, figsize=(5, 5))
-                fig.subplots_adjust(
-                    right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.25
-                )
-                for method in method_names:
-                    if method == "JAC":
-                        continue
-                    else:
-                        dist_dict = compute_distance_to_true_theta(
-                            dim,
-                            cov_mode=method.split("_")[0],
-                            langevin=True if "LANGEVIN" in method else False,
-                            clip=True if "clip" in method else False,
-                        )
-                        axs.plot(
-                            N_OBS,
-                            [dist_dict[n_obs]["mmd"] for n_obs in N_OBS],
-                            alpha=alpha,
-                            **METHODS_STYLE[method],
-                        )
-                axs.set_xticks(N_OBS)
-                axs.set_xlabel(r"$n$")
-                axs.set_ylabel(f"{METRICS_STYLE[metric]['label']}")
-                if dim == 4:
-                    axs.set_ylim([0, 600])
-                # axs.legend()
-                # axs.set_title(rf"${dim}$D")
+        for i, dim in enumerate(DIMS):
+            fig, axs = plt.subplots(1, 1, figsize=(5, 5))
+            fig.subplots_adjust(
+                right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.25
+            )
+            for method in method_names:
+                if method == "JAC":
+                    continue
+                else:
+                    dist_dict = compute_distance_to_true_theta(
+                        dim,
+                        cov_mode=method.split("_")[0],
+                        langevin=True if "LANGEVIN" in method else False,
+                        clip=True if "clip" in method else False,
+                    )
+                    axs.plot(
+                        N_OBS,
+                        [dist_dict[n_obs]["mmd"] for n_obs in N_OBS],
+                        alpha=alpha,
+                        **METHODS_STYLE[method],
+                    )
+            axs.set_xticks(N_OBS)
+            axs.set_xlabel(r"$n$")
+            axs.set_ylabel(f"{METRICS_STYLE[metric]['label']}")
+            if dim == 4:
+                axs.set_ylim([0, 600])
+            # axs.legend()
+            # axs.set_title(rf"${dim}$D")
 
-                # plt.suptitle(rf"MMD to $\theta^\star = (135, 220, 2000, {gain})$")
-                plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs_g_{gain}_dim_{dim}.png")
-                plt.savefig(PATH_EXPERIMENT + f"{metric}_n_obs_g_{gain}_dim_{dim}.pdf")
-                plt.clf()
+            # plt.suptitle(rf"MMD to $\theta^\star = (135, 220, 2000, {gain})$")
+            plt.savefig(PATH_EXPERIMENT + f"mmd_to_dirac_n_obs_g_{gain}_dim_{dim}.png")
+            plt.savefig(PATH_EXPERIMENT + f"mmd_to_dirac_n_obs_g_{gain}_dim_{dim}.pdf")
+            plt.clf()
+    
+    if args.lc2st:
+        dim = args.dim
+
+        # load results
+        results_dict = {method: {} for method in method_names}
+        for method in method_names:
+            if method == "JAC":
+                continue
+            for n_obs in [1,8,14,22,30]:
+                results_dict[method][n_obs] = load_lc2st_results(dim, method, n_obs)
+
+        fig, axs = plt.subplots(1, 2, figsize=(15, 5), tight_layout=True)
+        for method in method_names:
+            if method == "JAC":
+                continue
+
+            t_stats_mean = [results_dict[method][n_obs]["scores_data"].mean() for n_obs in [1,8,14,22,30]]
+            t_stats_std = [results_dict[method][n_obs]["scores_data"].std() for n_obs in [1,8,14,22,30]]
+            p_values = [results_dict[method][n_obs]["p_value"] for n_obs in [1,8,14,22,30]]
+            axs[0].plot([1,8,14,22,30], t_stats_mean, **METHODS_STYLE[method])
+            axs[0].fill_between([1,8,14,22,30], [t_stats_mean[i] - t_stats_std[i] for i in range(5)], [t_stats_mean[i] + t_stats_std[i] for i in range(5)], alpha=0.2, color=METHODS_STYLE[method]["color"])
+            axs[1].plot([1,8,14,22,30], p_values, **METHODS_STYLE[method])
+        axs[1].axhline(0.05, color="black", label="significance level", linewidth=3, linestyle="--")
+
+        axs[0].set_xticks([1,8,14,22,30])
+        axs[1].set_xticks([1,8,14,22,30])
+        axs[0].set_xlabel(r"$n$")
+        axs[1].set_xlabel(r"$n$")
+        axs[0].set_ylim(-0.01, 0.25)
+        axs[1].set_ylim(-0.01, 1)
+        axs[0].set_title(r"$\ell$-C2ST statistics")
+        axs[1].set_title("p-values")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.savefig(PATH_EXPERIMENT + f"lc2st_results_dim_{dim}.png")
+        plt.savefig(PATH_EXPERIMENT + f"lc2st_results_dim_{dim}.pdf")
+
 
     if args.pairplot:
         from matplotlib import colormaps as cm
 
-        gain = 0.0
         method = "GAUSS"
         for dim in DIMS:
             theta_true = [135.0, 220.0, 2000.0, gain]
@@ -229,100 +290,109 @@ if __name__ == "__main__":
         import seaborn as sns
 
         colors = [cm.get_cmap("viridis")(i) for i in torch.linspace(0.2, 1, len(N_OBS))]
-        gain = 0.0
         method = "GAUSS"
-        for dim in DIMS:
-            theta_true = [135.0, 220.0, 2000.0, gain]
-            param_names = ["$C$", "$\mu$", "$\sigma$", "$g$"]
-            if dim == 3:
-                theta_true = theta_true[:3]
-                param_names = param_names[:3]
+        dim = 3
 
-            # for j, n_obs in enumerate(N_OBS):
-            #     if n_obs == 1:
-            #         continue
-            #     else:
-            #         samples = load_results(
-            #             dim,
-            #             result_name="posterior_samples",
-            #             n_obs=n_obs,
-            #             gain=gain,
-            #             cov_mode=method.split("_")[0],
-            #             langevin=True if "LANGEVIN" in method else False,
-            #             clip=True if "clip" in method else False,
-            #         )
-            n_obs = 30
-            fig, axs = plt.subplots(1, dim, figsize=(5 * dim, 5))
-            fig.subplots_adjust(
-                right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+        theta_true = [135.0, 220.0, 2000.0, gain]
+        param_names = ["$C$", "$\mu$", "$\sigma$", "$g$"]
+        if dim == 3:
+            theta_true = theta_true[:3]
+            param_names = param_names[:3]
+
+        n_obs = 30
+        fig, axs = plt.subplots(1, dim, figsize=(5 * dim, 5))
+        fig.subplots_adjust(
+            right=0.995, top=0.92, bottom=0.2, hspace=0, wspace=0, left=0.1
+        )
+        for i in range(n_obs):
+            samples_single = load_results(
+                dim,
+                result_name="posterior_samples",
+                n_obs=n_obs,
+                gain=gain,
+                cov_mode=method.split("_")[0],
+                langevin=True if "LANGEVIN" in method else False,
+                clip=True if "clip" in method else False,
+                single_obs=i,
             )
-            for i in range(n_obs):
-                samples_single = load_results(
-                    dim,
-                    result_name="posterior_samples",
-                    n_obs=n_obs,
-                    gain=gain,
-                    cov_mode=method.split("_")[0],
-                    langevin=True if "LANGEVIN" in method else False,
-                    clip=True if "clip" in method else False,
-                    single_obs=i,
-                )
-                for k in range(dim):
-                    # plot density of marginals
-                    if k == 2 and i == 0:
-                        sns.kdeplot(
-                            samples_single[:, k],
-                            alpha=0.1,
-                            color=colors[0],
-                            ax=axs[k],
-                            linewidth=3,
-                            fill=True,
-                            label=rf"$n=1$",
-                        )
-                    else:
-                        sns.kdeplot(
-                            samples_single[:, k],
-                            alpha=0.1,
-                            color=colors[0],
-                            ax=axs[k],
-                            linewidth=3,
-                            fill=True,
-                        )
-                axs[k].legend()
-            for j, n_obs in enumerate(N_OBS[1:]):
-                samples = load_results(
-                    dim,
-                    result_name="posterior_samples",
-                    n_obs=n_obs,
-                    gain=gain,
-                    cov_mode=method.split("_")[0],
-                    langevin=True if "LANGEVIN" in method else False,
-                    clip=True if "clip" in method else False,
-                )
-
-                for k, name in enumerate(param_names):
+            for k in range(dim):
+                # plot density of marginals
+                if k == 2 and i == 0:
                     sns.kdeplot(
-                        samples[:, k],
+                        samples_single[:, k],
                         alpha=0.1,
-                        label=rf"$n={n_obs}$",
-                        color=colors[j + 1],
+                        color=colors[0],
+                        ax=axs[k],
+                        linewidth=3,
+                        fill=True,
+                        label=rf"$n=1$",
+                    )
+                else:
+                    sns.kdeplot(
+                        samples_single[:, k],
+                        alpha=0.1,
+                        color=colors[0],
                         ax=axs[k],
                         linewidth=3,
                         fill=True,
                     )
-                    # line for theta_true
-                    axs.ravel()[k].axvline(
-                        theta_true[k], ls="--", linewidth=3, c="black"
-                    )
-                    axs[k].set_xlabel(name)
-                    axs[k].set_ylabel("")
-                    # emply list for ytick labels
-                    axs[k].set_yticklabels([])
-                axs[k].legend()
-            plt.savefig(
-                PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.png"
+            axs[k].legend()
+        for j, n_obs in enumerate(N_OBS[1:]):
+            samples = load_results(
+                dim,
+                result_name="posterior_samples",
+                n_obs=n_obs,
+                gain=gain,
+                cov_mode=method.split("_")[0],
+                langevin=True if "LANGEVIN" in method else False,
+                clip=True if "clip" in method else False,
             )
-            plt.savefig(
-                PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.pdf"
-            )
-            plt.clf()
+
+            for k, name in enumerate(param_names):
+                sns.kdeplot(
+                    samples[:, k],
+                    alpha=0.1,
+                    label=rf"$n={n_obs}$",
+                    color=colors[j + 1],
+                    ax=axs[k],
+                    linewidth=3,
+                    fill=True,
+                )
+                # line for theta_true
+                axs.ravel()[k].axvline(
+                    theta_true[k], ls="--", linewidth=3, c="black"
+                )
+                axs[k].set_xlabel(name)
+                axs[k].set_ylabel("")
+                # emply list for ytick labels
+                axs[k].set_yticklabels([])
+            axs[k].legend()
+        plt.savefig(
+            PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.png"
+        )
+        plt.savefig(
+            PATH_EXPERIMENT + f"single_multi_obs_{method}_g_{gain}_{dim}d.pdf"
+        )
+        plt.clf()
+
+
+    # dim = 4
+    # gain_list = [-10., 0., 10.]
+    # theta_true_list = [[135.0, 220.0, 2000.0, gain] for gain in gain_list]
+    # samples = []
+    # labels = []
+    # for gain in gain_list:
+    #     samples_ = load_results(
+    #         dim,
+    #         result_name="posterior_samples",
+    #         n_obs=1,
+    #         gain=gain,
+    #         cov_mode="GAUSS"
+    #     )
+    #     samples.append(samples_)
+    #     labels.append(r"$g_\mathrm{o}$"+rf"$={gain}$")
+    # colors = ['#32327B', '#3838E2', '#52A9F5']
+    # plot_pairgrid_with_groundtruth_jrnnm(samples, theta_true_list, labels, colors)
+    # plt.savefig(PATH_EXPERIMENT + f"pairplot_GAUSS_varying_gain_{dim}d.png")
+    # plt.savefig(PATH_EXPERIMENT + f"pairplot_GAUSS_varying_gain_{dim}d.pdf")
+    # plt.clf()

@@ -136,6 +136,7 @@ class LC2ST:
         theta_q: Tensor,
         x_p: Tensor,
         x_q: Tensor,
+        n_ensemble: int = 1,
         verbosity: int = 0,
     ) -> List[Any]:
         """Returns the classifiers trained on observed data.
@@ -145,6 +146,8 @@ class LC2ST:
             theta_q: Samples from Q, of shape (sample_size, dim).
             x_p: Observations corresponding to P, of shape (sample_size, dim_x).
             x_q: Observations corresponding to Q, of shape (sample_size, dim_x).
+            n_ensemble: Number of classifiers to train for the ensemble, 
+                defaults to 1.
             verbosity: Verbosity level, defaults to 0.
 
         Returns:
@@ -182,10 +185,10 @@ class LC2ST:
                 trained_clfs.append(clf_n)
 
         # ensembling
-        if self.n_ensemble > 1:
+        if n_ensemble > 1:
             trained_clfs = []
             for n in tqdm(
-                range(self.n_ensemble), desc="Ensembling", disable=verbosity < 1
+                range(n_ensemble), desc="Ensembling", disable=verbosity < 1
             ):
                 # set random state and initialize classifier
                 if "random_state" in self.clf_kwargs:
@@ -244,11 +247,11 @@ class LC2ST:
         else:
             return scores
 
-    def train_on_observed_data(self) -> None:
+    def train_on_observed_data(self, verbosity=1) -> None:
         """Train the classifiers on the observed data.
         Saves the trained classifiers.
         """
-        trained_clfs = self._train(self.theta_p, self.theta_q, self.x_p, self.x_q)
+        trained_clfs = self._train(self.theta_p, self.theta_q, self.x_p, self.x_q, n_ensemble=self.n_ensemble, verbosity=verbosity)
         self.trained_clfs = trained_clfs
 
     def get_scores_on_observed_data(
@@ -307,6 +310,7 @@ class LC2ST:
         self,
         theta_o: Tensor,
         x_o: Tensor,
+        verbosity: int = 0,
     ) -> float:
         r"""Computes the p-value for L-C2ST.
 
@@ -327,7 +331,7 @@ class LC2ST:
             theta_o=theta_o, x_o=x_o, return_probs=True
         )
         _, stats_null = self.get_statistics_under_null_hypothesis(
-            theta_o=theta_o, x_o=x_o, return_probs=True, verbosity=0
+            theta_o=theta_o, x_o=x_o, return_probs=True, verbosity=verbosity
         )
         return (stat_data < stats_null).mean()
 

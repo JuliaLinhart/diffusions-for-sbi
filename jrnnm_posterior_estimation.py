@@ -16,7 +16,6 @@ from zuko.nn import MLP
 from tall_posterior_sampler import diffused_tall_posterior_score, euler_sde_sampler, tweedies_approximation
 from vp_diffused_priors import get_vpdiff_uniform_score
 
-from lc2st import LC2ST
 
 PATH_EXPERIMENT = "results/jrnnm/"
 N_OBS_LIST = [1, 8, 14, 22, 30]
@@ -33,7 +32,7 @@ def run_train_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:0"
 
     # Prepare training data
     theta_train, x_train = data_train["theta"], data_train["x"]
@@ -131,7 +130,7 @@ def run_sample_sgm(
     # Set Device
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:0"
 
     # normalize context
     context_norm = (context - x_train_mean) / x_train_std
@@ -247,7 +246,7 @@ def run_sample_sgm(
                 # ), randomness='different')(context_norm.to(device))
 
                 # split context into batches
-                b_size = 2000 if n_obs == 1 else 200 if n_obs == 8 else 100 if n_obs in [14,22] else 50 if n_obs == 30 else 1
+                b_size = 2000 if n_obs == 1 else 200 if n_obs == 8 else 100 if n_obs == 14 else 50 if n_obs in [22, 30] else 1
                 context_norm_b = context_norm.reshape(-1, b_size, n_obs, context_norm.shape[-1])
                 cov_est = []
                 for batch in tqdm(context_norm_b, desc="Estimating Covariance on calibration data over batches"):
@@ -255,9 +254,11 @@ def run_sample_sgm(
                         cov_est_fn,
                         randomness="different",
                     ), randomness='different')(batch.to(device))
+                    assert torch.isnan(cov_).sum() == 0, f"Number of NaNs in cov est: {torch.isnan(cov_).sum()}, {torch.where(torch.isnan(cov_))}"
                     cov_est.append(cov_)
                 cov_est = torch.cat(cov_est, dim=0)
                 cov_est = vmap(vmap(lambda x: torch.cov(x.mT)))(cov_est)
+            assert torch.isnan(cov_est).sum() == 0, f"Number of NaNs in cov est: {torch.isnan(cov_est).sum()}, {torch.where(torch.isnan(cov_est))}"
             print(f"cov est shape: {cov_est.shape}")
             print()
 
@@ -322,8 +323,6 @@ def run_sample_sgm(
                 theta_clipping_range=theta_clipping_range,
             )
 
-        assert torch.isnan(samples).sum() == 0, f"Number of NaNs: {torch.isnan(samples).sum()}"
-
         # save  path
         if n_cal is None:
             if single_obs is not None:
@@ -342,6 +341,16 @@ def run_sample_sgm(
                 save_path
                 + f"posterior_samples_n_cal_{n_cal}_n_obs_{n_obs}_{cov_mode_name}.pkl"
             )
+
+    if torch.isnan(samples).sum() != 0:
+        print(f"Number of NaNs in samples: {torch.isnan(samples).sum()}, {torch.where(torch.isnan(samples))}")
+        # replace NaNs with mean if it's less than 10% of the samples
+        theshold = 0.1 * samples.shape[0] * samples.shape[1]
+        if torch.isnan(samples).sum() < threshold:
+            samples_new = torch.where(torch.isnan(samples),0,samples)
+            samples = torch.where(samples_new == 0,samples_new.mean(axis=0), samples_new)
+
+    assert torch.isnan(samples).sum() == 0, f"Number of NaNs in samples: {torch.isnan(samples).sum()}, {torch.where(torch.isnan(samples))}"
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -488,8 +497,8 @@ if __name__ == "__main__":
             filename = PATH_EXPERIMENT + f"dataset_n_train_50000_3d.pkl"
         # if os.path.exists(filename):
         dataset_train = torch.load(filename)
-        theta_train = dataset_train["theta"][: args.n_train]
-        x_train = dataset_train["x"][: args.n_train]
+        # theta_train = dataset_train["theta"][: args.n_train]
+        # x_train = dataset_train["x"][: args.n_train]
         # else:
         #     print("==============================================================================")
         #     print(f"Sampling training data.")
@@ -503,17 +512,17 @@ if __name__ == "__main__":
         #         "theta": theta_train, "x": x_train
         #     }
         #     torch.save(dataset_train, filename)
-        theta_train_mean = theta_train.mean(dim=0)
-        theta_train_std = theta_train.std(dim=0)
-        x_train_mean = x_train.mean(dim=0)
-        x_train_std = x_train.std(dim=0)
-        means_stds_dict = {
-            "theta_train_mean": theta_train_mean,
-            "theta_train_std": theta_train_std,
-            "x_train_mean": x_train_mean,
-            "x_train_std": x_train_std,
-        }
-        torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
+        # theta_train_mean = theta_train.mean(dim=0)
+        # theta_train_std = theta_train.std(dim=0)
+        # x_train_mean = x_train.mean(dim=0)
+        # x_train_std = x_train.std(dim=0)
+        # means_stds_dict = {
+        #     "theta_train_mean": theta_train_mean,
+        #     "theta_train_std": theta_train_std,
+        #     "x_train_mean": x_train_mean,
+        #     "x_train_std": x_train_std,
+        # }
+        # torch.save(means_stds_dict, save_path + f"train_means_stds_dict.pkl")
 
         if run_type == "train":
             run_fn = run_train_sgm
