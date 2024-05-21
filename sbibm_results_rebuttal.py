@@ -198,8 +198,9 @@ def compute_mean_distance(
 
         for num_obs in NUM_OBSERVATION_LIST:
             dist = dist_list_all[num_obs - 1]
-            if load and num_obs not in prec_ignore_nums:
-                dist_list.append(dist)
+            if load:
+                if num_obs not in prec_ignore_nums:
+                    dist_list.append(dist)
             else:
                 dist_list.append(dist)
             # ignore Nans
@@ -259,7 +260,7 @@ def compute_mean_distance(
                 if metric == "c2st":
                     # import ipdb; ipdb.set_trace()
                     try:
-                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        device = "cuda:0" if torch.cuda.is_available() else "cpu"
                         dist = c2st(torch.tensor(np.array(samples_ref)).to(device), samples.to(device))
                     except ValueError:
                         print(f"NaNs for num_obs = {num_obs}")
@@ -348,9 +349,9 @@ if __name__ == "__main__":
 
     if args.losses:
 
-        print("=====================================")
+        print("==============================================================")
         print(f"Loss Functions for tasks: {list(TASKS.keys())}")
-        print("=====================================")
+        print("==============================================================")
         print()
 
         lr_list = [1e-4, 1e-3]
@@ -461,13 +462,14 @@ if __name__ == "__main__":
                 if "cfg" not in method and "tamed" not in method
             ]
 
-        print("=====================================")
+        print("==============================================================")
         print(f"Computing Metrics for tasks: {list(tasks_dict.keys())}")
-        print("=====================================")
+        print("==============================================================")
         print()
 
         # remove "JAC" from methods
-        method_names = [method for method in method_names if "JAC" not in method]
+        method_names = [method for method in method_names if method != "JAC"]
+        # method_names = ["JAC_clip"]
 
         metrics = ["mmd"] if args.mmd else []
         metrics += ["swd"] if args.swd else []
@@ -531,6 +533,7 @@ if __name__ == "__main__":
             not args.clf_free_guidance
             and not args.langevin_comparison
             and not args.pf_nse
+            and "mmd" in metrics and "swd" in metrics
         ):
             torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
             torch.save(
@@ -585,13 +588,13 @@ if __name__ == "__main__":
                 ]
                 title_ext = f"_{args.tasks}"
 
-            print("=====================================")
+            print("==============================================================")
             print(f"Generating results for tasks: {list(tasks_dict.keys())}")
-            print("=====================================")
+            print("==============================================================")
             print()
 
             # remove "JAC" from methods
-            method_names = [method for method in method_names if "JAC" not in method]
+            method_names = [method for method in method_names if method != "JAC"]
 
             if not args.pf_nse:
                 # plot mean distance as function of n_train
@@ -650,7 +653,7 @@ if __name__ == "__main__":
 
     if args.plot_samples:
         n_train = 30000
-        task_name = "slcp"
+        task_name = "lotka_volterra"
         task = get_task(task_name, save_path="tasks/sbibm/data/")
         save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
@@ -661,8 +664,8 @@ if __name__ == "__main__":
         for num_obs in np.arange(1, 26):
             theta_true = task.get_reference_parameters(verbose=False)[num_obs - 1]
             for method, color in zip(
-                ["TRUE", "GAUSS", "JAC_clip", "LANGEVIN"],
-                ["Greens", "Blues", "Oranges", "Reds"],
+                ["TRUE", "GAUSS"], #, "JAC_clip", "LANGEVIN"],
+                ["Greens", "Blues"], #, "Oranges", "Reds"],
             ):
                 samples = []
                 for n_obs in N_OBS:

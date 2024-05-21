@@ -264,6 +264,8 @@ def set_axs_lims_sbibm(metric, ax, task_name):
             ax.set_ylim([0, 2])
         if task_name == "gaussian_linear":
             ax.set_ylim([0, 6])
+    elif metric == "c2st":
+        ax.set_ylim([0.5, 1.1])
     else:
         ax.set_ylim([0, 1])
 

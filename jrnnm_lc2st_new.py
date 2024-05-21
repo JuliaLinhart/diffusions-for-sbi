@@ -3,7 +3,7 @@ import torch
 
 from functools import partial
 
-from lc2st import LC2ST
+from lc2st_new import LC2ST
 
 PATH_EXPERIMENT = "results/jrnnm/"
 # parameters for the trained score network
@@ -68,12 +68,19 @@ if __name__ == "__main__":
         "--run",
         type=str,
         default="train_data",
-        choices=["train_data", "train_null", "eval_data", "eval_null"],
+        choices=["train_data", "train_null", "train_all", "eval_data", "eval_null"],
         help="run type",
     )
 
     parser.add_argument(
-        "--n_ensemble",
+        "--n_seeds",
+        type=int,
+        default=5,
+        help="number of runs with different seeding for the classifier trained on observed data",
+    )
+
+    parser.add_argument(
+        "--num_ensemble",
         type=int,
         default=5,
         help="number of classifiers in ensemble",
@@ -154,7 +161,7 @@ if __name__ == "__main__":
         print("save_path:", save_path)
         print()
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
         print("====================================================================")
         print(f"L-C2ST on {args.theta_dim}D JRNMM: n_cal = {args.n_cal}, n_obs = {n_obs}")
@@ -192,10 +199,10 @@ if __name__ == "__main__":
         print("samples_cal: ", samples_cal.shape)
         print()
 
-        lc2st_path = sampler_path + f"lc2st_results/"
+        lc2st_path = sampler_path + f"lc2st_results_new/"
         os.makedirs(lc2st_path, exist_ok=True)
 
-        filename = f"lc2st_n_cal_{args.n_cal}_n_obs_{n_obs}.pkl"
+        filename = f"lc2st_ensemble_{args.num_ensemble}_n_cal_{args.n_cal}_n_obs_{n_obs}.pkl"
         if not args.langevin:
             filename = filename[:-4] + f"_{args.cov_mode}.pkl"
         if args.clip:
@@ -213,19 +220,29 @@ if __name__ == "__main__":
                 thetas=theta_cal.to(device),
                 xs=x_cal.reshape(args.n_cal, -1).to(device),
                 posterior_samples=samples_cal.to(device),
-                n_ensemble=args.n_ensemble,
+                num_ensemble=args.num_ensemble,
                 classifier="mlp",
             )
-        lc2st.n_ensemble = args.n_ensemble
 
+        if os.path.exists(lc2st_path + f"clfs_data_" + filename):
+            clfs_data = torch.load(lc2st_path + f"clfs_data_" + filename)
+        else:
+            clfs_data = []
+        
         if "train" in run_type:
-            print("Training on observed data...")
-            print()
-            _ = lc2st.train_on_observed_data()
-            if "null" in run_type:
+            if "data" in run_type or "all" in run_type:
+                print("Training on observed data...")
+                print()
+                for n in range(len(clfs_data), args.n_seeds):
+                    print(f"Seeding {n+1}/{args.n_seeds}:")
+                    _ = lc2st.train_on_observed_data(seed=n*args.num_ensemble+1)
+                    clfs_data.append(lc2st.trained_clfs)
+                    torch.save(clfs_data, lc2st_path + f"clfs_data_" + filename)
+
+            if "null" in run_type or "all" in run_type:
                 _ = lc2st.train_under_null_hypothesis()
             torch.save(lc2st, lc2st_path + filename)
-
+    
         elif "eval" in run_type:
             # Observations
             theta_true = [135.0, 220.0, 2000.0, args.gain]
@@ -243,23 +260,25 @@ if __name__ == "__main__":
                 langevin=args.langevin,
                 clip=args.clip,
             )
-            probs_data, scores_data = lc2st.get_scores_on_observed_data(theta_o=samples_obs, x_o=x_obs.reshape(-1), return_probs=True,)
-            ensemble_probs = probs_data.mean(axis=0)
-            ensemble_stat = ((ensemble_probs - [0.5] * len(ensemble_probs)) ** 2).mean()
+            
+            print(f"Evaluating on observed data...")
+            stats_data = []
+            for n in range(args.n_seeds):
+                lc2st.trained_clfs = clfs_data[n]
+                stat_data = lc2st.get_statistic_on_observed_data(theta_o=samples_obs, x_o=x_obs.reshape(-1))
+                stats_data.append(stat_data)
 
-            results_dict = {"scores_data": scores_data, "ensemble_stat": ensemble_stat}
+            results_dict = {"stats_data": stats_data}
 
             if "null" in run_type:
                 scores_null = lc2st.get_statistics_under_null_hypothesis(theta_o=samples_obs, x_o=x_obs.reshape(-1), verbosity=1)
                 results_dict["scores_null"] = scores_null
 
                 p_values = []
-                for stat_data in scores_data:
-                    p_values.append((stat_data < scores_null).mean())
+                for stat_data in stats_data:
+                    p_value = (stat_data < scores_null).mean()
+                    p_values.append(p_value)
                 results_dict["p_values"] = p_values
-
-                ensemble_p_value = (ensemble_stat < scores_null).mean()
-                results_dict["ensemble_p_value"] = ensemble_p_value
 
             print()
             print("Results: ")
@@ -267,10 +286,9 @@ if __name__ == "__main__":
                 if key == "scores_null":
                     continue
                 print(f"{key}: {value}")
-            import ipdb; ipdb.set_trace()
 
-            torch.save(results_dict, lc2st_path + f"results_ensemble_{args.n_ensemble}_{theta_true}_" + filename)
-            print("Saved at: ", lc2st_path + f"results_ensemble_{args.n_ensemble}_{theta_true}_" + filename)
+            torch.save(results_dict, lc2st_path + f"results_{theta_true}_" + filename)
+            print("Saved at: ", lc2st_path + f"results_{theta_true}_" + filename)
 
     if args.all_nobs:
         for n_obs in N_OBS_LIST:

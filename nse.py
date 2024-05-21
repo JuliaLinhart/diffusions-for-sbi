@@ -512,7 +512,6 @@ class NSE(nn.Module):
         # Defining variables
         n_observations = x.shape[0] if len(x.shape) > 1 else 1
         n_samples = theta.shape[0]
-        theta_ = theta.clone().requires_grad_(True)
 
         # Calculating m, Sigma and scores for the posteriors
         if self.net_type == "fnet":
@@ -540,7 +539,6 @@ class NSE(nn.Module):
         else:
             prior_score = prior_score_fun(theta[None], t)[0]
         aggregated_score = (1 - n_observations) * prior_score + scores.sum(axis=1)
-        theta_.detach()
         return aggregated_score
 
     def factorized_score(

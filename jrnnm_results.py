@@ -1,5 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
+import numpy as np
 
 # from ot import sliced_wasserstein_distance
 from experiment_utils import dist_to_dirac
@@ -90,9 +91,9 @@ def load_lc2st_results(
     else:
         sampler_path = "langevin_steps_400_5/"
         ext = "_clip" if "clip" in method else ""
-    lc2st_path = save_path + sampler_path + f"lc2st_results/"
+    lc2st_path = save_path + sampler_path + f"lc2st_results_new/"
     
-    return torch.load(lc2st_path + f"results_ensemble_5_{theta_true}_lc2st_n_cal_10000_n_obs_{n_obs}{ext}.pkl")
+    return torch.load(lc2st_path + f"results_{theta_true}_lc2st_ensemble_1_n_cal_10000_n_obs_{n_obs}{ext}.pkl")
 
 
 
@@ -232,12 +233,14 @@ if __name__ == "__main__":
             if method == "JAC":
                 continue
 
-            t_stats_mean = [results_dict[method][n_obs]["scores_data"].mean() for n_obs in [1,8,14,22,30]]
-            t_stats_std = [results_dict[method][n_obs]["scores_data"].std() for n_obs in [1,8,14,22,30]]
-            p_values = [results_dict[method][n_obs]["p_value"] for n_obs in [1,8,14,22,30]]
+            t_stats_mean = [np.mean(results_dict[method][n_obs]["stats_data"]) for n_obs in [1,8,14,22,30]]
+            t_stats_std = [np.std(results_dict[method][n_obs]["stats_data"]) for n_obs in [1,8,14,22,30]]
+            p_values_mean = [np.mean(results_dict[method][n_obs]["p_values"]) for n_obs in [1,8,14,22,30]]
+            p_values_std = [np.std(results_dict[method][n_obs]["p_values"]) for n_obs in [1,8,14,22,30]]
             axs[0].plot([1,8,14,22,30], t_stats_mean, **METHODS_STYLE[method])
             axs[0].fill_between([1,8,14,22,30], [t_stats_mean[i] - t_stats_std[i] for i in range(5)], [t_stats_mean[i] + t_stats_std[i] for i in range(5)], alpha=0.2, color=METHODS_STYLE[method]["color"])
-            axs[1].plot([1,8,14,22,30], p_values, **METHODS_STYLE[method])
+            axs[1].plot([1,8,14,22,30], p_values_mean, **METHODS_STYLE[method])
+            axs[1].fill_between([1,8,14,22,30], [p_values_mean[i] - p_values_std[i] for i in range(5)], [p_values_mean[i] + p_values_std[i] for i in range(5)], alpha=0.2, color=METHODS_STYLE[method]["color"])
         axs[1].axhline(0.05, color="black", label="significance level", linewidth=3, linestyle="--")
 
         axs[0].set_xticks([1,8,14,22,30])
