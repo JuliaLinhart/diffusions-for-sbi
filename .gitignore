@@ -4,8 +4,10 @@ __pycache__/
 .DS_Store
 
 /results/jrnnm/4d/*/euler*/*
-/results/jrnnm/4d/*/langevin*/*
-/results/jrnnm/4d/*/ddim*/*
+/results/jrnnm/4d/*/langevin*/posterior*.pkl
+/results/jrnnm/4d/*/langevin*/single_obs/*
+/results/jrnnm/4d/*/ddim*/posterior*.pkl
+/results/jrnnm/4d/*/ddim*/single_obs/*
 /results/jrnnm/dataset*.pkl
 /results/jrnnm/3d/*/euler*/*
 /results/jrnnm/3d/*/langevin*/*

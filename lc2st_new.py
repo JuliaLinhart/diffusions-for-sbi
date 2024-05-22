@@ -1,3 +1,6 @@
+# Code taken from the sbi toolbox at:
+# https://github.com/sbi-dev/sbi/blob/main/sbi/diagnostics/lc2st.py
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -754,11 +757,10 @@ def permute_data(
 
 
 class EnsembleClassifier(BaseEstimator):
-    def __init__(self, clf, num_ensemble=1, verbosity=1, device="cpu"):
+    def __init__(self, clf, num_ensemble=1, verbosity=1):
         self.clf = clf
         self.num_ensemble = num_ensemble
         self.trained_clfs = []
-        self.device = device
         self.verbosity = verbosity
 
     def fit(self, X, y):
@@ -778,5 +780,3 @@ class EnsembleClassifier(BaseEstimator):
     def predict_proba(self, X):
         probas = [clf.predict_proba(X) for clf in self.trained_clfs]
         return np.mean(probas, axis=0)
-
-    
