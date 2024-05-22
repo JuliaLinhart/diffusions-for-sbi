@@ -1,9 +1,7 @@
 import os
 import torch
 
-from functools import partial
-
-from lc2st_new import LC2ST
+from lc2st import LC2ST
 
 PATH_EXPERIMENT = "results/jrnnm/"
 # parameters for the trained score network
@@ -199,7 +197,7 @@ if __name__ == "__main__":
         print("samples_cal: ", samples_cal.shape)
         print()
 
-        lc2st_path = sampler_path + f"lc2st_results_new/"
+        lc2st_path = sampler_path + f"lc2st_results/"
         os.makedirs(lc2st_path, exist_ok=True)
 
         filename = f"lc2st_ensemble_{args.num_ensemble}_n_cal_{args.n_cal}_n_obs_{n_obs}.pkl"

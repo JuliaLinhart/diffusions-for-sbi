@@ -91,7 +91,7 @@ def load_lc2st_results(
     else:
         sampler_path = "langevin_steps_400_5/"
         ext = "_clip" if "clip" in method else ""
-    lc2st_path = save_path + sampler_path + f"lc2st_results_new/"
+    lc2st_path = save_path + sampler_path + f"lc2st_results/"
     
     return torch.load(lc2st_path + f"results_{theta_true}_lc2st_ensemble_1_n_cal_10000_n_obs_{n_obs}{ext}.pkl")
 

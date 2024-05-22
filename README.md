@@ -1,7 +1,5 @@
 # diffusions-for-sbi
 
-# diffusions-for-sbi
-
 Offical Code for the paper "Diffusion posterior sampling for simulation-based inference in tall data settings".
 
 ## Requirements
