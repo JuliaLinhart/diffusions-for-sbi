@@ -128,7 +128,7 @@ Precomputed results can be found at the above mentioned directory under the file
 - To reproduce the figures run `python jrnnm_results.py` with the arguments `lc2st` and `--dirac_dist` for the plots respectively associated to the $\ell$-C2ST results and posterior concentration quantified with the `MMD to Dirac` metric, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
 
 
-### New features: classifier-free guidance and PF-NPSE
+### New features: Classifier-free guidance and Partial Factorization (Appendix L)
 
 Two main features have been added to extend our proposition:
 - **Classifier-free guidance:** it is possible to implicitly **learn the prior score** by randomly dropping the context variables during the training of the posterior score. This is useful in cases where the diffused prior score cannot be computed analytically. To do so, specify the "drop rate" in the `classifier_free_guidance` variable of the training function implemented in `sm_utils.py`.
