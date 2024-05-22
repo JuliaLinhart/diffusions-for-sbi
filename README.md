@@ -113,7 +113,7 @@ and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `-
 ```
 python jrnnm_lc2st.py --run <train_data, train_null> --all_nobs
 ```
-Pretrained "data" classifiers and `LC2ST` objects with pretrained "null" classifiers can be found at the above mentioned directory under the filenames `clfs_data...` and `lc2st_...`. 
+Pretrained "data" classifiers can be found at the above mentioned directory under the filenames `clfs_data...`. (The "null" classifiers (there are 100) take-up too much memory and we only save the corresponding test statistics).
 
 Then compute the test statistics/p-values by running:
 ```
@@ -121,7 +121,7 @@ python jrnnm_lc2st.py --run <eval_data, eval_null> --all_nobs
 ```
 Again, in each case you should add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which sampling algorithm should be evaluated. 
 
-Precomputed results can be found at the above mentioned directory under the filenames `results_lc2st...`.
+Precomputed results can be found at the above mentioned directory under the filenames `results_lc2st...`, which includes the test statistics computed over all trials under the null hypothesis, the test statistics for the observed data and the corresponding p-values.
 
 #### Figures
   
