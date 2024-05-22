@@ -63,7 +63,7 @@ N_OBS = [1, 8, 14, 22, 30]
 NUM_OBSERVATION_LIST = list(np.arange(1, 26))
 N_MAX_LIST = [3, 6, 30]  # for pf_nse
 
-METRICS = ["mmd", "swd", "mmd_to_dirac"]
+METRICS = ["mmd", "swd", "c2st"]
 
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS, batch_size=BATCH_SIZE):
@@ -469,7 +469,6 @@ if __name__ == "__main__":
 
         # remove "JAC" from methods
         method_names = [method for method in method_names if method != "JAC"]
-        # method_names = ["JAC_clip"]
 
         metrics = ["mmd"] if args.mmd else []
         metrics += ["swd"] if args.swd else []
@@ -535,17 +534,17 @@ if __name__ == "__main__":
             and not args.pf_nse
             and "mmd" in metrics and "swd" in metrics
         ):
-            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task.pkl")
+            torch.save(IGNORE_NUMS, PATH_EXPERIMENT + f"ignore_nums_per_task_{args.tasks}.pkl")
             torch.save(
                 final_ignore_nums,
-                PATH_EXPERIMENT + f"ignore_nums_final.pkl",
+                PATH_EXPERIMENT + f"ignore_nums_final_{args.tasks}.pkl",
             )
 
     if args.plot_dist:
         prec_ignore_nums = torch.load(
             # PATH_EXPERIMENT + f"ignore_nums_final.pkl"
             PATH_EXPERIMENT
-            + f"ignore_nums_per_task.pkl"
+            + f"ignore_nums_per_task_{args.tasks}.pkl"
         )
         print()
         print(f"Ignored observations: {prec_ignore_nums}")

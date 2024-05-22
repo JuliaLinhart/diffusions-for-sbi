@@ -27,8 +27,8 @@ The `environment.yml` file details the environment (packages and versions) used 
 - `tall_posterior_sampler.py`: utility functions (e.g. `tweedies_approximation`) for our tall posterior sampler (`GAUSS` and `JAC` algorithms).
 - `vp_diffused_priors.py`: analytic diffused (uniform and gaussian) prior for a VP-SDE diffusion process.
 
-### Evaluation with the $\ell$-C2ST diagnostic
-- `lc2st.py`: implementation of the $\ell$-C2ST diagnostic to evaluate the accuracy of the sampling algorithms. Code taken from the [implementation of the `sbi` toolbox](https://github.com/sbi-dev/sbi/blob/main/sbi/diagnostics/lc2st.py).
+### Evaluation with the L-C2ST diagnostic
+- `lc2st_new.py`: implementation of the L-C2ST diagnostic to evaluate the accuracy of the sampling algorithms. Code taken from the [implementation of the `sbi` toolbox](https://github.com/sbi-dev/sbi/blob/main/sbi/diagnostics/lc2st.py).
 
 ### Experiment utils:
 - `embedding_nets.py`: implementation of some networks for the score model (used in the toy models experiments from section 4.1)
@@ -73,7 +73,7 @@ The script to reproduce experiments and generate figures are `sbibm_posterior_es
   ```
   python sbibm_results.py --compute_dist --tasks <main/extra/all>
   ```
-  to compute the distances (this might take some time). Precomputed results can be found in `results/sbibm/<task_name>/metrics/`. 
+  to compute the distances. This might take some time. By default, precomputed results are loaded and can be found in `results/sbibm/<task_name>/metrics/`. 
 
   To quickly generate the figures, run 
   ```
@@ -99,15 +99,15 @@ The script to reproduce experiments and generate figures are `jrnnm_posterior_es
   ```
   and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used. Specifying `--run sample --n_obs 30 --single_obs` will generate results for each of the `n_obs=30` observation seperately.
 
-#### 2. $\ell$-C2ST diagnostic
+#### 2. L-C2ST diagnostic
 Results are saved at the following directory: `results/jrnnm/<theta_dim>d/<path_to_score_network>/<path_to_sampler>/<lc2st_results>/`.
-- To generate the calibration datasets used to compute the $\ell$-C2ST results run: 
+- To generate the calibration datasets used to compute the L-C2ST results run: 
 ```
 python jrnnm_posterior_estimation.py --run sample_cal_all --lr <1e-3/1e-4> --theta_dim <3/4>
 ```
 and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used.
 
-- To compute the $\ell$-C2ST results first train the classifiers by running
+- To compute the L-C2ST results first train the classifiers by running
 ```
 python jrnnm_lc2st.py --run <train_data, train_null> --all_nobs
 ```
@@ -123,7 +123,7 @@ Precomputed results can be found at the above mentioned directory under the file
 
 #### 3. Figures
   
-- To reproduce the figures run `python jrnnm_results.py` with the arguments `lc2st` and `--dirac_dist` for the plots respectively associated to the $\ell$-C2ST results and posterior concentration quantified with the `MMD to Dirac` metric, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
+- To reproduce the figures run `python jrnnm_results.py` with the arguments `lc2st` and `--dirac_dist` for the plots respectively associated to the L-C2ST results and posterior concentration quantified with the `MMD to Dirac` metric, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
 
 
 ### New features: Classifier-free guidance and Partial Factorization (Appendix L)

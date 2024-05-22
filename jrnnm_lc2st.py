@@ -1,7 +1,7 @@
 import os
 import torch
 
-from lc2st import LC2ST
+from lc2st_new import LC2ST
 
 PATH_EXPERIMENT = "results/jrnnm/"
 # parameters for the trained score network
