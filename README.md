@@ -89,7 +89,7 @@ The script to reproduce experiments and generate figures are `sbibm_posterior_es
 
 The script to reproduce experiments and generate figures are `jrnnm_posterior_estimation.py` and `jrnnm_results.py`. Results are saved in `results/jrnnm/<theta_dim>d/`.
 
-#### Neural Score Estimation and Inference of the tall posterior
+#### 1. Neural Score Estimation and Inference of the tall posterior
 - To train the score models run:
   ```
   python jrnnm_posterior_estimation.py --run train --lr <1e-3/1e-4> --theta_dim <3/4>
@@ -101,7 +101,7 @@ The script to reproduce experiments and generate figures are `jrnnm_posterior_es
   ```
   and add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which algorithm should be used. Specifying `--run sample --n_obs 30 --single_obs` will generate results for each of the `n_obs=30` observation seperately.
 
-##### $\ell$-C2ST diagnostic
+#### 2. $\ell$-C2ST diagnostic
 Results are saved at the following directory: `results/jrnnm/<theta_dim>d/<path_to_score_network>/<path_to_sampler>/<lc2st_results>/`.
 - To generate the calibration datasets used to compute the $\ell$-C2ST results run: 
 ```
@@ -123,7 +123,7 @@ Again, in each case you should add the arguments `--cov_mode <GAUSS/JAC>` and `-
 
 Precomputed results can be found at the above mentioned directory under the filenames `results_lc2st...`, which includes the test statistics computed over all trials under the null hypothesis, the test statistics for the observed data and the corresponding p-values.
 
-#### Figures
+#### 3. Figures
   
 - To reproduce the figures run `python jrnnm_results.py` with the arguments `lc2st` and `--dirac_dist` for the plots respectively associated to the $\ell$-C2ST results and posterior concentration quantified with the `MMD to Dirac` metric, `--pairplot` for the full pairplots with 1D and 2D histograms of the posterior, and `--single_multi_obs` for the 1D histograms in the 3D case.
 
