@@ -117,7 +117,7 @@ Then compute the test statistics/p-values by running:
 ```
 python jrnnm_lc2st.py --run <eval_data, eval_null> --all_nobs
 ```
-Again, in each case you should add the arguments `--cov_mode <GAUSS/JAC>` and `--langevin` with optional `--clip` to indicate which sampling algorithm should be evaluated. 
+Again, in each case you should add the arguments `--cov_mode <GAUSS/JAC>` or `--langevin geffner` with optional `--clip` to indicate which sampling algorithm should be evaluated. 
 
 Precomputed results can be found at the above mentioned directory under the filenames `results_lc2st...`, which includes the test statistics computed over all trials under the null hypothesis, the test statistics for the observed data and the corresponding p-values.
 
