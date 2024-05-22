@@ -173,9 +173,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check_post", action="store_true", help="Check the reference posterior"
     )
-    parser.add_argument(
-        "--check_train", action="store_true", help="Check the training data"
-    )
 
     args = parser.parse_args()
 
@@ -258,46 +255,3 @@ if __name__ == "__main__":
         plt.legend()
         plt.savefig("_checks/slcp_post_check.png")
         plt.clf()
-
-    if args.check_train:
-        import matplotlib.pyplot as plt
-
-        data = torch.load(
-            "/data/parietal/store3/work/jlinhart/git_repos/diffusions-for-sbi/results/sbibm/slcp_good/dataset_n_train_50000.pkl"
-        )
-        theta = data["theta"][:1000]
-        x = data["x"][:1000]
-
-        data_new = slcp.generate_training_data(n_simulations=1000, save=False)
-        x_new = data_new["x"]
-        theta_new = data_new["theta"]
-
-        plt.scatter(x[:, 0], x[:, 1], label="sbibm")
-        plt.scatter(x_new[:, 0], x_new[:, 1], label="jl")
-        plt.legend()
-        plt.savefig("_checks/slcp_train_x_check.png")
-        plt.clf()
-
-        plt.scatter(theta[:, 0], theta[:, 1], label="sbibm")
-        plt.scatter(theta_new[:, 0], theta_new[:, 1], label="jl")
-        plt.legend()
-        plt.savefig("_checks/slcp_train_theta_check.png")
-        plt.clf()
-
-    data_new = slcp.generate_training_data(n_simulations=100, save=False, n_obs=100)
-    x_new = data_new["x"]
-    theta_new = data_new["theta"]
-    print(x_new.shape, theta_new.shape)
-
-    # plot x for one theta
-    import matplotlib.pyplot as plt
-
-    x = x_new[0]
-    x_2 = slcp.simulator(theta_new[0], n_obs=100, rng_key=rng_key)
-    x_3 = x_new[1]
-    x_4 = slcp.simulator(theta_new[1], n_obs=100, rng_key=rng_key)
-    plt.scatter(x[:, 0], x[:, 1])
-    plt.scatter(x_2[:, 0], x_2[:, 1])
-    plt.scatter(x_3[:, 0], x_3[:, 1])
-    plt.scatter(x_4[:, 0], x_4[:, 1])
-    plt.savefig("_checks/slcp_big_train_x_check.png")
