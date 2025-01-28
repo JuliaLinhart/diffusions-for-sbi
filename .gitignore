@@ -27,11 +27,13 @@ __pycache__/
 /results/*/*.pdf
 /results/*/*/*/*.png
 /results/*/*/*/*.pdf
+*clfs*
+*lc2st_ensemble*
 
 /tasks/sbibm/_*
 
 /notebooks
-/test_toy
+/test*
 *old*
 *dataset*
 sbibm_results_submission*

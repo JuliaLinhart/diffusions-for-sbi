@@ -32,6 +32,8 @@ if __name__ == "__main__":
     records = []
     ref_sw_per_dim = {}
     for exp in tqdm.tqdm(data):
+        # if exp["eps"] == 0 and exp["dim"] == 10 and exp["seed"] == 0: # if specific experiment is to be treated
+        print(exp["seed"], exp["N_OBS"])
         index = (exp["N_OBS"], exp["dim"], exp["seed"], exp["eps"])
         try:
             all_data.loc[index]
@@ -55,11 +57,24 @@ if __name__ == "__main__":
             }
             for name, alg_data in exp["exps"].items():
                 for e in alg_data:
-                    sw = max_sliced_wasserstein_distance(
-                        X_s=ref_samples[:1_000].cuda(),
-                        X_t=e["samples"].cuda(),
-                        n_projections=10_000,
-                    ).item()
+                    #  # uncomment to save samples
+                    # if e["n_steps"] == 1000:
+                    #     sw = max_sliced_wasserstein_distance(
+                    #         X_s=ref_samples[:1_000].cuda(),
+                    #         X_t=e["samples"].cuda(),
+                    #         n_projections=10_000,
+                    #     ).item()
+                    #     if sw > 0:
+                    #         # print(sw)
+                    #         # print(index)
+                    #         # print(e["samples"].shape)
+                    #         torch.save(
+                    #             {
+                    #                 "reference": ref_samples[:1_000],
+                    #                 "estimate": e["samples"],
+                    #             },
+                    #             f"{destination_folder}/gaussian_mixture_exp_{name}_samples_n_{exp['N_OBS']}_eps_0.pt",
+                    #         )
                     records.append(
                         {
                             "N_OBS": exp["N_OBS"],

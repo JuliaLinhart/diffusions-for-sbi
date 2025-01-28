@@ -667,7 +667,7 @@ if __name__ == "__main__":
                 ["Greens", "Blues"], #, "Oranges", "Reds"],
             ):
                 samples = []
-                for n_obs in N_OBS:
+                for n_obs in [1,14,30]:
                     if method == "TRUE":
                         samples.append(
                             task.get_reference_posterior_samples(
@@ -696,7 +696,7 @@ if __name__ == "__main__":
                     theta_true=theta_true,
                     ignore_ticks=True,
                     ignore_xylabels=True,
-                    legend=False,
+                    legend=True,
                     size=5.5,
                     title=METHODS_STYLE[method]["label"]
                     if method != "TRUE"
