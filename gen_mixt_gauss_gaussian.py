@@ -168,7 +168,7 @@ if __name__ == "__main__":
                             dist_cov_est=cov_est.cuda(),
                             cov_mode="GAUSS",
                         ).cpu()
-                        print(samples_gauss.isnan().sum())
+                        # print(samples_gauss.isnan().sum())
 
                         tstart_jac = time.time()
                         # Sample with JAC
@@ -181,7 +181,7 @@ if __name__ == "__main__":
                             # prior=prior,
                             cov_mode="JAC",
                         ).cpu()
-                        print(samples_jac.isnan().sum())
+                        # print(samples_jac.isnan().sum())
 
                         tstart_lang = time.time()
                         # Sample with Langevin
@@ -193,7 +193,7 @@ if __name__ == "__main__":
                                 lsteps=5,
                                 steps=sampling_steps,
                             ).cpu()
-                            print(lang_samples.isnan().sum())
+                            # print(lang_samples.isnan().sum())
                         t_end_lang = time.time()
                         dt_gauss = tstart_jac - tstart_gauss
                         dt_jac = tstart_lang - tstart_jac
@@ -220,7 +220,7 @@ if __name__ == "__main__":
                             }
                         )
                         all_exps.append(infos)
-                        print(N_OBS, eps)
+                        print(f"N_OBS: {N_OBS}, eps: {eps}")
                         torch.save(
                             all_exps,
                             os.path.join(path_to_save, "gaussian_mixture_exp.pt"),

@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     destination_folder = sys.argv[1]
     os.makedirs(f"{destination_folder}/figures", exist_ok=True)
-
+    os.makedirs(f"{destination_folder}/data", exist_ok=True)
     alpha, alpha_fill = set_plotting_style()
 
     # Read all the data!
@@ -22,7 +22,25 @@ if __name__ == "__main__":
         f"{destination_folder}/gaussian_mixture_exp_treated.csv"
     ).reset_index()
 
-    # Same, choosing data with equivalent speed
+    # Make Time table
+    dim = 10
+    n_obs = 32
+    eps = 1e-2
+    time_info = (
+        all_data.groupby(["dim", "N_OBS", "sampling_steps", "alg", "eps"])[["dt", "sw"]]
+        .agg(lambda x: f"{x.mean():.2f} +/- {x.std()*1.96 / x.shape[0]**.5:.2f}")
+        .reset_index()
+    )
+    table_to_save = time_info.loc[
+        (time_info.dim == dim) & (time_info.N_OBS == n_obs) & (time_info.eps == eps),
+        ["alg", "sampling_steps", "dt", "sw"],
+    ]
+    print(table_to_save)
+    table_to_save.reset_index().to_csv(
+        f"{destination_folder}/data/table_time_sw_comparison.csv", index=False
+    )
+
+    # Load data of "equivalent speed"
     equivalent_speed_data = all_data.loc[
         (
             ((all_data.alg == "GAUSS") & (all_data.sampling_steps == 1000))

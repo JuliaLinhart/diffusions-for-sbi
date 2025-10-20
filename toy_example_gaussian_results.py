@@ -23,7 +23,7 @@ if __name__ == "__main__":
         f"{destination_folder}/gaussian_exp_treated.csv"
     ).reset_index()
 
-    # Make Tite table
+    # Make Time table
     dim = 10
     n_obs = 32
     eps = 1e-2
@@ -37,6 +37,10 @@ if __name__ == "__main__":
         ["alg", "sampling_steps", "dt", "sw"],
     ]
     print(table_to_save)
+    table_to_save.reset_index().to_csv(
+        f"{destination_folder}/data/table_time_sw_comparison.csv", index=False
+    )
+
     time_data = all_data.pivot(
         index=["dim", "N_OBS", "eps", "sampling_steps", "seed"],
         columns="alg",

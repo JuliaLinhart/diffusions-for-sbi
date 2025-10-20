@@ -21,9 +21,9 @@ if __name__ == "__main__":
     torch.manual_seed(1)
 
     all_exps = []
-    for DIM in [2, 4, 8, 10, 16, 32, 64]:
+    for DIM in [2, 4, 8, 10, 16, 32]: #, 64]:
         for eps in [0, 1e-3, 1e-2, 1e-1]:
-            for seed in tqdm(range(5), desc=f"Dim {DIM} eps {eps}"):
+            for seed in tqdm(range(5), desc=f"Dim {DIM}, eps {eps}, NOBS = 2,4,8,16,32,64,90 - Seed loop"):
                 # Simulator and observations
                 torch.manual_seed(seed)
                 means = torch.rand(DIM) * 20 - 10  # between -10 and 10
@@ -215,5 +215,5 @@ if __name__ == "__main__":
                                 "eta": 0.5,
                             }
                     all_exps.append(infos)
-                    print(N_OBS, eps)
+
                     torch.save(all_exps, os.path.join(path_to_save, "gaussian_exp.pt"))
