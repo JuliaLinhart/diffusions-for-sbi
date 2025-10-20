@@ -34,6 +34,8 @@ def setup(
 
         rng_key = random.PRNGKey(1)
         kwargs = {"rng_key": rng_key}
+    if "bernoulli" in task.name:
+        task.generate_stimulus()
     if all:
         train_data = True
         reference_data = True

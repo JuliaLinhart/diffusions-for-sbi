@@ -169,39 +169,55 @@ class BernoulliGLM(MCMCTask):
 
         return sta
 
-    def generate_stimulus(self):
+    def generate_stimulus(self, overwrite=False):
         path = f"{self.save_path}files/"
         path_2 = f"{self.save_path[:-1]}_raw/files/"
-        os.makedirs(path, exist_ok=True)
-        os.makedirs(path_2, exist_ok=True)
-        stimulus_t = torch.arange(
-            0, self.stimulus["duration"], self.stimulus["dt"], dtype=torch.float32
-        )
-        torch.save(stimulus_t, f"{path}stimulus_t.pt")
-        torch.save(stimulus_t, f"{path_2}stimulus_t.pt")
-        stimulus_I = torch.from_numpy(
-            np.random.RandomState(self.stimulus["seed"])
-            .randn(len(stimulus_t))
-            .reshape(-1)
-            .astype(np.float32)
-        )
-        torch.save(stimulus_I, f"{path}stimulus_I.pt")
-        torch.save(stimulus_I, f"{path_2}stimulus_I.pt")
 
-        # Build design matrix X, such that X * h returns convolution of x with filter h
-        # Including linear offset by first element
-        design_matrix = torch.zeros(size=(len(stimulus_t), self.dim_theta - 1))
-        for j in range(self.dim_theta - 1):
-            design_matrix[j:, j] = stimulus_I[0 : len(stimulus_t) - j]
-        design_matrix = torch.cat(
-            (torch.ones(size=(len(stimulus_t), 1)), design_matrix), axis=1
-        )
-        torch.save(design_matrix, f"{path}design_matrix.pt")
-        torch.save(design_matrix, f"{path_2}design_matrix.pt")
+        # File paths
+        files_to_check = [
+            f"{path}stimulus_t.pt",
+            f"{path}stimulus_I.pt",
+            f"{path}design_matrix.pt",
+        ]
 
-        print(f"Saved stimulus and design matrix at {path} and {path_2}")
+        if not overwrite and all(os.path.exists(f) for f in files_to_check):
+            print(f"Files already exist at {path} and {path_2}. Skipping generation.")
+            print()
+            stimulus_I = torch.load(f"{path}stimulus_I.pt")
+            design_matrix = torch.load(f"{path}design_matrix.pt")
+            return stimulus_I, design_matrix
+        else:
+            os.makedirs(path, exist_ok=True)
+            os.makedirs(path_2, exist_ok=True)
+            
+            stimulus_t = torch.arange(
+                0, self.stimulus["duration"], self.stimulus["dt"], dtype=torch.float32
+            )
+            torch.save(stimulus_t, f"{path}stimulus_t.pt")
+            torch.save(stimulus_t, f"{path_2}stimulus_t.pt")
+            stimulus_I = torch.from_numpy(
+                np.random.RandomState(self.stimulus["seed"])
+                .randn(len(stimulus_t))
+                .reshape(-1)
+                .astype(np.float32)
+            )
+            torch.save(stimulus_I, f"{path}stimulus_I.pt")
+            torch.save(stimulus_I, f"{path_2}stimulus_I.pt")
 
-        return stimulus_I, design_matrix
+            # Build design matrix X, such that X * h returns convolution of x with filter h
+            # Including linear offset by first element
+            design_matrix = torch.zeros(size=(len(stimulus_t), self.dim_theta - 1))
+            for j in range(self.dim_theta - 1):
+                design_matrix[j:, j] = stimulus_I[0 : len(stimulus_t) - j]
+            design_matrix = torch.cat(
+                (torch.ones(size=(len(stimulus_t), 1)), design_matrix), axis=1
+            )
+            torch.save(design_matrix, f"{path}design_matrix.pt")
+            torch.save(design_matrix, f"{path_2}design_matrix.pt")
+
+            print(f"Saved stimulus and design matrix at {path} and {path_2}")
+
+            return stimulus_I, design_matrix
 
 
 if __name__ == "__main__":

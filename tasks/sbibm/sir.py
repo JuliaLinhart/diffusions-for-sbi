@@ -216,5 +216,5 @@ if __name__ == "__main__":
         # plt.scatter(samples_jl_30[:,0], samples_jl_30[:,1], label='jl_30')
         plt.scatter(theta_star[0], theta_star[1], label="theta_star")
         plt.legend()
-        plt.savefig("_checks/sir_post_check.png")
+        plt.savefig("tasks/sbibm/_checks/sir_post_check.png")
         plt.clf()
