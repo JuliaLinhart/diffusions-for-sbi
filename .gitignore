@@ -21,7 +21,6 @@ __pycache__/
 /results/sbibm/*/*/*/ddim*/
 /results/sbibm/*/*/*/langevin*/
 /results/sbibm/*/*metrics*/
-/results/sbibm/*good/
 /results/*/_*/
 /results/*/*.png
 /results/*/*.pdf
