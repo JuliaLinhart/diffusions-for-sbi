@@ -345,7 +345,7 @@ def run_sample_sgm(
     if torch.isnan(samples).sum() != 0:
         print(f"Number of NaNs in samples: {torch.isnan(samples).sum()}, {torch.where(torch.isnan(samples))}")
         # replace NaNs with mean if it's less than 10% of the samples
-        theshold = 0.1 * samples.shape[0] * samples.shape[1]
+        threshold = 0.1 * samples.shape[0] * samples.shape[1]
         if torch.isnan(samples).sum() < threshold:
             samples_new = torch.where(torch.isnan(samples),0,samples)
             samples = torch.where(samples_new == 0,samples_new.mean(axis=0), samples_new)
