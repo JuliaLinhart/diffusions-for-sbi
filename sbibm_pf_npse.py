@@ -84,6 +84,7 @@ def run_train_sgm(
 
     # create context set sizes
     torch.manual_seed(42)  # for reproducibility
+    n_train = theta_train.shape[0]
     ns = torch.randint(1, n_max + 1, (n_train, 1))
     print("Context set sizes:", ns.shape)
 

@@ -309,13 +309,17 @@ def plots_dist_n_train(
                     )
                     mean_dist_dict[method].append(dist["mean"])
                     std_dist_dict[method].append(dist["std"])
-
+            print()
+            print(n_obs)
+            print()
             for k, mean_, std_ in zip(
                 mean_dist_dict.keys(),
                 mean_dist_dict.values(),
                 std_dist_dict.values(),
             ):
                 mean_, std_ = torch.FloatTensor(mean_), torch.FloatTensor(std_)
+                print(k, mean_, std_)
+                # print()
                 axs[i, j].fill_between(
                     n_train_list,
                     mean_ - std_,

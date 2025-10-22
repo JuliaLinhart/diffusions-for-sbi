@@ -65,6 +65,9 @@ N_MAX_LIST = [3, 6, 30]  # for pf_nse
 
 METRICS = ["mmd", "swd", "c2st"]
 
+# path to save figures
+os.makedirs(PATH_EXPERIMENT + "figures/", exist_ok=True)
+
 
 def load_losses(task_name, n_train, lr, path, n_epochs=N_EPOCHS, batch_size=BATCH_SIZE):
     path = (
@@ -413,11 +416,11 @@ if __name__ == "__main__":
                     axs[i, j].set_ylim([0, 0.5])
             axs[i, j].legend()
             plt.savefig(
-                PATH_EXPERIMENT + f"_plots_rebuttal/losses_bs_{bs}_{args.tasks}.png"
+                PATH_EXPERIMENT + f"figures/sbibm_losses_bs_{bs}_{args.tasks}.png"
             )
             plt.savefig(
                 PATH_EXPERIMENT
-                + f"_plots_rebuttal/sbibm_losses_bs_{bs}_{args.tasks}.pdf"
+                + f"figures/sbibm_losses_bs_{bs}_{args.tasks}.pdf"
             )
             plt.clf()
 
@@ -608,10 +611,10 @@ if __name__ == "__main__":
                     title_ext=title_ext,
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train{title_ext}.png"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_train{title_ext}.png"
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train{title_ext}.pdf"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_train{title_ext}.pdf"
                 )
                 plt.clf()
                 # plot mean distance as function of n_obs
@@ -626,10 +629,10 @@ if __name__ == "__main__":
                     title_ext=title_ext,
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs{title_ext}.png"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_obs{title_ext}.png"
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_obs{title_ext}.pdf"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_obs{title_ext}.pdf"
                 )
                 plt.clf()
             else:
@@ -643,10 +646,10 @@ if __name__ == "__main__":
                     compute_dist_fn=compute_mean_distance,
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train_pf_nse.png"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_train_pf_nse.png"
                 )
                 plt.savefig(
-                    PATH_EXPERIMENT + f"_plots_rebuttal/{metric}_n_train_pf_nse.pdf"
+                    PATH_EXPERIMENT + f"figures/{metric}_n_train_pf_nse.pdf"
                 )
                 plt.clf()
 
@@ -654,7 +657,7 @@ if __name__ == "__main__":
         n_train = 30000
         task_name = "lotka_volterra"
         task = get_task(task_name, save_path="tasks/sbibm/data/")
-        save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
+        save_path = PATH_EXPERIMENT + f"figures/pairplots/{task_name}/"
         os.makedirs(save_path, exist_ok=True)
 
         # Pairplot for all methods with increasing n_obs
@@ -714,7 +717,7 @@ if __name__ == "__main__":
     # task_name = "two_moons"
     # task = get_task(task_name, save_path="tasks/sbibm/data/")
 
-    # save_path = PATH_EXPERIMENT + f"_samples/{task_name}/"
+    # save_path = PATH_EXPERIMENT + f"figures/pairplots/{task_name}/"
     # os.makedirs(save_path, exist_ok=True)
     # n_train = 30000
     # num_obs_lists = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
