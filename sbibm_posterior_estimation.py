@@ -565,6 +565,7 @@ if __name__ == "__main__":
             score_network = torch.load(
                 save_path + f"score_network.pkl",
                 map_location=torch.device("cpu"),
+                weights_only=False,
             )
             score_network.net_type = "default"
             score_network.tweedies_approximator = tweedies_approximation

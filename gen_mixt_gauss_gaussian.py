@@ -134,6 +134,12 @@ if __name__ == "__main__":
                         "exps": {"Langevin": [], "GAUSS": [], "JAC": []},
                     }
 
+                    for tau, lsteps in zip(
+                        [0.5, 0.1, 0.05, 0.01], [5, 10, 50, 100]
+                    ):
+                        infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"] = []
+
+
                     # Approximate posterior samples
                     for sampling_steps, eta in zip(
                         [50, 150, 400, 1000][::-1], [0.2, 0.5, 0.8, 1][::-1]
@@ -158,6 +164,8 @@ if __name__ == "__main__":
                             samples_ddim.permute(1, 0, 2)
                         )
                         # Sample with "GAUSS"
+                        print()
+                        print("GAUSS sampling...")
                         samples_gauss = score_net.ddim(
                             shape=(1000,),
                             x=x_obs_100[:N_OBS].cuda(),
@@ -172,6 +180,8 @@ if __name__ == "__main__":
 
                         tstart_jac = time.time()
                         # Sample with JAC
+                        print()
+                        print("JAC sampling...")
                         samples_jac = score_net.ddim(
                             shape=(1000,),
                             x=x_obs_100[:N_OBS].cuda(),
@@ -183,28 +193,36 @@ if __name__ == "__main__":
                         ).cpu()
                         # print(samples_jac.isnan().sum())
 
-                        tstart_lang = time.time()
                         # Sample with Langevin
-                        with torch.no_grad():
-                            lang_samples = score_net.annealed_langevin_geffner(
-                                shape=(1000,),
-                                x=x_obs_100[:N_OBS].cuda(),
-                                prior_score_fn=prior_score,
-                                lsteps=5,
-                                steps=sampling_steps,
-                            ).cpu()
-                            # print(lang_samples.isnan().sum())
-                        t_end_lang = time.time()
-                        dt_gauss = tstart_jac - tstart_gauss
-                        dt_jac = tstart_lang - tstart_jac
-                        dt_lang = t_end_lang - tstart_lang
-                        infos["exps"]["Langevin"].append(
+                        for tau, lsteps in zip(
+                            [0.5, 0.1, 0.05, 0.01], [5, 10, 50, 100]
+                        ):
+                            tstart_lang = time.time()
+                            with torch.no_grad():
+                                print()
+                                print(f"Langevin sampling... Lsteps: {lsteps}, tau: {tau}")
+                                lang_samples = score_net.annealed_langevin_geffner(
+                                    shape=(1000,),
+                                    x=x_obs_100[:N_OBS].cuda(),
+                                    prior_score_fn=prior_score,
+                                    lsteps=lsteps,
+                                    tau=tau,
+                                    steps=sampling_steps,
+                                ).cpu()
+                            t_end_lang = time.time()
+                            dt_lang = t_end_lang - tstart_lang
+
+                            infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"].append(
                             {
                                 "dt": dt_lang,
                                 "samples": lang_samples,
                                 "n_steps": sampling_steps,
                             }
                         )
+
+                        dt_gauss = tstart_jac - tstart_gauss
+                        dt_jac = tstart_lang - tstart_jac
+
                         infos["exps"]["GAUSS"].append(
                             {
                                 "dt": dt_gauss,
@@ -223,5 +241,5 @@ if __name__ == "__main__":
                         print(f"N_OBS: {N_OBS}, eps: {eps}")
                         torch.save(
                             all_exps,
-                            os.path.join(path_to_save, "gaussian_mixture_exp.pt"),
+                            os.path.join(path_to_save, "gaussian_mixture_exp_langevin.pt"),
                         )
