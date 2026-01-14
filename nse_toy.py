@@ -507,6 +507,55 @@ class NSE(nn.Module):
 
         return theta
 
+    def deterministic_gaussian_geffner(
+            self,
+            shape: Size,
+            x: Tensor,
+            prior_score_fn: Callable[[torch.tensor, torch.tensor], torch.tensor],
+            steps: int = 64,
+            verbose: bool = False,
+            **kwargs,
+    ):
+        """Deterministic Gaussian NSE sampler from Geffner et al. (2023):
+        corresponds to Algorithm 2 in Appendix D but with continuous noise schedule 
+        (`self.alpha(t)`) and analytic diffused prior score (`prior_score_fn`).
+
+        N.B.: alpha and gamma roles are inverted wrt Geffner et al. notation.
+        """
+        time = torch.linspace(1, 0, steps + 1).to(x)
+
+        theta = DiagNormal(self.zeros, self.ones).sample(shape)
+
+        n_x, n_theta = x.shape[0], theta.shape[0]
+
+        for i, t in enumerate(tqdm(time[:-1], disable=not verbose)):
+            if i < steps - 1:
+                gamma_t = self.alpha(t) / self.alpha(t - time[-2])
+            else:
+                gamma_t = self.alpha(t)
+
+            # compute posterior score for all x
+            post_score = self(theta[:, None, :].repeat(1, n_x, 1).reshape(1*n_x*n_theta, -1),
+                         x[None, :, :].repeat(n_theta, 1, 1).reshape(n_x*n_theta, -1),
+                         t[None, None].repeat(n_theta*n_x, 1),
+                         **kwargs) / -self.sigma(t)
+            post_score = post_score.reshape(n_theta, n_x, -1)
+            # get prior score
+            prior_score, _, _ = prior_score_fn(theta, t)
+            # compute transition mean
+            mu_t = 1/gamma_t**.5 * (n_x * theta + (1-gamma_t) * post_score.sum(dim=1)) - (n_x - 1) * gamma_t**.5 * theta
+            mu_t *= 1 / (n_x - gamma_t * (n_x - 1))
+            # compute transition variance
+            var_t = ((1 - gamma_t) / (n_x - gamma_t * (n_x - 1)))
+            # prior correction term
+            mu_t += var_t * (1 - n_x) * prior_score
+            # update theta
+            theta = mu_t + torch.randn_like(mu_t) * var_t**.5
+
+
+        return theta
+
+
     def mean_pred(self, theta: Tensor, score: Tensor, alpha_t: Tensor, **kwargs) -> Tensor:
         '''
         Parameters
