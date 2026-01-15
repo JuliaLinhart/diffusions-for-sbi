@@ -94,6 +94,50 @@ METHODS_STYLE = {
         "linewidth": 4,
         "markersize": markersize + 2,
     },
+    "DET_GEF": {
+        "label": "GEFFNER (deterministic)",
+        "color": "lightgreen",
+        "marker": "+",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize + 10,
+    }
+}
+
+colors = cm.get_cmap("Reds")(np.linspace(0.4, 1.0, 4)).tolist()
+METHODS_STYLE_LANGEVIN = {
+    "Langevin_L_5_tau_0.5": {
+        "label": "LANGEVIN L=5, τ=0.5",
+        "color": colors[0],
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
+    "Langevin_L_25_tau_0.1": {
+        "label": "LANGEVIN L=25, τ=0.1",
+        "color": colors[1],
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
+    "Langevin_L_50_tau_0.05": {
+        "label": "LANGEVIN L=50, τ=0.05",
+        "color": colors[2],
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
+    "Langevin_L_250_tau_0.01": {
+        "label": "LANGEVIN L=250, τ=0.01",
+        "color": colors[3],
+        "marker": "o",
+        "linestyle": "-",
+        "linewidth": 3,
+        "markersize": markersize,
+    },
 }
 
 METRICS_STYLE = {

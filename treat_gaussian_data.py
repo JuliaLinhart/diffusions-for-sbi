@@ -10,10 +10,12 @@ if __name__ == "__main__":
     import sys
 
     destination_folder = sys.argv[1]
-    data = torch.load(f"{destination_folder}/gaussian_exp.pt")
+    data = torch.load(f"{destination_folder}/gaussian_exp_geffner_all.pt")
+    # data = torch.load(f"{destination_folder}/gaussian_exp_langevin.pt")
     try:
         all_data = pd.read_csv(
-            f"{destination_folder}/gaussian_exp_treated.csv"
+            f"{destination_folder}/gaussian_exp_geffner_all_treated.csv"
+            # f"{destination_folder}/gaussian_exp_langevin_treated.csv"
         ).set_index(keys=["N_OBS", "dim", "seed", "eps"])
     except FileNotFoundError:
         all_data = pd.DataFrame(
@@ -91,7 +93,8 @@ if __name__ == "__main__":
             axis=0,
         )
         all_data.reset_index().to_csv(
-            f"{destination_folder}/gaussian_exp_treated.csv", index=False
+            f"{destination_folder}/gaussian_exp_geffner_all_treated.csv", index=False
+            # f"{destination_folder}/gaussian_exp_langevin_treated.csv", index=False
         )
     else:
         all_data = all_data.reset_index()

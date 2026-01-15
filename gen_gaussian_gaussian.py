@@ -120,114 +120,146 @@ if __name__ == "__main__":
                         "seed": seed,
                         "dim": DIM,
                         "eps": eps,
-                        "exps": {"Langevin": [], "GAUSS": [], "JAC": []},
+                        "exps": {"Langevin": [], "GAUSS": [], "JAC": [], "DET_GEF": []},
                     }
 
-                    for tau, lsteps in zip(
-                        [0.5, 0.1, 0.05, 0.01], [5, 10, 50, 100]
-                    ):
-                        infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"] = []
+                    # for tau, lsteps in zip(
+                    #     [0.5, 0.1, 0.05, 0.01], [5, 25, 50, 250]
+                    # ):
+                    #     infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"] = []
 
 
                     # Approximate posterior samples
                     for sampling_steps, eta in zip(
                         [50, 150, 400, 1000], [0.2, 0.5, 0.8, 1]
                     ):
-                        # tstart_gauss = time.time()
-                        # # Estimate Gaussian covariance
-                        # samples_ddim = (
-                        #     score_net.ddim(
-                        #         shape=(1000 * N_OBS,),
-                        #         x=x_obs_100[None, :N_OBS]
-                        #         .repeat(1000, 1, 1)
-                        #         .reshape(1000 * N_OBS, -1)
-                        #         .cuda(),
-                        #         steps=100,
-                        #         eta=0.5,
-                        #     )
-                        #     .detach()
-                        #     .reshape(1000, N_OBS, -1)
-                        #     .cpu()
-                        # )
+                        tstart_gauss = time.time()
+                        # Estimate Gaussian covariance
+                        samples_ddim = (
+                            score_net.ddim(
+                                shape=(1000 * N_OBS,),
+                                x=x_obs_100[None, :N_OBS]
+                                .repeat(1000, 1, 1)
+                                .reshape(1000 * N_OBS, -1)
+                                .cuda(),
+                                steps=100,
+                                eta=0.5,
+                            )
+                            .detach()
+                            .reshape(1000, N_OBS, -1)
+                            .cpu()
+                        )
 
-                        # cov_est = vmap(lambda x: torch.cov(x.mT))(
-                        #     samples_ddim.permute(1, 0, 2)
-                        # )
+                        cov_est = vmap(lambda x: torch.cov(x.mT))(
+                            samples_ddim.permute(1, 0, 2)
+                        )
 
-                        # # Sample with GAUSS
-                        # samples_gauss = score_net.ddim(
-                        #     shape=(1000,),
-                        #     x=x_obs_100[:N_OBS].cuda(),
-                        #     eta=eta,
-                        #     steps=sampling_steps,
-                        #     prior_score_fn=prior_score,
-                        #     # prior=prior,
-                        #     dist_cov_est=cov_est.cuda(),
-                        #     cov_mode="GAUSS",
-                        # ).cpu()
+                        # Sample with GAUSS
+                        print()
+                        print("GAUSS sampling...")
+                        samples_gauss = score_net.ddim(
+                            shape=(1000,),
+                            x=x_obs_100[:N_OBS].cuda(),
+                            eta=eta,
+                            steps=sampling_steps,
+                            prior_score_fn=prior_score,
+                            # prior=prior,
+                            dist_cov_est=cov_est.cuda(),
+                            cov_mode="GAUSS",
+                        ).cpu()
 
-                        # tstart_jac = time.time()
-                        # # Sample with JAC
-                        # samples_jac = score_net.ddim(
-                        #     shape=(1000,),
-                        #     x=x_obs_100[:N_OBS].cuda(),
-                        #     eta=eta,
-                        #     steps=sampling_steps,
-                        #     prior_score_fn=prior_score,
-                        #     # prior=prior,
-                        #     cov_mode="JAC",
-                        # ).cpu()
+                        tstart_jac = time.time()
+                        # Sample with JAC
+                        print()
+                        print("JAC sampling...")
+                        samples_jac = score_net.ddim(
+                            shape=(1000,),
+                            x=x_obs_100[:N_OBS].cuda(),
+                            eta=eta,
+                            steps=sampling_steps,
+                            prior_score_fn=prior_score,
+                            # prior=prior,
+                            cov_mode="JAC",
+                        ).cpu()
 
                         # Sample with Langevin
-                        for tau, lsteps in zip(
-                            [0.5, 0.1, 0.05, 0.01], [5, 10, 50, 100]
-                        ):
-                            tstart_lang = time.time()
-                            with torch.no_grad():
-                                print()
-                                print(f"Langevin sampling... Lsteps: {lsteps}, tau: {tau}")
-                                lang_samples = score_net.annealed_langevin_geffner(
-                                    shape=(1000,),
-                                    x=x_obs_100[:N_OBS].cuda(),
-                                    prior_score_fn=prior_score,
-                                    lsteps=lsteps,
-                                    tau=tau,
-                                    steps=sampling_steps,
-                                )
-                            t_end_lang = time.time()
-                            dt_lang = t_end_lang - tstart_lang
+                        # for tau, lsteps in zip(
+                        #     [0.5, 0.1, 0.05, 0.01], [5, 25, 50, 250]
+                        # ):
+                        lsteps = 5
+                        tau = 0.5
+                        tstart_lang = time.time()
+                        with torch.no_grad():
+                            print()
+                            print(f"Langevin sampling... Lsteps: {lsteps}, tau: {tau}")
+                            lang_samples = score_net.annealed_langevin_geffner(
+                                shape=(1000,),
+                                x=x_obs_100[:N_OBS].cuda(),
+                                prior_score_fn=prior_score,
+                                lsteps=lsteps,
+                                tau=tau,
+                                steps=sampling_steps,
+                            ).cpu()
+                        t_end_lang = time.time()
+                        dt_lang = t_end_lang - tstart_lang
 
-                            infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"].append(
+                        # infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"].append(
+                        infos["exps"]["Langevin"].append(
+                        {
+                            "dt": dt_lang,
+                            "samples": lang_samples,
+                            "n_steps": sampling_steps,
+                        }
+                        )
+
+                        # sample with deterministic gaussian sampler from Geffner et al.
+                        tstart_det_gg = time.time()
+                        with torch.no_grad():
+                            print()
+                            print(f"DETERMINISTIC GEFFNER sampling...")
+                            samples_det_gg = score_net.deterministic_gaussian_geffner(
+                                shape=(1000,),
+                                x=x_obs_100[:N_OBS].cuda(),
+                                prior_score_fn=prior_score,
+                                steps=sampling_steps,
+                            ).cpu()
+                        t_end_det_gg = time.time()
+                        dt_det_gg = t_end_det_gg - tstart_det_gg
+
+                        infos["exps"]["DET_GEF"].append(
                             {
-                                "dt": dt_lang,
-                                "samples": lang_samples,
+                                "dt": dt_det_gg,
+                                "samples": samples_det_gg,
                                 "n_steps": sampling_steps,
                             }
                         )
+
+                        if samples_det_gg.isnan().sum() > 0:
+                            print("NaN detected in DET_GEF samples!")
+
+                        dt_gauss = tstart_jac - tstart_gauss
+                        dt_jac = tstart_lang - tstart_jac
                         
-                        # dt_gauss = tstart_jac - tstart_gauss
-                        # dt_jac = tstart_lang - tstart_jac
-                        
-                        # infos["exps"]["GAUSS"].append(
-                        #     {
-                        #         "dt": dt_gauss,
-                        #         "samples": samples_gauss,
-                        #         "n_steps": sampling_steps,
-                        #     }
-                        # )
-                        # infos["exps"]["JAC"].append(
-                        #     {
-                        #         "dt": dt_jac,
-                        #         "samples": samples_jac,
-                        #         "n_steps": sampling_steps,
-                        #     }
-                        # )
-                        # if "DDIM" not in infos:
-                        #     infos["DDIM"] = {
-                        #         "samples": samples_ddim.cpu(),
-                        #         "steps": 100,
-                        #         "eta": 0.5,
-                        #     }
+                        infos["exps"]["GAUSS"].append(
+                            {
+                                "dt": dt_gauss,
+                                "samples": samples_gauss,
+                                "n_steps": sampling_steps,
+                            }
+                        )
+                        infos["exps"]["JAC"].append(
+                            {
+                                "dt": dt_jac,
+                                "samples": samples_jac,
+                                "n_steps": sampling_steps,
+                            }
+                        )
+                        if "DDIM" not in infos:
+                            infos["DDIM"] = {
+                                "samples": samples_ddim.cpu(),
+                                "steps": 100,
+                                "eta": 0.5,
+                            }
                     all_exps.append(infos)
 
-                    torch.save(all_exps, os.path.join(path_to_save, "gaussian_exp_langevin.pt"))
+                    torch.save(all_exps, os.path.join(path_to_save, "gaussian_exp_geffner_all.pt"))

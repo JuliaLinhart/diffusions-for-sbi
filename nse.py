@@ -655,6 +655,55 @@ class NSE(nn.Module):
 
         return total_score  # / (1 + (1/n_obs)*torch.abs(total_score))
 
+    def deterministic_gaussian_geffner(
+            self,
+            shape: Size,
+            x: Tensor,
+            prior_score_fn: Callable[[torch.tensor, torch.tensor], torch.tensor],
+            steps: int = 1000,
+            verbose: bool = False,
+            theta_clipping_range=(None, None),
+            **kwargs,
+    ):
+        """Deterministic Gaussian NSE sampler from Geffner et al. (2023):
+        corresponds to Algorithm 2 in Appendix D but with continuous noise schedule 
+        (`self.alpha(t)`) and analytic diffused prior score (`prior_score_fn`).
+
+        N.B.: alpha and gamma roles are inverted wrt Geffner et al. notation.
+        N.B.: Quick addition, does not work with fnet or clf_free_guidance.
+        """
+        time = torch.linspace(1, 0, steps + 1).to(x)
+
+        theta = DiagNormal(self.zeros, self.ones).sample(shape)
+
+        n_observations = x.shape[0] if len(x.shape) > 1 else 1
+
+        for i, t in enumerate(tqdm(time[:-1], disable=not verbose)):
+            if i < steps - 1:
+                gamma_t = self.alpha(t) / self.alpha(t - time[-2])
+            else:
+                gamma_t = self.alpha(t)
+
+            # compute posterior score for all x
+            scores = self.score(theta[:, None], x[None, :], t, **kwargs).detach()
+            # get prior score
+            prior_score = prior_score_fn(theta[None], t)[0]
+            # compute transition mean
+            mu_t = 1/gamma_t**.5 * (n_observations * theta + (1-gamma_t) * scores.sum(axis=1)) - (n_observations - 1) * gamma_t**.5 * theta
+            mu_t *= 1 / (n_observations - gamma_t * (n_observations - 1))
+            # compute transition variance
+            var_t = ((1 - gamma_t) / (n_observations - gamma_t * (n_observations - 1)))
+            # prior correction term
+            mu_t += var_t * (1 - n_observations) * prior_score
+
+            # update theta
+            theta = mu_t + torch.randn_like(mu_t) * var_t**.5
+
+            if theta_clipping_range[0] is not None:
+                theta = theta.clip(*theta_clipping_range)
+
+        return theta
+
 
 class NSELoss(nn.Module):
     r"""Calculates the *noise parametrized* denoising score matching (DSM) loss for NSE.
