@@ -91,6 +91,7 @@ def path_to_results(
     sampler="ddim",
     langevin=False,
     tamed_ula=False,
+    det_gef=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -113,14 +114,17 @@ def path_to_results(
         if tamed_ula:
             path = path[:-1] + "_ours/"
     else:
-        path = (
-            path + f"{sampler}_steps_1000/"
-            if sampler == "euler" or cov_mode == "GAUSS"
-            else path + f"{sampler}_steps_400/"
-        )
+        if det_gef:
+            path = path + "det_geffner_steps_1000/"
+        else:
+            path = (
+                path + f"{sampler}_steps_1000/"
+                if sampler == "euler" or cov_mode == "GAUSS"
+                else path + f"{sampler}_steps_400/"
+            )
 
     path = path + result_name + f"_{num_obs}_n_obs_{n_obs}.pkl"
-    if not langevin:
+    if not langevin and not det_gef:
         path = path[:-4] + f"_{cov_mode}.pkl"
     if clip:
         path = path[:-4] + "_clip.pkl"
@@ -137,6 +141,7 @@ def load_samples(
     sampler="ddim",
     langevin=False,
     tamed_ula=False,
+    det_gef=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -152,6 +157,7 @@ def load_samples(
         sampler,
         langevin,
         tamed_ula,
+        det_gef,
         clip,
         clf_free_guidance,
         pf_nse,
@@ -171,6 +177,7 @@ def compute_mean_distance(
     sampler="ddim",
     langevin=False,
     tamed_ula=False,
+    det_gef=False,
     clip=False,
     clf_free_guidance=False,
     pf_nse=False,
@@ -179,11 +186,20 @@ def compute_mean_distance(
     prec_ignore_nums=None,
     quantile=0.99,
 ):
-    # load results if already computed
+    # define and create save path
     save_path = (
         PATH_EXPERIMENT
-        + f"{task_name}/metrics/cov_mode_{cov_mode}_langevin_{langevin}_clip_{clip}/"
+        + f"{task_name}/metrics/"
     )
+    if langevin:
+        save_path = save_path + "langevin"
+    elif det_gef:
+        save_path = save_path + "det_geffner"
+    else:
+        save_path = save_path + f"{cov_mode}"
+
+    save_path = save_path + f"_clip_{clip}/"
+
     if langevin and tamed_ula:
         save_path = save_path[:-1] + "_ours/"
     if pf_nse:
@@ -193,6 +209,8 @@ def compute_mean_distance(
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     filename = save_path + f"n_train_{n_train}_n_obs_{n_obs}_metric_{metric}.pkl"
+
+    # load results if already computed
     if load or os.path.exists(filename):
         dist_list_all = torch.load(filename)
         dist_list = []
@@ -244,6 +262,7 @@ def compute_mean_distance(
                     cov_mode=cov_mode,
                     langevin=langevin,
                     tamed_ula=tamed_ula,
+                    det_gef=det_gef,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -286,6 +305,7 @@ def compute_mean_distance(
                     cov_mode=cov_mode,
                     langevin=langevin,
                     tamed_ula=tamed_ula,
+                    det_gef=det_gef,
                     clip=clip,
                     clf_free_guidance=clf_free_guidance,
                     pf_nse=pf_nse,
@@ -472,6 +492,8 @@ if __name__ == "__main__":
 
         # remove "JAC" from methods
         method_names = [method for method in method_names if method != "JAC"]
+        print(f"Methods: {method_names}")
+        print()
 
         metrics = ["mmd"] if args.mmd else []
         metrics += ["swd"] if args.swd else []
@@ -499,6 +521,7 @@ if __name__ == "__main__":
                                     cov_mode=method.split("_")[0],
                                     langevin=True if "LANGEVIN" in method else False,
                                     tamed_ula=True if "tamed" in method else False,
+                                    det_gef=True if "DET_GEF" in method else False,
                                     clip=True if "clip" in method else False,
                                     clf_free_guidance=args.clf_free_guidance,
                                     pf_nse=args.pf_nse,
@@ -542,12 +565,13 @@ if __name__ == "__main__":
                 final_ignore_nums,
                 PATH_EXPERIMENT + f"ignore_nums_final_{args.tasks}.pkl",
             )
+            print("Saved ignored observations.")
 
     if args.plot_dist:
         prec_ignore_nums = torch.load(
             # PATH_EXPERIMENT + f"ignore_nums_final.pkl"
             PATH_EXPERIMENT
-            + f"ignore_nums_per_task_{args.tasks}.pkl"
+            + f"ignore_nums_per_task_{args.tasks}.pkl", weights_only=False
         )
         print()
         print(f"Ignored observations: {prec_ignore_nums}")

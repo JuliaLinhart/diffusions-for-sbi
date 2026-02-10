@@ -135,7 +135,7 @@ if __name__ == "__main__":
                     }
 
                     # for tau, lsteps in zip(
-                    #     [0.5, 0.1, 0.05, 0.01], [5, 25, 50, 250]
+                    #     [0.5, 0.1, 0.01], [5, 25, 250]
                     # ):
                     #     infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"] = []
 
@@ -144,6 +144,10 @@ if __name__ == "__main__":
                     for sampling_steps, eta in zip(
                         [50, 150, 400, 1000][::-1], [0.2, 0.5, 0.8, 1][::-1]
                     ):
+                        print()
+                        print(f"N_OBS: {N_OBS}, Sampling steps: {sampling_steps}")
+                        print()
+
                         tstart_gauss = time.time()
                         # Estimate the Gaussian covariance
                         samples_ddim = (
@@ -195,10 +199,16 @@ if __name__ == "__main__":
 
                         # Sample with Langevin
                         # for tau, lsteps in zip(
-                        #     [0.5, 0.1, 0.05, 0.01], [5, 25, 50, 250]
+                        #     [0.5, 0.1, 0.01], [5, 25, 250]
                         # ):
+                        #     if lsteps == 5 and tau == 0.5: # default setting
+                        #         exp_name = "Langevin"
+                        #     else:
+                        #         exp_name = f"Langevin_L_{lsteps}_tau_{tau}"
                         lsteps = 5
                         tau = 0.5
+                        exp_name = "Langevin"
+
                         tstart_lang = time.time()
                         with torch.no_grad():
                             print()
@@ -214,13 +224,12 @@ if __name__ == "__main__":
                         t_end_lang = time.time()
                         dt_lang = t_end_lang - tstart_lang
 
-                        infos["exps"]["Langevin"].append(
-                        # infos["exps"][f"Langevin_L_{lsteps}_tau_{tau}"].append(
-                        {
-                            "dt": dt_lang,
-                            "samples": lang_samples,
-                            "n_steps": sampling_steps,
-                        }
+                        infos["exps"][exp_name].append(
+                            {
+                                "dt": dt_lang,
+                                "samples": lang_samples,
+                                "n_steps": sampling_steps,
+                            }
                         )
 
                         # sample with deterministic gaussian sampler from Geffner et al.
