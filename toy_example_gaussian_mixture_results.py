@@ -13,13 +13,13 @@ if __name__ == "__main__":
     import sys
 
     destination_folder = sys.argv[1]
-    os.makedirs(f"{destination_folder}/figures", exist_ok=True)
-    os.makedirs(f"{destination_folder}/data", exist_ok=True)
+    os.makedirs(f"{destination_folder}/figures_geffner_all", exist_ok=True)
+    os.makedirs(f"{destination_folder}/data_geffner_all", exist_ok=True)
     alpha, alpha_fill = set_plotting_style()
 
     # Read all the data!
     all_data = pd.read_csv(
-        f"{destination_folder}/gaussian_mixture_exp_treated.csv"
+        f"{destination_folder}/gaussian_mixture_exp_geffner_all_treated.csv"
     ).reset_index()
 
     # Make Time table
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     ]
     print(table_to_save)
     table_to_save.reset_index().to_csv(
-        f"{destination_folder}/data/table_time_sw_comparison.csv", index=False
+        f"{destination_folder}/data_geffner_all/table_time_sw_comparison.csv", index=False
     )
 
     # Load data of "equivalent speed"
@@ -46,6 +46,7 @@ if __name__ == "__main__":
             ((all_data.alg == "GAUSS") & (all_data.sampling_steps == 1000))
             | ((all_data.alg == "JAC") & (all_data.sampling_steps == 400))
             | ((all_data.alg == "Langevin") & (all_data.sampling_steps == 400))
+            | ((all_data.alg == "DET_GEF") & (all_data.sampling_steps == 1000))
         )
     ]
 
@@ -118,8 +119,8 @@ if __name__ == "__main__":
         ax.set_xlim(1.5, 110)
     axes_all[-1, -1].legend(prop={"family": "monospace"})
     # axes[0].set_xlim(1.5, 100.5)
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_eps_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_eps_dim.png")
     fig.show()
     plt.close(fig)
 
@@ -188,7 +189,7 @@ if __name__ == "__main__":
         ax.set_xscale("log")
         ax.set_xlim(1.5, 110)
     axes[-1, -1].legend()
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.pdf")
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.png")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim.png")
     fig.show()
     plt.close(fig)

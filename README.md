@@ -143,3 +143,12 @@ To address the limitations of Langevin Dynamics, we compared the algorithm propo
 
 - To obtain samples with tamed ULA, specify `--langevin tamed` when running the `sbibm_posterior_estimation.py` script in addition to the other comand line arguments.
 - To reproduce the Figure from the paper, add the `--langevin_comparison` comand line argument when running `python sbibm_results.py` to compute and plot the sW and MMD distances between the estimated and true posterior samples.
+
+### 3. Comparison with the deterministic sampler from Geffner et al. (Appendix M)                                                                                                                                   
+                                                                                                                                                                                                                      
+  We compare our methods (GAUSS, JAC) and LANGEVIN with the deterministic sampler proposed in [Geffner et al., 2023 (Appendix D)](https://arxiv.org/abs/2209.14249), referred to as `DET_GEF`. This sampler avoids Langevin dynamics by composing Gaussian reverse transitions with shared isotropic variance. Results are reported in Appendix M of the paper.                                                                        
+
+  The `DET_GEF` sampler is implemented in `nse.py` as a new method named `deterministic_gaussian_geffner`.
+
+  - Toy Models: Just rerun the same experiments. The `DET_GEF` method is now hard coded in the experiments scripts.
+  - SBIBM: To sample from the approximate posterior using `DET_GEF`, run the `sbibm_posterior_estimation.py` script like before, but add the `--det_geff` command argument. To reproduce the figures from Appendix M, just rerun the `sbibm_results.py` like before. The `DET_GEF` method is now hard coded in the experiments scripts. 

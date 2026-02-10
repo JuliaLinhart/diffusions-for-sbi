@@ -162,6 +162,7 @@ def run_sample_sgm(
     cov_mode,
     sampler_type="ddim",
     langevin="geffner",
+    det_gef=False,
     clip=False,
     theta_log_space=False,
     x_log_space=False,
@@ -262,98 +263,123 @@ def run_sample_sgm(
             save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
         )
     else:
-        print()
-        print(
-            f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}."
-        )
-        print()
+        if det_gef:
+            print()
+            print(f"Using DETERMINISTIC Geffner sampler, clip = {clip}.")
+            print()
+            save_path += f"det_geffner_steps_1000/"
 
-        cov_mode_name = cov_mode
-        theta_clipping_range = (None, None)
-        if clip:
-            theta_clipping_range = (-3, 3)
-            cov_mode_name += "_clip"
+            ext = ""
+            theta_clipping_range = (None, None)
+            if clip:
+                theta_clipping_range = (-3, 3)
+                ext = "_clip"
 
-        cov_est, cov_est_prior = None, None
-        if cov_mode == "GAUSS":
-            # estimate cov for GAUSS
-            cov_est = vmap(
-                lambda x: score_network.ddim(
-                    shape=(nsamples,), x=x, steps=100, eta=0.5
-                ),
-                randomness="different",
-            )(context_norm.to(device))
-            cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
+            samples = score_network.deterministic_gaussian_geffner(
+                shape=(nsamples,),
+                x=context_norm.to(device),
+                prior_score_fn=prior_score_fn_norm,
+                steps=1000,
+                theta_clipping_range=theta_clipping_range,
+                verbose=True,
+            ).cpu()
 
-            if clf_free_guidance:
-                x_ = torch.zeros_like(context_norm[0][None, :])  #
-                cov_est_prior = vmap(
+            samples_filename = (
+                save_path + f"posterior_samples_{num_obs}_n_obs_{n_obs}{ext}_prior.pkl"
+            )
+        else:
+            print()
+            print(
+                f"Using {sampler_type.upper()} sampler, cov_mode = {cov_mode}, clip = {clip}."
+            )
+            print()
+
+            cov_mode_name = cov_mode
+            theta_clipping_range = (None, None)
+            if clip:
+                theta_clipping_range = (-3, 3)
+                cov_mode_name += "_clip"
+
+            cov_est, cov_est_prior = None, None
+            if cov_mode == "GAUSS":
+                # estimate cov for GAUSS
+                cov_est = vmap(
                     lambda x: score_network.ddim(
                         shape=(nsamples,), x=x, steps=100, eta=0.5
                     ),
                     randomness="different",
-                )(x_.to(device))
-                cov_est_prior = vmap(lambda x: torch.cov(x.mT))(cov_est_prior)
+                )(context_norm.to(device))
+                cov_est = vmap(lambda x: torch.cov(x.mT))(cov_est)
 
-        if sampler_type == "ddim":
-            save_path += f"ddim_steps_{steps}/"
+                if clf_free_guidance:
+                    x_ = torch.zeros_like(context_norm[0][None, :])  #
+                    cov_est_prior = vmap(
+                        lambda x: score_network.ddim(
+                            shape=(nsamples,), x=x, steps=100, eta=0.5
+                        ),
+                        randomness="different",
+                    )(x_.to(device))
+                    cov_est_prior = vmap(lambda x: torch.cov(x.mT))(cov_est_prior)
 
-            samples = score_network.ddim(
-                shape=(nsamples,),
-                x=context_norm.to(device),
-                eta=1
-                if steps == 1000
-                else 0.8
-                if steps == 400
-                else 0.5,  # corresponds to the equivalent time setting from section 4.1
-                steps=steps,
-                theta_clipping_range=theta_clipping_range,
-                prior=prior_norm,
-                prior_type=prior_type,
-                prior_score_fn=prior_score_fn_norm,
-                clf_free_guidance=clf_free_guidance,
-                dist_cov_est=cov_est,
-                dist_cov_est_prior=cov_est_prior,
-                cov_mode=cov_mode,
-                verbose=True,
-            ).cpu()
-        else:
-            save_path += f"euler_steps_{steps}/"
+            if sampler_type == "ddim":
+                save_path += f"ddim_steps_{steps}/"
 
-            # define score function for tall posterior
-            score_fn = partial(
-                diffused_tall_posterior_score,
-                prior=prior_norm,  # normalized prior
-                prior_type=prior_type,
-                prior_score_fn=prior_score_fn_norm,  # analytical prior score function
-                x_obs=context_norm.to(device),  # observations
-                nse=score_network,  # trained score network
-                dist_cov_est=cov_est,
-                cov_mode=cov_mode,
+                samples = score_network.ddim(
+                    shape=(nsamples,),
+                    x=context_norm.to(device),
+                    eta=1
+                    if steps == 1000
+                    else 0.8
+                    if steps == 400
+                    else 0.5,  # corresponds to the equivalent time setting from section 4.1
+                    steps=steps,
+                    theta_clipping_range=theta_clipping_range,
+                    prior=prior_norm,
+                    prior_type=prior_type,
+                    prior_score_fn=prior_score_fn_norm,
+                    clf_free_guidance=clf_free_guidance,
+                    dist_cov_est=cov_est,
+                    dist_cov_est_prior=cov_est_prior,
+                    cov_mode=cov_mode,
+                    verbose=True,
+                ).cpu()
+            else:
+                save_path += f"euler_steps_{steps}/"
+
+                # define score function for tall posterior
+                score_fn = partial(
+                    diffused_tall_posterior_score,
+                    prior=prior_norm,  # normalized prior
+                    prior_type=prior_type,
+                    prior_score_fn=prior_score_fn_norm,  # analytical prior score function
+                    x_obs=context_norm.to(device),  # observations
+                    nse=score_network,  # trained score network
+                    dist_cov_est=cov_est,
+                    cov_mode=cov_mode,
+                )
+
+                # sample from tall posterior
+                (
+                    samples,
+                    _,
+                ) = euler_sde_sampler(
+                    score_fn,
+                    nsamples,
+                    dim_theta=theta_train_mean.shape[-1],
+                    beta=score_network.beta,
+                    device=device,
+                    debug=False,
+                    theta_clipping_range=theta_clipping_range,
+                )
+
+            assert (
+                torch.isnan(samples).sum() == 0
+            ), f"NaN in samples: {torch.isnan(samples).sum()}"
+
+            samples_filename = (
+                save_path
+                + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
             )
-
-            # sample from tall posterior
-            (
-                samples,
-                _,
-            ) = euler_sde_sampler(
-                score_fn,
-                nsamples,
-                dim_theta=theta_train_mean.shape[-1],
-                beta=score_network.beta,
-                device=device,
-                debug=False,
-                theta_clipping_range=theta_clipping_range,
-            )
-
-        assert (
-            torch.isnan(samples).sum() == 0
-        ), f"NaN in samples: {torch.isnan(samples).sum()}"
-
-        samples_filename = (
-            save_path
-            + f"posterior_samples_{num_obs}_n_obs_{n_obs}_{cov_mode_name}_prior.pkl"
-        )
 
     # unnormalize
     samples = samples.detach().cpu()
@@ -457,6 +483,11 @@ if __name__ == "__main__":
         default="",
         choices=["geffner", "tamed"],
         help="whether to use langevin sampler (Geffner et al. 2023) or our tamed ULA (Brosse et al. 2017)",
+    )
+    parser.add_argument(
+        "--det_gef",
+        action="store_true",
+        help="whether to use deterministic Geffner et al. 2023 sampler",
     )
     parser.add_argument(
         "--clip",
@@ -565,6 +596,7 @@ if __name__ == "__main__":
             score_network = torch.load(
                 save_path + f"score_network.pkl",
                 map_location=torch.device("cpu"),
+                weights_only=False,
             )
             score_network.net_type = "default"
             score_network.tweedies_approximator = tweedies_approximation
@@ -597,6 +629,7 @@ if __name__ == "__main__":
                 "clip": args.clip,  # for clipping
                 "sampler_type": args.sampler,
                 "langevin": args.langevin,
+                "det_gef": args.det_gef,
                 "theta_log_space": args.task in ["lotka_volterra", "sir"],
                 "x_log_space": args.task == "lotka_volterra",
                 "clf_free_guidance": args.clf_free_guidance,

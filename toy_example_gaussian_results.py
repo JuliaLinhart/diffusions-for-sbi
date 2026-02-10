@@ -7,20 +7,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import cm
 
-from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style
+from plot_utils import METHODS_STYLE, METRICS_STYLE, set_plotting_style, METHODS_STYLE_LANGEVIN
 
 if __name__ == "__main__":
     import sys
 
     destination_folder = sys.argv[1]
-    os.makedirs(f"{destination_folder}/figures", exist_ok=True)
-    os.makedirs(f"{destination_folder}/data", exist_ok=True)
+    # os.makedirs(f"{destination_folder}/figures", exist_ok=True)
+    # os.makedirs(f"{destination_folder}/figures_langevin", exist_ok=True)
+    os.makedirs(f"{destination_folder}/figures_geffner_all", exist_ok=True)
+    os.makedirs(f"{destination_folder}/data_geffner_all", exist_ok=True)
 
     alpha, alpha_fill = set_plotting_style()
 
     # Read all the data!
     all_data = pd.read_csv(
-        f"{destination_folder}/gaussian_exp_treated.csv"
+        # f"{destination_folder}/gaussian_exp_treated.csv"
+        f"{destination_folder}/gaussian_exp_geffner_all_treated.csv"
     ).reset_index()
 
     # Make Time table
@@ -38,7 +41,7 @@ if __name__ == "__main__":
     ]
     print(table_to_save)
     table_to_save.reset_index().to_csv(
-        f"{destination_folder}/data/table_time_sw_comparison.csv", index=False
+        f"{destination_folder}/data_geffner_all/table_time_sw_comparison.csv", index=False
     )
 
     time_data = all_data.pivot(
@@ -49,15 +52,16 @@ if __name__ == "__main__":
     time_data = time_data.assign(
         speed_up_gauss=time_data.GAUSS / time_data.Langevin,
         speed_up_jac=time_data.JAC / time_data.Langevin,
+        speed_up_det_gef=time_data.DET_GEF / time_data.Langevin,
     )
     agg_time_data = (
-        time_data.groupby(["dim"])[["speed_up_gauss", "speed_up_jac"]]
+        time_data.groupby(["dim"])[["speed_up_gauss", "speed_up_jac", "speed_up_det_gef"]]
         .agg(lambda x: f"{x.mean():.2f} ± {x.std()*1.96 / x.shape[0]**.5:.2f}")
         .reset_index()
     )
     agg_time_data = agg_time_data.loc[agg_time_data["dim"] < 64]
     agg_time_data.reset_index().to_csv(
-        f"{destination_folder}/data/speed_up_comparison.csv", index=False
+        f"{destination_folder}/data_geffner_all/speed_up_comparison.csv", index=False
     )
 
     # Load data of "equivalent speed"
@@ -66,6 +70,11 @@ if __name__ == "__main__":
             ((all_data.alg == "GAUSS") & (all_data.sampling_steps == 1000))
             | ((all_data.alg == "JAC") & (all_data.sampling_steps == 400))
             | ((all_data.alg == "Langevin") & (all_data.sampling_steps == 400))
+            | ((all_data.alg == "DET_GEF") & (all_data.sampling_steps == 1000))
+            # ((all_data.alg == "Langevin_L_5_tau_0.5") & (all_data.sampling_steps == 400))
+            # | ((all_data.alg == "Langevin_L_25_tau_0.1") & (all_data.sampling_steps == 400))
+            # | ((all_data.alg == "Langevin_L_50_tau_0.05") & (all_data.sampling_steps == 400))
+            # | ((all_data.alg == "Langevin_L_250_tau_0.01") & (all_data.sampling_steps == 400))
         )
     ]
     # Remove eps high since it does not work!
@@ -125,7 +134,9 @@ if __name__ == "__main__":
                 if alg == "Langevin":
                     alg = "LANGEVIN"
                 label = f"{alg} ({sampling_steps})"
-                plot_kwars = METHODS_STYLE[alg]
+                # label = f"{METHODS_STYLE_LANGEVIN[alg]['label']} ({sampling_steps})"
+                plot_kwars = METHODS_STYLE[alg].copy()
+                # plot_kwars = METHODS_STYLE_LANGEVIN[alg].copy()
                 plot_kwars["label"] = label
                 ax.plot(
                     dt.groupby(["N_OBS"]).first().index,
@@ -156,8 +167,10 @@ if __name__ == "__main__":
             ax.set_xlim(1.5, 110)
     axes_all[-1, -1].legend(prop={"family": "monospace"})
     # axes[0].set_xlim(1.5, 100.5)
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_eps_dim.pdf")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_eps_dim.png")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_eps_dim.png")
     fig.show()
     plt.close(fig)
 
@@ -190,6 +203,7 @@ if __name__ == "__main__":
         #     n_obs = [i[1] for i in ref_sw_per_dim.keys() if i[0] == dim[0]]
         if dim == 2:
             ax.set_title(f"{alg}")
+            # ax.set_title(f"{METHODS_STYLE_LANGEVIN[alg]['label']}")
 
         print(alg)
         # ax.fill_between(n_obs, -np.array(yerr_ref), yerr_ref, color='red', alpha=.5)
@@ -198,6 +212,7 @@ if __name__ == "__main__":
             c = cm.get_cmap("coolwarm")(-math.log10(eps[0] + 1e-5) / 5)
             # c = cm.get_cmap('coolwarm')(i / len(alg_data['eps'].unique()))
             plot_kwars = METHODS_STYLE[alg]
+            # plot_kwars = METHODS_STYLE_LANGEVIN[alg]
             plot_kwars["label"] = label
             plot_kwars["color"] = c
             ax.plot(
@@ -226,8 +241,10 @@ if __name__ == "__main__":
         ax.set_xscale("log")
         ax.set_xlim(1.5, 110)
     axes[-1, -1].legend(prop={"family": "monospace"})
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.pdf")
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.png")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.pdf")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim.pdf")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim.png")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim.png")
     fig.show()
     plt.close(fig)
 
@@ -262,6 +279,7 @@ if __name__ == "__main__":
             c = cm.get_cmap("coolwarm")(-math.log10(eps[0] + 1e-5) / 5)
             # c = cm.get_cmap('coolwarm')(i / len(alg_data['eps'].unique()))
             plot_kwars = METHODS_STYLE[alg]
+            # plot_kwars = METHODS_STYLE_LANGEVIN[alg]
             plot_kwars["label"] = label
             plot_kwars["color"] = c
             ax.plot(
@@ -297,7 +315,9 @@ if __name__ == "__main__":
         if alg == "GAUSS":
             ax.set_title(rf"$m = {dim}$")
     axes[-1, -1].legend(prop={"family": "monospace"})
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.pdf")
-    fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.png")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.pdf")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim_inverted.pdf")
+    # fig.savefig(f"{destination_folder}/figures/n_obs_vs_sw_per_alg_dim_inverted.png")
+    fig.savefig(f"{destination_folder}/figures_geffner_all/n_obs_vs_sw_per_alg_dim_inverted.png")
     # fig.show()
     plt.close(fig)

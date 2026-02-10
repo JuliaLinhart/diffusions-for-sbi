@@ -17,9 +17,11 @@ __pycache__/
 /results/sbibm/*/*/euler*/
 /results/sbibm/*/*/ddim*/
 /results/sbibm/*/*/langevin*/
+/results/sbibm/*/*/det_geffner*/
 /results/sbibm/*/*/*/euler*/
 /results/sbibm/*/*/*/ddim*/
 /results/sbibm/*/*/*/langevin*/
+/results/sbibm/*/*/*/det_geffner*/
 /results/sbibm/*/*metrics*/
 /results/*/_*/
 /results/*/*.png
@@ -32,6 +34,7 @@ __pycache__/
 /tasks/sbibm/_*
 
 /notebooks
+*test*
 *old*
 *dataset*
 sbibm_results_submission*
